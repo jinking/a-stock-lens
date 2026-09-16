@@ -165,7 +165,7 @@ git add -A && git commit -m "feat(data): normalize csv rows into canonical daily
 - Consumes: `NormalizedDataset`
 - Produces:
   - `QualityIssue(rule: str, status: DataStatus, severity: ErrorSeverity, symbol: str | None, trade_date: date | None, message: str)`
-  - `QualityReport(dataset: str, as_of: datetime, checked: int, accepted: int, issues: tuple[QualityIssue, ...] = ())`
+  - `QualityReport(dataset: str, as_of: datetime, checked: int, accepted: int, rules_version: str, issues: tuple[QualityIssue, ...] = ())`
   - `QualityReport.blocking() -> tuple[QualityIssue, ...]`
   - `DailyBarQualityGate(rules_version: str = "v1")`
   - `DailyBarQualityGate.check(dataset: NormalizedDataset) -> QualityReport`
