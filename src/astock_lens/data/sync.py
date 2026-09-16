@@ -34,6 +34,12 @@ TRADE_DATE_COLUMN = "trade_date"
 DEFAULT_BAR_DATASET = "daily_bars"
 DEFAULT_SECURITIES_DATASET = "securities"
 
+# Financial statements are keyed the way their source keys them: the CLI's
+# instrument code and the report period. `EndDate` is the period the numbers
+# describe, which is what makes a re-landed statement replace its own row
+# instead of appending a second copy of the same quarter.
+FINANCIAL_KEYS: tuple[str, ...] = ("code", "EndDate")
+
 # A landing is "done" when the data arrived, or when there was nothing new to
 # fetch. Anything else — null, invalid, or a source error — is reported as an
 # incomplete landing rather than a quiet success.
@@ -51,6 +57,7 @@ class DatasetLanding(DomainRecord):
     rows_written: int
     rows_total: int
     symbols_skipped: tuple[str, ...] = ()
+    symbols_missing: tuple[str, ...] = ()
     note: str | None = None
 
 
@@ -89,20 +96,96 @@ def read_raw_rows(
         return tuple(header), tuple(tuple(row) for row in reader)
 
 
-def landed_symbols(path: Path, *, as_of: datetime) -> frozenset[str]:
+def landed_symbols(
+    path: Path,
+    *,
+    as_of: datetime,
+    symbol_column: str = SYMBOL_COLUMN,
+    date_column: str = TRADE_DATE_COLUMN,
+) -> frozenset[str]:
     """Return the symbols that already carry a row for the target date.
 
     A file without the columns needed to answer the question answers with
     nothing: guessing would either re-fetch everything or skip the wrong rows.
     """
     columns, rows = read_raw_rows(path)
-    if SYMBOL_COLUMN not in columns or TRADE_DATE_COLUMN not in columns:
+    if symbol_column not in columns or date_column not in columns:
         return frozenset()
 
-    symbol_index = columns.index(SYMBOL_COLUMN)
-    date_index = columns.index(TRADE_DATE_COLUMN)
+    symbol_index = columns.index(symbol_column)
+    date_index = columns.index(date_column)
     day = as_of.date().isoformat()
     return frozenset(row[symbol_index] for row in rows if row[date_index] == day)
+
+
+def read_symbols(path: Path, *, column: str = SYMBOL_COLUMN) -> tuple[str, ...]:
+    """Return the symbols a landed file carries, deduplicated and ordered."""
+    columns, rows = read_raw_rows(path)
+    if column not in columns:
+        return ()
+    index = columns.index(column)
+    return tuple(
+        sorted({row[index] for row in rows if len(row) > index and row[index]})
+    )
+
+
+def land_financial_statements(
+    *,
+    provider: DataProvider,
+    root: Path,
+    as_of: datetime,
+    symbols: Sequence[str],
+    datasets: Sequence[str],
+) -> SyncResult:
+    """Land financial statements for the given symbols.
+
+    Unlike the daily bars, a statement is not fetched for one date: the source
+    answers with its most recent periods, and the publication date each row
+    carries is what places it in time. So there is no "already landed" skip
+    here. Re-landing is still safe: rows merge on `(code, EndDate)`, so a
+    repeated run replaces the periods it fetched and appends the new ones.
+
+    A freshness-based skip (for example "not again within N days") would need a
+    cadence decision the design does not make, so it is left out rather than
+    invented.
+    """
+    if not symbols:
+        raise ValueError("landing financial statements needs at least one symbol")
+
+    landings: list[DatasetLanding] = []
+    for dataset in datasets:
+        path = root / f"{dataset}.csv"
+        raw = provider.fetch(
+            FetchRequest(dataset=dataset, as_of=as_of, symbols=tuple(symbols))
+        )
+        payload = raw.payload
+        if raw.status is not DataStatus.VALUE or payload is None or not payload.rows:
+            landings.append(
+                DatasetLanding(
+                    dataset=dataset,
+                    path=path,
+                    status=raw.status,
+                    rows_written=0,
+                    rows_total=len(read_raw_rows(path)[1]),
+                    symbols_missing=raw.missing_symbols or tuple(symbols),
+                    note=raw.status.value,
+                )
+            )
+            continue
+
+        written, total = _write_merged(path, payload, keys=FINANCIAL_KEYS)
+        landings.append(
+            DatasetLanding(
+                dataset=dataset,
+                path=path,
+                status=DataStatus.VALUE,
+                rows_written=written,
+                rows_total=total,
+                symbols_missing=raw.missing_symbols,
+            )
+        )
+
+    return SyncResult(as_of=as_of, landings=tuple(landings))
 
 
 def land_raw(
@@ -126,6 +209,10 @@ def land_raw(
         as_of=as_of,
         dataset=securities_dataset,
         symbols=None,
+        # A listing holds one row per instrument, so the instrument is its key.
+        # Keying on every cell would append a second row whenever a field the
+        # source reformats (a name, a listing date) changes.
+        keys=(SYMBOL_COLUMN,),
     )
     wanted = tuple(symbols) if symbols is not None else _listed_symbols(listing.payload)
 
@@ -153,6 +240,7 @@ def _land_dataset(
     as_of: datetime,
     dataset: str,
     symbols: Sequence[str] | None,
+    keys: Sequence[str] = (SYMBOL_COLUMN, TRADE_DATE_COLUMN),
 ) -> _Landed:
     path = root / f"{dataset}.csv"
     requested = tuple(symbols) if symbols is not None else None
@@ -195,7 +283,7 @@ def _land_dataset(
             payload=payload,
         )
 
-    written, total = _write_merged(path, payload)
+    written, total = _write_merged(path, payload, keys=keys)
     return _Landed(
         landing=DatasetLanding(
             dataset=dataset,
@@ -209,7 +297,12 @@ def _land_dataset(
     )
 
 
-def _write_merged(path: Path, payload: RawPayload) -> tuple[int, int]:
+def _write_merged(
+    path: Path,
+    payload: RawPayload,
+    *,
+    keys: Sequence[str] = (SYMBOL_COLUMN, TRADE_DATE_COLUMN),
+) -> tuple[int, int]:
     """Merge one payload into a raw file, replacing rows it already covers."""
     columns, rows = read_raw_rows(path)
     if columns and columns != payload.columns:
@@ -218,7 +311,7 @@ def _write_merged(path: Path, payload: RawPayload) -> tuple[int, int]:
             f"{list(payload.columns)}; refusing to mix two shapes in one file"
         )
 
-    key_columns = _key_columns(payload.columns)
+    key_columns = _key_columns(payload.columns, keys)
     seen = {_key(row, key_columns) for row in payload.rows}
     kept = tuple(row for row in rows if _key(row, key_columns) not in seen)
     merged = (*kept, *payload.rows)
@@ -232,10 +325,10 @@ def _write_merged(path: Path, payload: RawPayload) -> tuple[int, int]:
     return len(payload.rows), len(merged)
 
 
-def _key_columns(columns: tuple[str, ...]) -> tuple[int, ...]:
-    """Key a row by symbol and date when both exist, else by every cell."""
-    if SYMBOL_COLUMN in columns and TRADE_DATE_COLUMN in columns:
-        return (columns.index(SYMBOL_COLUMN), columns.index(TRADE_DATE_COLUMN))
+def _key_columns(columns: tuple[str, ...], keys: Sequence[str]) -> tuple[int, ...]:
+    """Key a row by the named columns when they all exist, else by every cell."""
+    if all(key in columns for key in keys):
+        return tuple(columns.index(key) for key in keys)
     return tuple(range(len(columns)))
 
 

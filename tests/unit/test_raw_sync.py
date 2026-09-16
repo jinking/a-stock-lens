@@ -176,6 +176,29 @@ def test_re_landing_the_listing_does_not_duplicate_its_rows(local_tmp: Path) -> 
     assert len(rows) == len(SECURITIES)
 
 
+def test_landing_a_listing_replaces_a_symbol_whose_details_changed(
+    local_tmp: Path,
+) -> None:
+    """A listing is keyed by instrument, not by every cell.
+
+    The source reformats names and dates between releases; keying on the whole
+    row would append a second row for the same instrument — and a Universe that
+    admitted one symbol twice would rank a duplicated cross-section.
+    """
+    (local_tmp / "securities.csv").write_text(
+        "symbol,name,exchange,list_date\n"
+        "600519.SH,OLD NAME,SSE,1900-01-01\n"
+        "000001.SZ,Ping An Bank,SZSE,1991-04-03\n",
+        encoding="utf-8",
+    )
+
+    land_raw(provider=StubProvider(), root=local_tmp, as_of=AS_OF)
+
+    _, rows = read_raw_rows(local_tmp / "securities.csv")
+    symbols = [row[0] for row in rows]
+    assert sorted(symbols) == ["000001.SZ", "600519.SH"]
+
+
 def test_earlier_rows_are_kept_when_a_new_date_is_landed(local_tmp: Path) -> None:
     (local_tmp / "daily_bars.csv").write_text(
         "symbol,trade_date,close\n600519.SH,2026-09-03,10.0\n", encoding="utf-8"
