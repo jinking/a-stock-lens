@@ -240,3 +240,44 @@ def test_bars_after_the_as_of_date_are_not_used_as_presence() -> None:
     )
 
     assert UniverseRule.NO_MARKET_DATA in _rules(snapshot, "600000.SH")
+
+
+def test_an_unknown_suspension_count_does_not_trip_the_rule() -> None:
+    """A source that reports no suspension count must not be excluded by a
+    value it never had. Setting `long_suspension_days` therefore requires a
+    source that actually reports the count — recorded as a pending dependency
+    in the slice ledger."""
+    config = UniverseConfig(
+        exchanges=("SSE", "SZSE", "BSE"),
+        min_average_turnover_20d=20_000_000.0,
+        min_listing_days=120,
+        long_suspension_days=60,
+    )
+    profile = SecurityProfile(
+        symbol="600000.SH",
+        name="浦发银行",
+        exchange="SSE",
+        list_date=date(1999, 11, 10),
+        suspended_trading_days=None,
+    )
+    liquidity = {
+        "600000.SH": FactorResult(
+            symbol="600000.SH",
+            factor="avg_amount_20d",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(factor_version="v1"),
+            raw_value=HEALTHY_LIQUIDITY_VALUE,
+        )
+    }
+
+    snapshot = UniverseBuilder(config).build(
+        (profile,),
+        as_of=AS_OF,
+        bars=(DailyBar(symbol="600000.SH", trade_date=AS_OF.date(), close=10.0),),
+        liquidity=liquidity,
+    )
+
+    assert UniverseRule.LONG_SUSPENSION not in _rules(snapshot, "600000.SH")
+    assert "600000.SH" in snapshot.included

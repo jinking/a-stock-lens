@@ -105,9 +105,14 @@ class UniverseBuilder:
                 )
             )
 
+        # `None` means the source reports no suspension count, so the rule has
+        # no value to compare. Such a profile is not excluded here — giving
+        # this threshold a number requires a source that reports the count
+        # first, which is recorded as a pending dependency in the slice ledger.
         if (
             config.exclude_long_suspension
             and config.long_suspension_days is not None
+            and profile.suspended_trading_days is not None
             and profile.suspended_trading_days >= config.long_suspension_days
         ):
             found.append(

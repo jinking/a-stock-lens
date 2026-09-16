@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from astock_lens.data.contracts import DataProvider, Normalizer
+from astock_lens.data.providers.akshare_provider import AkShareProvider
 from astock_lens.data.providers.local import LocalCsvProvider
 from astock_lens.data.snapshots.store import JsonSnapshotStore, SnapshotStore
 from astock_lens.factors.contracts import Factor
@@ -23,6 +24,13 @@ def test_required_contract_methods_are_stable() -> None:
 def test_local_csv_provider_satisfies_the_provider_contract() -> None:
     """The assignment is the assertion: the type checker verifies conformance."""
     provider: DataProvider = LocalCsvProvider(Path("."))
+
+    assert provider is not None
+
+
+def test_akshare_provider_satisfies_the_provider_contract() -> None:
+    """Both providers are interchangeable behind the same protocol."""
+    provider: DataProvider = AkShareProvider()
 
     assert provider is not None
 

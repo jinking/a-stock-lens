@@ -136,6 +136,21 @@ def test_an_unreadable_suspension_count_rejects_the_row() -> None:
     ]
 
 
+def test_an_absent_suspension_count_is_missing_not_rejected() -> None:
+    """A source that does not report suspension days yields `None`.
+
+    Empty is an absence: it must not become 0 (a factual claim that the stock
+    is trading), and it must not reject the row, because every identity field
+    the row *does* carry is readable. Unreadable text still rejects — see the
+    test above.
+    """
+    normalized = _normalize([_row(suspended_trading_days="")])
+
+    assert len(normalized.securities) == 1
+    assert normalized.securities[0].suspended_trading_days is None
+    assert normalized.parse_failures == ()
+
+
 def test_a_rejected_row_does_not_discard_its_neighbours() -> None:
     normalized = _normalize(
         [

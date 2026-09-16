@@ -48,7 +48,12 @@ class SecurityProfile(DomainRecord):
     list_date: date
     is_st: bool = False
     is_delisting_board: bool = False
-    suspended_trading_days: int = 0
+    # `None` means the source does not report suspension at all — an absence,
+    # never a zero. Zero would be a factual claim that the stock is trading,
+    # which the "no silent fallback" rule forbids. The Universe skips the
+    # long-suspension rule for such profiles, so giving that rule a threshold
+    # requires a source that reports the count first.
+    suspended_trading_days: int | None = None
 
 
 class FinancialObservation(DomainRecord):

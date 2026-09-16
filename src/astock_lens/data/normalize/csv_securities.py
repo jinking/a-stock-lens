@@ -113,19 +113,22 @@ def _parse_row(
     if is_delisting_board is None:
         fail("is_delisting_board")
 
-    suspended = _parse_int(read("suspended_trading_days"))
-    if suspended is None:
-        fail("suspended_trading_days")
+    # An absent count is a source that does not report suspension: it stays
+    # `None` and rejects nothing. Unreadable text is still a rejection.
+    suspended: int | None = None
+    if read("suspended_trading_days").strip():
+        suspended = _parse_int(read("suspended_trading_days"))
+        if suspended is None:
+            fail("suspended_trading_days")
 
     if failures:
         return None, failures
 
-    # The reads above only reach here when every value parsed, so the narrowing
-    # is a consequence of the checks rather than an assumption.
+    # The reads above only reach here when every required value parsed, so the
+    # narrowing is a consequence of the checks rather than an assumption.
     assert list_date is not None
     assert is_st is not None
     assert is_delisting_board is not None
-    assert suspended is not None
 
     return (
         SecurityProfile(

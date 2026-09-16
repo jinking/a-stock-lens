@@ -247,11 +247,36 @@ into Task 3 instead of being committed as a known-broken intermediate state.
 
 **Steps:**
 
-- [ ] Run `uv sync --extra providers` and confirm `import akshare` succeeds.
-- [ ] Write `scripts/record_akshare_fixture.py` and execute it once against the live API, writing the raw response verbatim under `tests/fixtures/akshare/` with a header recording source, endpoint, fetch timestamp, and the AkShare version.
-- [ ] If the recording cannot be made, stop and report it rather than substituting hand-written rows; a synthetic fixture must be labelled synthetic in its header (D8).
-- [ ] Write the contract test against the recorded file; it performs no network call and asserts the column mapping, the `as_of` handling, and the source-error path.
-- [ ] Run the full gate; commit: `feat(data): add akshare provider with recorded contract fixture`.
+**Deviation recorded during execution.** Three things turned out differently
+from the plan's text, all proven live on 2026-09-16:
+
+1. **Endpoint choice.** This environment's proxy drops Python clients talking
+   to eastmoney's `push2*` domains (requests, urllib3, and curl_cffi all fail
+   where the curl CLI succeeds), so `stock_zh_a_hist` — the plan's implied
+   interface — is unusable here. Daily bars come from akshare's
+   Tencent-domain interface `stock_zh_a_hist_tx`, which carries amount in
+   yuan and turnover, the fields the liquidity factor needs. The listing
+   lists come from the three exchange domains. SH needs both the main board
+   *and* the STAR market, or every 688-prefixed symbol silently vanishes
+   from the universe.
+2. **`suspended_trading_days` became `int | None`.** No exchange list reports
+   suspension counts, and the "no silent fallback" rule forbids inventing a
+   0. The field now means "the source does not report it": an absent cell is
+   a `None`, unreadable text still rejects the row, and the Universe skips
+   the long-suspension rule for such profiles. Giving
+   `long_suspension_days` a threshold therefore requires a source that
+   reports the count first — recorded as a pending dependency in the ledger.
+3. **Install path.** `uv sync --extra providers` hung on dependency
+   resolution in this environment; `uv pip install akshare` (1.18.94) was
+   used instead. The extras in `pyproject.toml` are unchanged.
+
+**Steps:**
+
+- [x] Install akshare and confirm `import akshare` succeeds.
+- [x] Write `scripts/record_akshare_fixture.py` and execute it once against the live API, writing the raw response verbatim under `tests/fixtures/akshare/` with a header recording source, endpoint, fetch timestamp, and the AkShare version.
+- [x] Recording succeeded — no synthetic rows exist (D8).
+- [x] Write the contract test against the recorded files; it performs no network call and asserts the column mapping, the `as_of` handling, and the source-error path, plus the live-path smoke test recorded in the ledger.
+- [x] Run the full gate; commit: `feat(data): add akshare provider with recorded contract fixture`.
 
 ---
 
