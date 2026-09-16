@@ -34,6 +34,23 @@ class DailyBar(DomainRecord):
     adj_factor: float | None = None
 
 
+class SecurityProfile(DomainRecord):
+    """A listed instrument's identity, as the securities master reports it.
+
+    This lives in `domain` rather than in `universe` because the normalizer in
+    `data` produces it: a `data → universe` import would reverse the dependency
+    direction the architecture fixes.
+    """
+
+    symbol: str
+    name: str
+    exchange: str
+    list_date: date
+    is_st: bool = False
+    is_delisting_board: bool = False
+    suspended_trading_days: int = 0
+
+
 class FinancialObservation(DomainRecord):
     """Point-in-time financial metric.
 

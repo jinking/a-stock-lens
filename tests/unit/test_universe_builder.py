@@ -1,0 +1,242 @@
+"""Universe construction.
+
+Every exclusion must carry the rule that caused it. A snapshot that only listed
+the survivors would make "why is this symbol missing?" unanswerable, which is
+the failure mode the design's explainability principle is written against.
+"""
+
+from datetime import UTC, date, datetime
+from pathlib import Path
+
+import pytest
+
+from astock_lens.data.contracts import FetchRequest
+from astock_lens.data.normalize.csv_securities import CsvSecurityNormalizer
+from astock_lens.data.providers.local import LocalCsvProvider
+from astock_lens.domain.enums import DataStatus
+from astock_lens.domain.models import DailyBar, SecurityProfile, SnapshotLineage
+from astock_lens.factors.contracts import FactorResult
+from astock_lens.universe.builder import UniverseBuilder
+from astock_lens.universe.config import UniverseConfig, load_universe_config
+from astock_lens.universe.models import UniverseRule, UniverseSnapshot
+
+ROOT = Path(__file__).resolve().parents[2]
+CSV_ROOT = ROOT / "tests" / "fixtures" / "csv"
+AS_OF = datetime(2026, 9, 4, 15, 0, tzinfo=UTC)
+
+# Every symbol in the fixture that has both a bar and a liquidity measure.
+# 000007.SZ is deliberately absent from both, and 000005.SZ is present but poor.
+MEASURED = (
+    "000001.SZ",
+    "000002.SZ",
+    "000003.SZ",
+    "000004.SZ",
+    "000005.SZ",
+    "000006.SZ",
+    "600000.SH",
+    "600519.SH",
+    "300750.SZ",
+    "830799.BJ",
+    "900948.SH",
+)
+
+LOW_LIQUIDITY_SYMBOL = "000005.SZ"
+LOW_LIQUIDITY_VALUE = 5_000_000.0
+HEALTHY_LIQUIDITY_VALUE = 80_000_000.0
+
+
+def _config() -> UniverseConfig:
+    return load_universe_config(ROOT / "configs" / "universe.yaml")
+
+
+def _profiles() -> tuple[SecurityProfile, ...]:
+    raw = LocalCsvProvider(CSV_ROOT).fetch(
+        FetchRequest(dataset="securities", as_of=AS_OF)
+    )
+    return CsvSecurityNormalizer().normalize(raw, as_of=AS_OF).securities
+
+
+def _bars() -> tuple[DailyBar, ...]:
+    """One bar on the as-of date for every symbol except `000007.SZ`."""
+    return tuple(
+        DailyBar(symbol=symbol, trade_date=AS_OF.date(), close=10.0)
+        for symbol in MEASURED
+    )
+
+
+def _liquidity() -> dict[str, FactorResult]:
+    return {
+        symbol: FactorResult(
+            symbol=symbol,
+            factor="avg_amount_20d",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(factor_version="v1"),
+            raw_value=(
+                LOW_LIQUIDITY_VALUE
+                if symbol == LOW_LIQUIDITY_SYMBOL
+                else HEALTHY_LIQUIDITY_VALUE
+            ),
+        )
+        for symbol in MEASURED
+    }
+
+
+def _build(config: UniverseConfig | None = None) -> UniverseSnapshot:
+    return UniverseBuilder(config or _config()).build(
+        _profiles(),
+        as_of=AS_OF,
+        bars=_bars(),
+        liquidity=_liquidity(),
+    )
+
+
+def _rules(snapshot: UniverseSnapshot, symbol: str) -> tuple[UniverseRule, ...]:
+    return tuple(
+        exclusion.rule
+        for exclusion in snapshot.exclusions
+        if exclusion.symbol == symbol
+    )
+
+
+def test_clean_symbols_survive_the_filters() -> None:
+    assert _build().included == (
+        "000001.SZ",
+        "000006.SZ",
+        "300750.SZ",
+        "600000.SH",
+        "600519.SH",
+        "830799.BJ",
+        "900948.SH",
+    )
+
+
+def test_the_snapshot_is_immutable() -> None:
+    snapshot = _build()
+
+    with pytest.raises(ValueError):
+        snapshot.included = ()  # type: ignore[misc]
+
+
+def test_st_is_excluded_with_a_reason() -> None:
+    assert _rules(_build(), "000002.SZ") == (UniverseRule.ST,)
+
+
+def test_delisting_board_is_excluded_with_a_reason() -> None:
+    assert _rules(_build(), "000003.SZ") == (UniverseRule.DELISTING_BOARD,)
+
+
+def test_short_listing_age_is_excluded_with_a_reason() -> None:
+    """Listed 2026-08-01, so 34 days old against a 120-day rule."""
+    assert _rules(_build(), "000004.SZ") == (UniverseRule.SHORT_LISTING,)
+
+
+def test_low_liquidity_is_excluded_with_the_measured_value() -> None:
+    exclusions = {exclusion.symbol: exclusion for exclusion in _build().exclusions}
+
+    exclusion = exclusions[LOW_LIQUIDITY_SYMBOL]
+    assert exclusion.rule is UniverseRule.LOW_LIQUIDITY
+    assert "5000000.0" in exclusion.detail
+    assert "20000000.0" in exclusion.detail
+
+
+def test_a_symbol_with_no_bar_on_the_as_of_date_is_excluded() -> None:
+    assert UniverseRule.NO_MARKET_DATA in _rules(_build(), "000007.SZ")
+
+
+def test_a_symbol_with_no_liquidity_measure_is_excluded() -> None:
+    assert UniverseRule.NO_LIQUIDITY_MEASURE in _rules(_build(), "000007.SZ")
+
+
+def test_a_symbol_that_breaks_two_rules_records_both() -> None:
+    """000007.SZ has neither a bar nor a measure; both are reported."""
+    assert _rules(_build(), "000007.SZ") == (
+        UniverseRule.NO_MARKET_DATA,
+        UniverseRule.NO_LIQUIDITY_MEASURE,
+    )
+
+
+def test_long_suspension_is_deferred_and_excludes_nobody() -> None:
+    """The rule is switched on but has no reviewed day count (D2)."""
+    snapshot = _build()
+
+    assert "000006.SZ" in snapshot.included
+    assert UniverseRule.LONG_SUSPENSION not in {
+        exclusion.rule for exclusion in snapshot.exclusions
+    }
+    assert [rule.rule for rule in snapshot.deferred_rules] == [
+        UniverseRule.LONG_SUSPENSION
+    ]
+    assert "long_suspension_days" in snapshot.deferred_rules[0].reason
+
+
+def test_a_reviewed_suspension_threshold_does_exclude() -> None:
+    """Supplying the number turns the same rule on, with no code change."""
+    config = _config().model_copy(update={"long_suspension_days": 60})
+
+    snapshot = _build(config)
+
+    assert _rules(snapshot, "000006.SZ") == (UniverseRule.LONG_SUSPENSION,)
+    assert snapshot.deferred_rules == ()
+
+
+def test_exchanges_outside_the_configuration_are_excluded() -> None:
+    config = _config().model_copy(update={"exchanges": ("SSE",)})
+
+    snapshot = _build(config)
+
+    assert "830799.BJ" in [e.symbol for e in snapshot.exclusions]
+    assert UniverseRule.EXCHANGE in _rules(snapshot, "830799.BJ")
+    assert "600000.SH" in snapshot.included
+
+
+def test_the_market_data_requirement_can_be_switched_off() -> None:
+    config = _config().model_copy(update={"require_valid_market_data": False})
+
+    assert "000007.SZ" in _build(config).included
+
+
+def test_snapshot_id_is_stable_and_content_sensitive() -> None:
+    snapshot = _build()
+    same = _build()
+    other = _build(_config().model_copy(update={"min_listing_days": 121}))
+
+    assert snapshot.snapshot_id == same.snapshot_id
+    assert snapshot.snapshot_id != other.snapshot_id
+    assert snapshot.snapshot_id.startswith("2026-09-04:")
+
+
+def test_lineage_carries_the_snapshot_id() -> None:
+    snapshot = _build()
+
+    assert snapshot.lineage.universe_snapshot == snapshot.snapshot_id
+
+
+def test_exclusions_are_ordered_by_symbol_for_readable_diffs() -> None:
+    symbols = [exclusion.symbol for exclusion in _build().exclusions]
+
+    assert symbols == sorted(symbols)
+
+
+def test_is_st_filtering_can_be_switched_off() -> None:
+    config = _config().model_copy(update={"exclude_st": False})
+
+    assert "000002.SZ" in _build(config).included
+
+
+def test_bars_after_the_as_of_date_are_not_used_as_presence() -> None:
+    """A bar dated tomorrow does not make a symbol tradeable today."""
+    future = date(2026, 9, 7)
+    bars = tuple(
+        DailyBar(symbol=symbol, trade_date=future, close=10.0) for symbol in MEASURED
+    )
+
+    snapshot = UniverseBuilder(_config()).build(
+        _profiles(),
+        as_of=AS_OF,
+        bars=bars,
+        liquidity=_liquidity(),
+    )
+
+    assert UniverseRule.NO_MARKET_DATA in _rules(snapshot, "600000.SH")

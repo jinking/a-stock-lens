@@ -10,6 +10,7 @@ from astock_lens.domain.models import (
     DailyBar,
     DomainRecord,
     FinancialObservation,
+    SecurityProfile,
 )
 
 
@@ -88,12 +89,18 @@ class NormalizedDataset(DomainRecord):
     `parse_failures` records what the normalizer could not read. It is not a
     quality verdict — deciding whether a bar is usable belongs to the gate —
     only a statement about conversion.
+
+    `securities` carries instrument identity rather than market data, so it is
+    populated by the securities normalizer and left empty by the daily-bar
+    normalizer. Keeping both on one record lets a single normalized dataset
+    drive the Universe, which needs identity and prices together.
     """
 
     dataset: str
     as_of: datetime
     daily_bars: tuple[DailyBar, ...] = ()
     observations: tuple[FinancialObservation, ...] = ()
+    securities: tuple[SecurityProfile, ...] = ()
     parse_failures: tuple[ParseFailure, ...] = ()
 
 

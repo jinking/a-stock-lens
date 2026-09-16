@@ -1,3 +1,9 @@
+# Universe thresholds.
+#
+# Every value here is either quoted from a design document or supplied by the
+# project owner. A threshold nobody has decided stays `null`, and the builder
+# reports the rule as DEFERRED rather than guessing a number.
+
 exchanges:
   - SSE
   - SZSE
@@ -5,7 +11,17 @@ exchanges:
 exclude_st: true
 exclude_delisting_board: true
 exclude_long_suspension: true
+# Supplied by the project owner on 2026-09-16. This is a product decision, not a
+# value found in a design document; there is no code default for it.
+min_average_turnover_20d: 20000000
+# "Short listing-age exclusion (default around 120 days)" — design spec §6.
 min_listing_days: 120
-# The exact V1 minimum 20-day average turnover amount is deferred.
-min_average_turnover_20d: null
 require_valid_market_data: true
+
+# DEFERRED. `docs/ARCHITECTURE.md` §6 names a long-suspension exclusion but
+# fixes no day count, and no candidate value appears anywhere in the design.
+# The rule is switched on above; while this key is null, UniverseBuilder records
+# LONG_SUSPENSION in the snapshot's deferred_rules and excludes nobody on that
+# basis. Set an integer here to activate the rule — no code change is needed,
+# which tests/unit/test_universe_builder.py demonstrates.
+long_suspension_days: null
