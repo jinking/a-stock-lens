@@ -37,6 +37,8 @@ uv run astock doctor
 - `configs/`：YAML 配置，只放已确认的值；
 - `data/`、`var/`：运行时数据与日志，不进版本库。
 
+`data/snapshots/`、`data/watchlist/`、`var/jobs/` 由本地运行的命令写入（`astock scan`、`astock watch`、`astock daily`），已在 `.gitignore` 中排除；需要留档的产物请显式复制到别处，不要提交运行时状态。
+
 ## 4. 工作流
 
 1. 先写失败测试，确认它因为目标行为尚不存在而失败；

@@ -11,4 +11,11 @@ htmlcov/
 var/astock.duckdb
 var/logs/*.log
 data/**/*.parquet
+# Runtime artifacts: `docs/DEVELOPMENT.md` keeps `data/` and `var/` out of the
+# repository, so snapshots, watchlist entries and job manifests written by a
+# local run must not show up as pending changes.
+data/snapshots/**
+!data/snapshots/.gitkeep
+data/watchlist/
+var/jobs/
 tests/.tmp/

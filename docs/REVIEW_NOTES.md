@@ -144,3 +144,36 @@ fixed:
 The throughput figure in §24 was also corrected: ~11s per 100 symbols is one
 statement, so all three statements over the whole market is a ~30-minute
 quarterly job, not part of the 10-minute daily target.
+
+## Fundamental factor slice (2026-09-16, same day)
+
+Five ratio factors now read the canonical observations. Decisions taken here,
+none of which the design settles:
+
+- **TTM against TTM.** Chinese statements are cumulative year-to-date, so
+  dividing an H1 flow by a period-end stock mixes half a year with a whole
+  balance sheet. The source publishes both TTM and period fields, so the ratios
+  that need a trailing year use TTM on both sides rather than a sum this code
+  assembled from quarters.
+- **Missing-evidence precedence is stated, not implied**: `NOT_APPLICABLE`
+  (the instrument's statements do not carry the line) outranks `NULL` (the
+  line exists without a value), which outranks `STALE`. Without a stated order
+  two implementations would disagree about the same record.
+- **`STALE` is a mechanism waiting for a number.** Each fundamental factor
+  config must declare `params.stale_after_days`; writing `null` records that no
+  freshness requirement has been reviewed, and the factor then never reports
+  `STALE`. This mirrors `configs/universe.yaml`'s `long_suspension_days: null`.
+- **`FactorResult.inputs` was added** so a value can name the metric, the report
+  period, the announcement date and the raw value it rests on. The design
+  requires the explanation chain to be walkable; without this field a reader
+  could see a ratio but not which quarter produced it.
+- **`factors compute` now normalizes through the same stage as the daily run.**
+  It previously built its own bars-only dataset, which would have made a
+  fundamental factor report `NOT_APPLICABLE` under one command and `VALUE`
+  under another.
+
+Known interpretation boundary, recorded rather than fixed: a bank's operating
+cash flow includes deposit movements, so `ocf_to_net_profit` does not mean
+"profit quality" for financial companies (measured: 000001.SZ = 8.20). Whether
+a factor should be exempt for some industries is a strategy-layer decision the
+design has not made, so no industry guard was added.

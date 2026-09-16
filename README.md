@@ -59,6 +59,7 @@ V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学�
 | AkShare Provider（腾讯域日线 + 三交易所名单）+ 真实录制契约 fixture | |
 | WeStock CLI Provider（三大表，含 `EndDate` + `InfoPublDate`，批量 100 只 / 11 秒）+ 录制 fixture | 财报的 Normalized / Quality Gate / 基本面因子（下一片） |
 | 财务 Normalized（48 个指标）+ Financial Quality Gate + 观测进入因子上下文 | 基本面因子本身（下一片）、全市场财报同步的限流验证 |
+| 5 个基本面因子（`ocf_to_net_profit` / `interest_bearing_debt_to_equity` / `goodwill_to_equity` / `dividend_payout_ttm` / `revenue_ttm_to_inventory`），带时点选择与证据引用 | 估值类因子（需要市值/股本口径评审）、行业适用的豁免规则 |
 | Job Run 记录与 Manifest（每阶段独立可重跑）、`astock daily`；CLI `sync` / `stock` / `watch` / `research` / `strategy run`；API `/health` `/universe` `/factors` `/candidates` `/watchlist` | |
 | 独立 Artifact Validator（快照 + Job Manifest，不导入生产代码） | |
 
@@ -165,6 +166,22 @@ uv run astock sync --as-of 2026-09-04 --financials --symbol 600519.SH --symbol 0
 管线随后把三大表归一化为 `FinancialObservation` 并过质量门：实测 3 只股票 → **1152 条观测 / 48 个指标**，每条都带 `report_period`、`announce_date`、`available_at`（= 公告日 A 股收盘，保守取值），且 `available_at <= as_of`。
 
 缺失的处理是三种不同的事实，不会互相冒充：源里没有值（`-`）→ `NULL` 观测；值读不出来 → 失败记录 + `INVALID`；某张表**根本没落地** → `absent_datasets` 里点名，而不是当成"空表"。
+
+### 基本面因子
+
+```bash
+uv run astock factors compute --as-of 2026-09-04 | grep ocf_to_net_profit
+```
+
+已实现 5 个比值因子（分子分母都是源站已发布的 TTM 或时点字段，代码里不拼年度）：现金流覆盖、有息负债/权益、商誉/权益、分红支付率、营收/存货。
+
+时点规则是硬的：因子只用 `available_at <= as_of` 的最新一期，公告在 `as_of` 之后的报告对它**不可见**（有测试专门钉住"最好看的那一期恰好还没公告"）。每个结果都带 `inputs`，写明用了哪个指标、哪一期、哪天公告、原值多少，所以 `StrategyResult → FactorSnapshot → Normalized Data → Provider` 这条解释链能一步步走回去。
+
+缺失用同一套 6 态词表，优先级显式：`NOT_APPLICABLE`（该标的报表没有这一行）> `NULL`（有行无值）> `STALE`（超过已评审的新鲜度上限）。`stale_after_days` 在配置里显式写 `null` = 未评审，机制就绪但不触发。
+
+实测（3 只股票，55 个基本面因子结果）：`VALUE 13 / NULL 2 / NOT_APPLICABLE 40`——那 40 个是没落地财报的 8 只标的，报"不适用"，不是 0。
+
+一个已知的解读边界：银行的经营现金流包含存款变动，`ocf_to_net_profit` 对金融企业不具"利润含金量"的含义（实测 000001.SZ = 8.20）。因子本身是客观数字，是否按行业豁免属于策略层决定，设计尚未确认，因此这里只记录不改写。
 
 ## 测试与质量检查
 
