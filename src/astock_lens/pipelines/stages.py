@@ -26,13 +26,28 @@ from astock_lens.data.contracts import (
 )
 from astock_lens.data.normalize.csv_bars import CsvDailyBarNormalizer
 from astock_lens.data.normalize.csv_securities import CsvSecurityNormalizer
+from astock_lens.data.normalize.financials import (
+    FinancialNormalizeOutcome,
+    FinancialStatementNormalizer,
+)
 from astock_lens.data.providers.local import LocalCsvProvider
+from astock_lens.data.providers.westock import FINANCIAL_DATASETS
+from astock_lens.data.quality.financial_gate import (
+    FinancialQualityGate,
+    FinancialQualityReport,
+    usable_observations,
+)
 from astock_lens.data.quality.gate import (
     DailyBarQualityGate,
     QualityReport,
     valid_bars,
 )
-from astock_lens.domain.models import DomainRecord, SecurityProfile, SnapshotLineage
+from astock_lens.domain.models import (
+    DomainRecord,
+    FinancialObservation,
+    SecurityProfile,
+    SnapshotLineage,
+)
 from astock_lens.factors.config import FactorConfig
 from astock_lens.factors.contracts import FactorContext, FactorResult
 from astock_lens.factors.registry import build_registry
@@ -44,6 +59,20 @@ from astock_lens.universe.models import UniverseSnapshot
 
 DEFAULT_DATASET = "daily_bars"
 DEFAULT_SECURITIES_DATASET = "securities"
+
+
+class FinancialInputs(DomainRecord):
+    """Normalized and gated fundamentals for one point in time.
+
+    `observations` holds only what survived the gate; the per-dataset outcomes
+    and reports keep everything the gate rejected visible, and
+    `absent_datasets` names the statements that were never landed at all.
+    """
+
+    outcomes: tuple[FinancialNormalizeOutcome, ...] = ()
+    reports: tuple[FinancialQualityReport, ...] = ()
+    observations: tuple[FinancialObservation, ...] = ()
+    absent_datasets: tuple[str, ...] = ()
 
 
 class NormalizeOutcome(DomainRecord):
@@ -59,6 +88,7 @@ class NormalizeOutcome(DomainRecord):
     quality_report: QualityReport
     bars: NormalizedDataset
     securities: tuple[SecurityProfile, ...] = ()
+    financials: FinancialInputs = FinancialInputs()
 
 
 def normalize_stage(
@@ -83,10 +113,15 @@ def normalize_stage(
     securities = CsvSecurityNormalizer().normalize(raw_securities, as_of=as_of)
     report = DailyBarQualityGate().check(normalized)
 
+    financials = financial_inputs(csv_root, as_of=as_of)
+
     gated = NormalizedDataset(
         dataset=normalized.dataset,
         as_of=normalized.as_of,
         daily_bars=valid_bars(normalized, report),
+        # The factor engine reads one normalized dataset per symbol context, so
+        # the fundamentals travel with the bars rather than beside them.
+        observations=financials.observations,
         parse_failures=normalized.parse_failures,
     )
 
@@ -96,6 +131,49 @@ def normalize_stage(
         quality_report=report,
         bars=gated,
         securities=securities.securities,
+        financials=financials,
+    )
+
+
+def financial_inputs(csv_root: Path, *, as_of: datetime) -> FinancialInputs:
+    """Normalize and gate every landed financial statement.
+
+    A statement that was never landed is named in `absent_datasets` rather than
+    treated as an empty one: "nobody synced the balance sheet" and "the balance
+    sheet had nothing in it" are different facts, and a factor has to be able
+    to tell them apart.
+    """
+    provider = LocalCsvProvider(csv_root)
+    normalizer = FinancialStatementNormalizer()
+    gate = FinancialQualityGate()
+
+    outcomes: list[FinancialNormalizeOutcome] = []
+    reports: list[FinancialQualityReport] = []
+    usable: list[FinancialObservation] = []
+    absent: list[str] = []
+
+    for dataset in sorted(FINANCIAL_DATASETS):
+        raw = provider.fetch(FetchRequest(dataset=dataset, as_of=as_of))
+        if raw.payload is None or not raw.payload.rows:
+            absent.append(dataset)
+            continue
+
+        outcome = normalizer.normalize(raw, as_of=as_of)
+        report = gate.check(
+            outcome.observations,
+            dataset=dataset,
+            as_of=as_of,
+            failures=outcome.failures,
+        )
+        outcomes.append(outcome)
+        reports.append(report)
+        usable.extend(usable_observations(outcome.observations, report))
+
+    return FinancialInputs(
+        outcomes=tuple(outcomes),
+        reports=tuple(reports),
+        observations=tuple(usable),
+        absent_datasets=tuple(absent),
     )
 
 
