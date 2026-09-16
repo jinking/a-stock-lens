@@ -60,6 +60,10 @@ class RawDataset(DomainRecord):
     status: DataStatus
     row_count: int
     missing_symbols: tuple[str, ...] = ()
+    # Why a fetch is not complete, when that needs saying: a batch that failed,
+    # a retry that gave up. `status` says *that* something is wrong; this says
+    # what, so a long batch run is diagnosable without re-running it.
+    message: str | None = None
     trade_date: date | None = None
     report_period: date | None = None
     payload: RawPayload | None = None

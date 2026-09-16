@@ -71,6 +71,14 @@ def _recorded(dataset: str) -> str:
     return (FIXTURES / f"{dataset}.md").read_text(encoding="utf-8")
 
 
+def _markdown(columns: tuple[str, ...], rows: tuple[tuple[str, ...], ...]) -> str:
+    """A minimal table, for shapes the recordings do not contain."""
+    header = "| " + " | ".join(columns) + " |"
+    separator = "| " + " | ".join("---" for _ in columns) + " |"
+    body = "\n".join("| " + " | ".join(row) + " |" for row in rows)
+    return f"{header}\n{separator}\n{body}\n"
+
+
 def _request(dataset: str, symbols: Sequence[str] = FIXTURE_SYMBOLS) -> FetchRequest:
     return FetchRequest(dataset=dataset, as_of=AS_OF, symbols=tuple(symbols))
 
@@ -171,14 +179,90 @@ def test_a_failing_command_is_a_source_error_not_an_exception() -> None:
     assert raw.row_count == 0
 
 
-def test_two_different_shapes_in_one_answer_are_refused() -> None:
-    """Merging an income table with a balance table would invent columns."""
-    mixed = _recorded("financial_income") + "\n" + _recorded("financial_balance")
+def test_a_batch_with_extra_columns_widens_the_merged_table() -> None:
+    """The source's shape depends on what the batch contains.
 
-    raw = _provider(ReplayRunner(mixed)).fetch(_request("financial_income"))
+    Measured on 2026-09-16: a batch holding a bank returns six more columns
+    than a batch of manufacturers. The first whole-market run treated that
+    difference as corruption and threw away a whole statement; the fix is to
+    merge on the union and leave the cells a shape did not carry empty — a
+    missing value, not a zero.
+    """
+    narrow = _markdown(
+        ("code", "EndDate", "InfoPublDate", "OperatingRevenue"),
+        (("sz000002", "2026-06-30", "2026-08-15", "1.0"),),
+    )
+    wide = _markdown(
+        ("code", "EndDate", "InfoPublDate", "OperatingRevenue", "Deposit"),
+        (("sz000001", "2026-06-30", "2026-08-15", "2.0", "3.0"),),
+    )
+
+    class TwoShapes:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, argv: Sequence[str]) -> CommandResult:
+            self.calls += 1
+            return CommandResult(
+                returncode=0,
+                stdout=narrow if self.calls == 1 else wide,
+                stderr="",
+            )
+
+    raw = _provider(TwoShapes(), batch_size=1).fetch(
+        _request("financial_income", ("000002.SZ", "000001.SZ"))
+    )
+
+    assert raw.status is DataStatus.VALUE
+    assert raw.payload is not None
+    assert "Deposit" in raw.payload.columns
+    # The first batch's row keeps its alignment and gains an empty cell where
+    # its own shape had no column.
+    deposit = raw.payload.columns.index("Deposit")
+    assert raw.payload.rows[0][deposit] == ""
+    assert raw.payload.rows[1][deposit] == "3.0"
+    assert raw.row_count == 2
+
+
+def test_a_failed_batch_does_not_discard_the_other_batches() -> None:
+    """A whole-market run must not lose a table to one transient batch."""
+
+    class OneBadBatch:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, argv: Sequence[str]) -> CommandResult:
+            self.calls += 1
+            if argv[2].startswith("sh601398"):
+                return CommandResult(returncode=3, stdout="", stderr="rate limited")
+            return CommandResult(
+                returncode=0, stdout=_recorded("financial_income"), stderr=""
+            )
+
+    runner = OneBadBatch()
+    raw = _provider(runner, batch_size=3).fetch(
+        _request("financial_income", (*FIXTURE_SYMBOLS, "601398.SH"))
+    )
+
+    assert raw.status is DataStatus.VALUE
+    assert raw.row_count == 24
+    assert raw.message is not None
+    assert "batch 2/2" in raw.message
+    assert "rate limited" in raw.message
+    assert raw.missing_symbols == ("601398.SH",)
+    # One retry per failed batch: the good batch is fetched once, the bad twice.
+    assert runner.calls == 3
+
+
+def test_every_batch_failing_is_a_source_error_with_the_reason() -> None:
+    runner = ReplayRunner("", returncode=5, stderr="endpoint down")
+
+    raw = _provider(runner, batch_size=10).fetch(_request("financial_income"))
 
     assert raw.status is DataStatus.SOURCE_ERROR
     assert raw.payload is None
+    assert raw.message is not None
+    assert "endpoint down" in raw.message
 
 
 def test_batching_calls_once_per_batch_and_concatenates_rows() -> None:

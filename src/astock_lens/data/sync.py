@@ -168,7 +168,10 @@ def land_financial_statements(
                     rows_written=0,
                     rows_total=len(read_raw_rows(path)[1]),
                     symbols_missing=raw.missing_symbols or tuple(symbols),
-                    note=raw.status.value,
+                    # The provider's reason travels with the landing: a
+                    # whole-market run that failed must be diagnosable without
+                    # re-running it.
+                    note=raw.message or raw.status.value,
                 )
             )
             continue
@@ -182,6 +185,7 @@ def land_financial_statements(
                 rows_written=written,
                 rows_total=total,
                 symbols_missing=raw.missing_symbols,
+                note=raw.message,
             )
         )
 
