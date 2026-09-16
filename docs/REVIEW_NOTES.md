@@ -211,3 +211,40 @@ Evidence that eligibility does real work rather than rubber-stamping: on the
 same run, `000001.SZ` (a bank) is eligible for `growth` and `dividend` but not
 for `quality`, because its income statement carries no gross margin. That is
 the `NULL` state doing its job, not a data outage.
+
+## Whole-market financial refresh (2026-09-16, evening)
+
+First real whole-market run: 5,576 symbols × three statements, 100 per batch,
+168 CLI calls. It found three defects that no fixture could have shown, and all
+three were fixed in the same session:
+
+1. **The source's shape depends on what is in the batch.** A batch holding a
+   bank returns six columns a batch of manufacturers does not (measured: 88 vs
+   82), and one holding an insurer returns a third set (`EmbeddedValuePS`,
+   `NewBusinessValuePSLife`, …). The provider first treated a shape difference
+   as corruption and returned `SOURCE_ERROR`, which threw away **both** the
+   balance sheet and the income statement — 10 minutes of fetching each —
+   because one batch happened to contain a bank. Batches now merge on the union
+   of their columns, and a cell a shape did not carry stays empty (a missing
+   value, never a zero). The same fix was then needed one layer down: the raw
+   *file* also widened instead of refusing a new shape.
+2. **A code can be silently omitted from a batch that succeeds.** 58 of 5,576
+   symbols came back empty from their batch; each answered normally when asked
+   again. The provider now ends a run with one top-up pass over whatever
+   `missing_symbols` names, which took the balance-sheet gap from 58 symbols to
+   4.
+3. **A failure reason was being discarded.** `RawDataset` carried only a status,
+   so the first failed run reported `SOURCE_ERROR` with no way to tell why
+   without re-running it. `RawDataset.message` now carries the reason, and the
+   landing report prints it.
+
+Operational numbers, for the §21 discussion: the refresh takes ~37 minutes and
+the normalization that follows takes ~92 seconds with a ~2.9 GB peak, because
+it materializes 2.13M observation objects at once. That peak is the largest
+single cost in the pipeline and the obvious candidate for a per-symbol read
+path if a daily fundamental refresh is ever wanted.
+
+What the run also validated: re-landing is idempotent (rows merge on
+`(code, EndDate)`, so a gap-filling pass replaced rather than duplicated), and
+a misconfigured run fails loudly — a missing `ASTOCK_WESTOCK_BIN` produced a
+`SOURCE_ERROR` naming the problem instead of a silently empty dataset.

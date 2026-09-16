@@ -61,6 +61,7 @@ V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学�
 | 财务 Normalized（48 个指标）+ Financial Quality Gate + 观测进入因子上下文 | 基本面因子本身（下一片）、全市场财报同步的限流验证 |
 | 12 个基本面因子（5 个比值 + 7 个指标透传），带时点选择、证据引用与单位 | 估值类因子（需要市值/股本口径评审）、行业适用的豁免规则 |
 | Growth / Quality / Dividend 三个 Scanner 的**资格判定**（打分待权重评审） | Value / GARP（缺估值口径）、Industry Trend（缺行业数据） |
+| 全市场财报同步已验证（5,576 只 × 三大表，37 分钟，缺口 4–6 只且有名有姓） | AkShare 全市场日线（5564 只 × 全history，尚未跑过） |
 | Job Run 记录与 Manifest（每阶段独立可重跑）、`astock daily`；CLI `sync` / `stock` / `watch` / `research` / `strategy run`；API `/health` `/universe` `/factors` `/candidates` `/watchlist` | |
 | 独立 Artifact Validator（快照 + Job Manifest，不导入生产代码） | |
 
@@ -153,6 +154,27 @@ uv run python scripts/record_westock_fixture.py   # 需要时重录契约 fixtur
 ```
 
 `neodata`（自然语言语义检索）留在研究侧，只经 `ResearchRequest` / `DeepResearchAdapter` 使用：它逐标的、输出渲染后的 Markdown、凭证 12 小时有效且只能由 WorkBuddy 平台刷新，不适合做批量因子源。
+
+### 全市场财报刷新（季度任务）
+
+```bash
+export ASTOCK_WESTOCK_BIN=/path/to/westock
+uv run astock sync --as-of 2026-09-16 --statements-only   # 只拉三大表，不碰日线
+```
+
+实测（2026-09-16，5,576 只标的 × 三大表，100 只/批，共 168 次调用）：
+
+| 数据集 | 结果 | 行数 | 源站未返回 |
+| --- | --- | --- | --- |
+| `financial_balance` | VALUE | 44,430 | 4 只 |
+| `financial_cashflow` | VALUE | 44,450 | 6 只 |
+| `financial_income` | VALUE | 44,464 | 4 只 |
+
+耗时 **37 分钟**（含一次针对缺口的补抓），缺口标的是 `000003.SZ`、`000005.SZ`、`830799.BJ`、`900948.SH` 这类退市/B 股/新三板标的——它们不是"抓失败"，而是源站确实没有当期报表，并且被逐一点名而不是从统计里消失。
+
+随后归一化：**2,133,636 条观测 / 5,565 只标的 / 48 个指标，92 秒，峰值内存约 2.9 GB，0 个阻断问题**（NULL 类问题 97,876 个，多为银行没有毛利率这类真实缺失）。
+
+规模上的两点事实：内存 ~2.9 GB 来自一次性物化 213 万个观测对象，是当前最大开销；全市场抓取 + 归一化合计约 40 分钟，因此它是季度任务，不是每日任务的一部分。
 
 ### 落财务数据
 
