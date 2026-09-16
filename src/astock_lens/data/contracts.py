@@ -46,6 +46,11 @@ class RawDataset(DomainRecord):
     architecture requires alongside them. `payload` is `None` when the fetch
     produced nothing — the `status` field then explains why, and callers must
     read it rather than assume an empty payload means an empty market.
+
+    `missing_symbols` names the symbols the caller asked for that the source
+    did not return. A source can quietly answer a batch partially — the
+    WeStock CLI reports "success" even when some codes yielded nothing — so the
+    gap is recorded here instead of being inferred from a row count.
     """
 
     provider: str
@@ -54,6 +59,7 @@ class RawDataset(DomainRecord):
     provider_version: str
     status: DataStatus
     row_count: int
+    missing_symbols: tuple[str, ...] = ()
     trade_date: date | None = None
     report_period: date | None = None
     payload: RawPayload | None = None
