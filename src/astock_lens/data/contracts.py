@@ -68,13 +68,33 @@ class FetchRequest(DomainRecord):
     end_date: date | None = None
 
 
+class ParseFailure(DomainRecord):
+    """A raw cell or row the normalizer could not convert.
+
+    Present so that "absent" and "corrupt" stay distinguishable: an empty cell
+    is a missing value with no failure record, while unreadable text is a
+    missing value *and* a record of why it is missing.
+    """
+
+    row_index: int
+    column: str
+    raw_value: str
+    reason: str
+
+
 class NormalizedDataset(DomainRecord):
-    """Canonical-schema output of the Data Quality Gate."""
+    """Canonical-schema output of the Data Quality Gate.
+
+    `parse_failures` records what the normalizer could not read. It is not a
+    quality verdict — deciding whether a bar is usable belongs to the gate —
+    only a statement about conversion.
+    """
 
     dataset: str
     as_of: datetime
     daily_bars: tuple[DailyBar, ...] = ()
     observations: tuple[FinancialObservation, ...] = ()
+    parse_failures: tuple[ParseFailure, ...] = ()
 
 
 class ProviderHealth(DomainRecord):

@@ -118,7 +118,7 @@ git add -A && git commit -m "feat(data): add raw payload contract and local csv 
 - Produces:
   - `ParseFailure(row_index: int, column: str, raw_value: str, reason: str)`
   - `NormalizedDataset.parse_failures: tuple[ParseFailure, ...] = ()`
-  - `CsvDailyBarNormalizer(*, column_map: Mapping[str, str] | None = None, source: str)`
+  - `CsvDailyBarNormalizer(*, column_map: Mapping[str, str] | None = None)`
   - `CsvDailyBarNormalizer.normalize(dataset: RawDataset, *, as_of: datetime) -> NormalizedDataset`
 
 **Normalization rules:**
