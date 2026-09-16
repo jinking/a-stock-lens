@@ -43,17 +43,27 @@ V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学�
 
 ## 当前状态
 
-项目处于 **bootstrap 阶段**：工程骨架与架构契约已就绪，业务算法尚未实现。
+项目处于**第一条垂直切片已贯通**：`CSV → Raw → Normalized → Quality Gate → Factor → Scanner → Candidate → 快照` 可以端到端跑通，且不需要网络、不需要可选依赖。
 
 | 已具备 | 尚未实现 |
 | --- | --- |
-| 设计三件套（spec / PRODUCT / ARCHITECTURE） | Provider 与数据抓取 |
-| 类型化配置加载 `load_app_config` | Normalizer 与 Data Quality Gate |
-| 领域枚举、时间模型、6 个扩展契约 Protocol | Universe / Factor / Strategy / Market / Signal 算法 |
-| `astock doctor` CLI 与 FastAPI `/health` | DuckDB + Parquet 存储 |
-| 单元测试与契约测试 | Watchlist、深研 Adapter 实现、React 前端 |
+| 设计三件套（spec / PRODUCT / ARCHITECTURE） | Universe 引擎与 `UniverseSnapshot` |
+| 类型化配置加载；因子与策略参数写在 YAML | 策略评分与排名（权重待评审） |
+| 领域枚举、时间模型、扩展契约 Protocol | Market Regime、Market Validation、Signal |
+| 本地 CSV Provider、Normalizer、Data Quality Gate | `next_action` 的路由规则（当前恒为 `IGNORE`） |
+| `avg_amount_20d` 因子与 Factor Registry | DuckDB / Parquet 持久化（当前是 JSON 快照） |
+| Momentum Scanner（资格判定 + 因子级解释） | AkShare Provider 与真实抓取 |
+| Candidate Builder 与 JSON 快照存储 | Watchlist 状态机、深研 Adapter 实现、React 前端 |
+| CLI `doctor` / `scan` / `factors compute`；API `/health` `/factors` `/candidates` | |
 
 包结构已按 `docs/ARCHITECTURE.md` 建立，`src/astock_lens/` 下的 `backtest`、`portfolio`、`events` 等目录只是预留边界，没有 V1 实现。
+
+### 本条切片刻意留空的部分
+
+- **不做策略评分。** `docs/ARCHITECTURE.md` §8.3 要求权重写进 YAML，而权重尚未评审，所以 `score`、`rank_percentile`、`confidence` 保持 `null`，而不是填一个看起来合理的数。
+- **`next_action` 恒为 `IGNORE`。** 设计文档枚举了允许的动作，但没有定义选择规则。在规则评审通过前，`IGNORE`（无动作）是唯一不会误导人的取值。
+- **快照是 JSON，不是 DuckDB。** DuckDB 属可选依赖 `data` extra；接口先行为准——`SnapshotStore` 协议已定，DuckDB 实现后续按同一协议替换。
+- **窗口不完整即 `NULL`。** 20 日窗口内少一天，输出 `NULL`，而不是用更短的窗口凑一个均值——那等于悄悄回答了另一个问题。
 
 ## 环境要求与安装
 
@@ -75,6 +85,23 @@ uv run astock doctor
 
 `doctor` 只读本地文件：检查 Python 版本、加载 `configs/app.yaml`、报告配置中的存储路径是否存在。它不会抓取行情、不会连接外部数据源、也不会创建 DuckDB 文件。
 
+### 跑一遍第一条垂直切片
+
+数据源指向本地 CSV 目录（默认 `data/raw`），快照写入目录（默认 `data/snapshots`），两者都可用环境变量覆盖：
+
+```bash
+export ASTOCK_CSV_ROOT=tests/fixtures/csv
+export ASTOCK_SNAPSHOT_ROOT=tests/.tmp/demo
+
+uv run astock factors compute --as-of 2026-09-04   # 每个因子一行 JSON，走 stdout
+uv run astock scan --as-of 2026-09-04              # 候选数、next_action、快照路径
+
+uv run uvicorn --factory astock_lens.api.app:create_app
+curl "http://127.0.0.1:8000/candidates?as_of=2026-09-04"
+```
+
+`--as-of` 接受交易日 `YYYY-MM-DD`，按当日 A 股收盘（15:00 +08:00）解析。`factors compute` 的 JSON 走 stdout、运行说明走 stderr，因此可以直接管道给别的工具。
+
 ## 测试与质量检查
 
 ```bash
@@ -88,7 +115,14 @@ uv run mypy
 
 ## 下一步
 
-第一个垂直切片是让设计文档中的验收链真正跑通：先实现 Provider + Normalizer + Data Quality Gate，再实现 Factor 计算、第一个 Scanner 与 Candidate 快照，然后接上 `/health` 之外的第一个领域 API。
+按设计文档 §22 的验收链继续往前推进，下一片包含：
+
+1. **Universe 引擎**与不可变 `UniverseSnapshot`。注意 `configs/universe.yaml` 里的 `min_average_turnover_20d` 目前是 `null`——阈值需要先定下来。
+2. **策略评分、排名与 `next_action` 路由规则**。三者都需要先评审权重，评审结果写进 `configs/strategies/*.yaml`。
+3. **DuckDB / Parquet 存储**替换 JSON 快照，按已有的 `SnapshotStore` 协议实现。
+4. **AkShare Provider**，把离线链路换成真实全市场数据。
+
+每条切片的计划都放在 `docs/superpowers/plans/`，设计权威仍是 `docs/superpowers/specs/2026-09-16-a-stock-lens-design.md`。
 
 ## 文档索引
 
