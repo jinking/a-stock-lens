@@ -27,6 +27,7 @@ from astock_lens.data.providers.westock import FINANCIAL_DATASETS, WestockCliPro
 from astock_lens.data.snapshots.resolve import resolve_snapshot_store
 from astock_lens.data.snapshots.store import SnapshotStore
 from astock_lens.data.sync import (
+    DatasetLanding,
     SyncResult,
     land_financial_statements,
     land_raw,
@@ -843,6 +844,17 @@ def sync(
             help="Also land the three financial statements from the WeStock CLI.",
         ),
     ] = False,
+    statements_only: Annotated[
+        bool,
+        typer.Option(
+            "--statements-only",
+            help=(
+                "Land only the financial statements, using the listing already "
+                "on disk. This is the quarterly whole-market refresh: it skips "
+                "the per-symbol daily-bar fetch entirely."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Land raw data for one date, skipping what is already there.
 
@@ -859,15 +871,19 @@ def sync(
         )
         raise typer.Exit(code=1)
 
-    result = land_raw(
-        provider=provider,
-        root=_csv_root(),
-        as_of=day,
-        symbols=tuple(symbol) if symbol else None,
-    )
-    landings = list(result.landings)
-    failed = list(result.failed_datasets)
-    if financials:
+    landings: list[DatasetLanding] = []
+    failed: list[str] = []
+    if not statements_only:
+        result = land_raw(
+            provider=provider,
+            root=_csv_root(),
+            as_of=day,
+            symbols=tuple(symbol) if symbol else None,
+        )
+        landings.extend(result.landings)
+        failed.extend(result.failed_datasets)
+
+    if financials or statements_only:
         financial_result = _land_financials(day, symbols=symbol)
         landings.extend(financial_result.landings)
         failed.extend(financial_result.failed_datasets)

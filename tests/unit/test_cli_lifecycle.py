@@ -506,6 +506,39 @@ def test_sync_financials_needs_a_symbol_list(
     assert "no symbols" in result.output
 
 
+def test_statements_only_skips_the_daily_bar_fetch(
+    local_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The quarterly whole-market refresh must not re-fetch 5000 bar series.
+
+    The listing still decides the symbols, so it is read from disk rather than
+    fetched: the run touches the market only for the statements.
+    """
+    import astock_lens.cli.app as cli_module
+
+    raw_root = local_tmp / "raw"
+    raw_root.mkdir()
+    (raw_root / "securities.csv").write_text(
+        "symbol,name,exchange,list_date\n600519.SH,Moutai,SSE,2001-08-27\n",
+        encoding="utf-8",
+    )
+    bulk = StubProvider()
+    financial = StubFinancialProvider()
+    monkeypatch.setattr(cli_module, "_bulk_provider", lambda: bulk)
+    monkeypatch.setattr(cli_module, "_financial_provider", lambda: financial)
+
+    result = CliRunner().invoke(
+        app,
+        ["sync", "--as-of", DAY, "--statements-only"],
+        env=_env(local_tmp) | {"ASTOCK_CSV_ROOT": str(raw_root)},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert bulk.requests == []  # no listing fetch, no bar fetch
+    assert (raw_root / "financial_income.csv").is_file()
+    assert not (raw_root / "daily_bars.csv").exists()
+
+
 # --- research --------------------------------------------------------------
 
 
