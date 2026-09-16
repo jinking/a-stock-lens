@@ -22,6 +22,8 @@ from astock_lens.universe.models import (
     UniverseRule,
     UniverseSnapshot,
 )
+from astock_lens.watchlist.state_machine import open_entry
+from astock_lens.watchlist.store import JsonWatchlistStore
 
 AS_OF = datetime(2026, 9, 4, 15, 0, tzinfo=UTC)
 DAY = "2026-09-04"
@@ -160,3 +162,28 @@ def test_api_never_imports_the_computation_engines() -> None:
     assert "strategies.momentum" not in source
     assert "AverageAmountFactor" not in source
     assert "MomentumScanner" not in source
+
+
+def test_watchlist_route_reads_the_stored_entries(local_tmp: Path) -> None:
+    JsonWatchlistStore(local_tmp / "watchlist").write(
+        open_entry("600519.SH", at=AS_OF, thesis="brand moat")
+    )
+    client = TestClient(create_app(watchlist_root=local_tmp / "watchlist"))
+
+    response = client.get("/watchlist")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbols"] == ["600519.SH"]
+    assert payload["entries"][0]["state"] == "DISCOVERED"
+    assert payload["entries"][0]["thesis"] == "brand moat"
+
+
+def test_watchlist_route_is_empty_rather_than_missing(local_tmp: Path) -> None:
+    """Nothing discovered yet is an answer, not a 404."""
+    client = TestClient(create_app(watchlist_root=local_tmp / "watchlist"))
+
+    response = client.get("/watchlist")
+
+    assert response.status_code == 200
+    assert response.json() == {"symbols": [], "entries": []}

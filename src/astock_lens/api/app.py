@@ -14,10 +14,13 @@ from fastapi import FastAPI, HTTPException
 
 from astock_lens.data.snapshots.resolve import resolve_snapshot_store
 from astock_lens.domain.enums import SnapshotKind
+from astock_lens.watchlist.store import resolve_watchlist_store
 
 SERVICE_NAME = "A-Stock Lens"
 SNAPSHOT_ROOT_ENV = "ASTOCK_SNAPSHOT_ROOT"
+WATCHLIST_ROOT_ENV = "ASTOCK_WATCHLIST_ROOT"
 DEFAULT_SNAPSHOT_ROOT = Path("data/snapshots")
+DEFAULT_WATCHLIST_ROOT = Path("data/watchlist")
 
 # A bare trade date means the A-share close on that day, so a query resolves to
 # the same snapshot key the CLI writes for `--as-of <date>`.
@@ -25,7 +28,10 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 CLOSE_HOUR = 15
 
 
-def create_app(snapshot_root: Path | None = None) -> FastAPI:
+def create_app(
+    snapshot_root: Path | None = None,
+    watchlist_root: Path | None = None,
+) -> FastAPI:
     """Build the API application.
 
     Storage is resolved per request rather than opened here, so importing the
@@ -37,6 +43,11 @@ def create_app(snapshot_root: Path | None = None) -> FastAPI:
         if snapshot_root is not None:
             return snapshot_root
         return Path(os.getenv(SNAPSHOT_ROOT_ENV, str(DEFAULT_SNAPSHOT_ROOT)))
+
+    def watchlist() -> Path:
+        if watchlist_root is not None:
+            return watchlist_root
+        return Path(os.getenv(WATCHLIST_ROOT_ENV, str(DEFAULT_WATCHLIST_ROOT)))
 
     @application.get("/health")
     def health() -> dict[str, str]:
@@ -64,6 +75,21 @@ def create_app(snapshot_root: Path | None = None) -> FastAPI:
         """Read the stored candidate snapshot for one date."""
         records = _read(root(), SnapshotKind.CANDIDATE, as_of)
         return {"as_of": as_of, "records": list(records)}
+
+    @application.get("/watchlist")
+    def watchlist_entries() -> dict[str, object]:
+        """Read the tracked symbols and their research context.
+
+        An empty watchlist is a normal answer, not an error: nothing has been
+        discovered yet is different from the question being unanswerable.
+        """
+        store = resolve_watchlist_store(watchlist())
+        entries = []
+        for symbol in store.symbols():
+            entry = store.read(symbol)
+            if entry is not None:
+                entries.append(entry.model_dump(mode="json"))
+        return {"symbols": list(store.symbols()), "entries": entries}
 
     return application
 

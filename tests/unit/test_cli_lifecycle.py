@@ -1,0 +1,490 @@
+"""CLI lifecycle tests.
+
+`spec §17` requires the CLI to be a first-class surface, usable from cron and
+from coding agents without the Web UI. These tests cover the commands that
+make the lifecycle reachable: tracking a symbol, reading a stock profile out
+of the stored snapshots, running one scanner, running the daily pipeline, and
+handing a research request to the adapter boundary.
+
+Every one of them follows the same rule: a command that cannot do what it was
+asked reports why and exits non-zero rather than printing a reassuring line.
+"""
+
+import json
+import shlex
+import sys
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+from click.testing import Result
+from typer.testing import CliRunner
+
+from astock_lens.cli.app import app
+from astock_lens.data.contracts import (
+    FetchRequest,
+    ProviderHealth,
+    RawDataset,
+    RawPayload,
+)
+from astock_lens.domain.enums import DataStatus
+
+ROOT = Path(__file__).resolve().parents[2]
+CSV_ROOT = ROOT / "tests" / "fixtures" / "csv"
+DAY = "2026-09-04"
+LONG_DATASET = "daily_bars_long"
+SHORT_DATASET = "daily_bars"
+
+RESEARCH_RESPONDER = shlex.join(
+    [
+        sys.executable,
+        "-c",
+        (
+            "import json,sys;"
+            "payload=json.load(sys.stdin);"
+            "request=payload.get('request') or {};"
+            "print(json.dumps({"
+            "'job_id': 'job-' + (request.get('thesis') or request.get('symbol') or 'x'),"
+            "'symbol': request.get('symbol') or 'unknown',"
+            "'submitted_at': '2026-09-04T15:05:00+00:00'}))"
+        ),
+    ]
+)
+
+
+class StubProvider:
+    """A bulk provider that answers from memory, so no test needs the network."""
+
+    def __init__(self) -> None:
+        self.requests: list[FetchRequest] = []
+
+    def health(self) -> ProviderHealth:
+        return ProviderHealth(
+            provider="stub",
+            healthy=True,
+            status=DataStatus.VALUE,
+            checked_at=datetime(2026, 9, 4, 15, 5, tzinfo=UTC),
+        )
+
+    def fetch(self, request: FetchRequest) -> RawDataset:
+        self.requests.append(request)
+        if request.dataset == "securities":
+            return self._dataset(
+                request,
+                ("symbol", "name", "exchange", "list_date"),
+                (("600519.SH", "Moutai", "SSE", "2001-08-27"),),
+            )
+        symbols: Sequence[str] = request.symbols or ()
+        return self._dataset(
+            request,
+            ("symbol", "trade_date", "close"),
+            tuple((symbol, DAY, "10.5") for symbol in symbols),
+        )
+
+    @staticmethod
+    def _dataset(
+        request: FetchRequest,
+        columns: tuple[str, ...],
+        rows: Sequence[tuple[str, ...]],
+    ) -> RawDataset:
+        return RawDataset(
+            provider="stub",
+            dataset=request.dataset,
+            fetched_at=datetime(2026, 9, 4, 15, 5, tzinfo=UTC),
+            provider_version="v1",
+            status=DataStatus.VALUE if rows else DataStatus.NULL,
+            row_count=len(rows),
+            payload=RawPayload(columns=columns, rows=tuple(rows)),
+        )
+
+
+def _env(
+    local_tmp: Path, *, dataset: str = LONG_DATASET, **extra: str
+) -> dict[str, str]:
+    return {
+        "ASTOCK_CSV_ROOT": str(CSV_ROOT),
+        "ASTOCK_SNAPSHOT_ROOT": str(local_tmp / "snapshots"),
+        "ASTOCK_WATCHLIST_ROOT": str(local_tmp / "watchlist"),
+        "ASTOCK_JOB_ROOT": str(local_tmp / "jobs"),
+        "ASTOCK_DATASET": dataset,
+    } | extra
+
+
+def _invoke(
+    local_tmp: Path, *args: str, dataset: str = LONG_DATASET, **extra: str
+) -> Result:
+    return CliRunner().invoke(
+        app, list(args), env=_env(local_tmp, dataset=dataset, **extra)
+    )
+
+
+# --- watch -----------------------------------------------------------------
+
+
+def test_watch_creates_an_entry_at_discovered(local_tmp: Path) -> None:
+    result = _invoke(
+        local_tmp,
+        "watch",
+        "600519.SH",
+        "--thesis",
+        "brand moat",
+        dataset=SHORT_DATASET,
+    )
+
+    assert result.exit_code == 0
+    assert "600519.SH" in result.stdout
+    assert "DISCOVERED" in result.stdout
+    assert "brand moat" in result.stdout
+    assert (local_tmp / "watchlist" / "600519.SH.json").is_file()
+
+
+def test_watch_records_questions_risks_and_what_it_waits_for(
+    local_tmp: Path,
+) -> None:
+    result = _invoke(
+        local_tmp,
+        "watch",
+        "600519.SH",
+        "--key-question",
+        "is volume still falling?",
+        "--risk-condition",
+        "channel inventory rebuild",
+        "--waiting-for",
+        "Q3 report",
+        dataset=SHORT_DATASET,
+    )
+
+    assert result.exit_code == 0
+    assert "is volume still falling?" in result.stdout
+    assert "channel inventory rebuild" in result.stdout
+    assert "Q3 report" in result.stdout
+
+
+def test_watch_lists_what_is_tracked(local_tmp: Path) -> None:
+    _invoke(local_tmp, "watch", "600519.SH", dataset=SHORT_DATASET)
+    _invoke(local_tmp, "watch", "000001.SZ", dataset=SHORT_DATASET)
+
+    result = _invoke(local_tmp, "watch", dataset=SHORT_DATASET)
+
+    assert result.exit_code == 0
+    assert "600519.SH" in result.stdout
+    assert "000001.SZ" in result.stdout
+
+
+def test_an_empty_watchlist_says_so(local_tmp: Path) -> None:
+    result = _invoke(local_tmp, "watch", dataset=SHORT_DATASET)
+
+    assert result.exit_code == 0
+    assert "empty" in result.stdout
+
+
+def test_watch_walks_the_confirmed_path_and_records_the_timeline(
+    local_tmp: Path,
+) -> None:
+    for state in ("WATCH", "DEEP_RESEARCH", "TRACK_SIGNAL"):
+        result = _invoke(
+            local_tmp,
+            "watch",
+            "600519.SH",
+            "--state",
+            state,
+            "--note",
+            "reviewed",
+            dataset=SHORT_DATASET,
+        )
+        assert result.exit_code == 0, result.output
+        assert state in result.stdout
+
+    listed = _invoke(local_tmp, "watch", dataset=SHORT_DATASET)
+    assert "TRACK_SIGNAL" in listed.stdout
+
+
+def test_watch_refuses_a_reserved_state(local_tmp: Path) -> None:
+    result = _invoke(
+        local_tmp, "watch", "600519.SH", "--state", "HOLDING", dataset=SHORT_DATASET
+    )
+
+    assert result.exit_code == 1
+    assert "HOLDING" in result.output
+    assert not (local_tmp / "watchlist" / "600519.SH.json").exists()
+
+
+def test_watch_refuses_a_skipped_state(local_tmp: Path) -> None:
+    result = _invoke(
+        local_tmp,
+        "watch",
+        "600519.SH",
+        "--state",
+        "DEEP_RESEARCH",
+        dataset=SHORT_DATASET,
+    )
+
+    assert result.exit_code == 1
+    assert "WATCH" in result.output
+
+
+def test_watch_rejects_a_state_that_is_not_a_state(local_tmp: Path) -> None:
+    result = _invoke(
+        local_tmp, "watch", "600519.SH", "--state", "MAYBE", dataset=SHORT_DATASET
+    )
+
+    assert result.exit_code != 0
+    assert "MAYBE" in result.output
+
+
+# --- stock -----------------------------------------------------------------
+
+
+def test_stock_profile_reads_the_stored_evidence(local_tmp: Path) -> None:
+    _invoke(local_tmp, "scan", "--as-of", DAY)
+
+    result = _invoke(local_tmp, "stock", "300750.SZ", "--as-of", DAY)
+
+    assert result.exit_code == 0, result.output
+    assert "300750.SZ" in result.stdout
+    assert "included" in result.stdout
+    assert "momentum" in result.stdout
+    assert "ret_20d" in result.stdout
+    assert "WATCH" in result.stdout
+    assert "lineage" in result.stdout
+
+
+def test_stock_profile_names_the_rule_that_excluded_a_symbol(
+    local_tmp: Path,
+) -> None:
+    _invoke(local_tmp, "scan", "--as-of", DAY)
+
+    result = _invoke(local_tmp, "stock", "000002.SZ", "--as-of", DAY)
+
+    assert result.exit_code == 0, result.output
+    assert "000002.SZ" in result.stdout
+    assert "ST" in result.stdout
+
+
+def test_stock_profile_reports_a_watchlist_entry(local_tmp: Path) -> None:
+    _invoke(local_tmp, "scan", "--as-of", DAY)
+    _invoke(local_tmp, "watch", "300750.SZ", "--thesis", "structural growth")
+
+    result = _invoke(local_tmp, "stock", "300750.SZ", "--as-of", DAY)
+
+    assert result.exit_code == 0
+    assert "structural growth" in result.stdout
+    assert "DISCOVERED" in result.stdout
+
+
+def test_stock_profile_refuses_a_date_with_no_snapshot(local_tmp: Path) -> None:
+    result = _invoke(local_tmp, "stock", "300750.SZ", "--as-of", "2020-01-02")
+
+    assert result.exit_code == 1
+    assert "2020-01-02" in result.output
+
+
+# --- strategy run ----------------------------------------------------------
+
+
+def test_strategy_run_prints_one_ranking_for_the_named_scanner(
+    local_tmp: Path,
+) -> None:
+    result = _invoke(local_tmp, "strategy", "run", "momentum", "--as-of", DAY)
+
+    assert result.exit_code == 0, result.output
+    assert "300750.SZ" in result.stdout
+    assert "momentum" in result.stdout
+    ranked = [line for line in result.stdout.splitlines() if line.startswith("  ")]
+    assert len(ranked) == 7
+
+
+def test_strategy_run_refuses_a_scanner_that_has_no_implementation(
+    local_tmp: Path,
+) -> None:
+    result = _invoke(local_tmp, "strategy", "run", "value", "--as-of", DAY)
+
+    assert result.exit_code == 1
+    assert "value" in result.output
+    assert "no implementation" in result.output
+
+
+def test_strategy_run_refuses_an_unknown_id(local_tmp: Path) -> None:
+    result = _invoke(local_tmp, "strategy", "run", "nonsense", "--as-of", DAY)
+
+    assert result.exit_code != 0
+    assert "nonsense" in result.output
+
+
+# --- daily -----------------------------------------------------------------
+
+
+def test_daily_reports_every_stage_and_its_verdict(local_tmp: Path) -> None:
+    result = _invoke(local_tmp, "daily", "--as-of", DAY)
+
+    assert result.exit_code == 1
+    for stage in (
+        "SYNC_DATA",
+        "NORMALIZE",
+        "COMPUTE_FACTORS",
+        "BUILD_UNIVERSE",
+        "RUN_STRATEGIES",
+        "BUILD_CANDIDATES",
+        "DETECT_REGIME",
+        "MARKET_VALIDATE",
+        "RUN_SIGNALS",
+        "UPDATE_WATCHLIST",
+        "GENERATE_DAILY_SNAPSHOT",
+    ):
+        assert stage in result.stdout, stage
+    assert "BLOCKED" in result.stdout
+    assert "SKIPPED" in result.stdout
+    assert (local_tmp / "jobs" / "2026-09-04.json").is_file()
+
+
+def test_daily_can_be_allowed_to_finish_incomplete(local_tmp: Path) -> None:
+    result = _invoke(local_tmp, "daily", "--as-of", DAY, "--allow-incomplete")
+
+    assert result.exit_code == 0, result.output
+    assert "BLOCKED" in result.stdout
+
+
+def test_daily_lands_raw_data_first_when_asked(
+    local_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import astock_lens.cli.app as cli_module
+
+    provider = StubProvider()
+    monkeypatch.setattr(cli_module, "_bulk_provider", lambda: provider)
+
+    raw_root = local_tmp / "raw"
+    result = CliRunner().invoke(
+        app,
+        ["daily", "--as-of", DAY, "--sync", "--allow-incomplete"],
+        env=_env(local_tmp) | {"ASTOCK_CSV_ROOT": str(raw_root)},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "SYNC_DATA SUCCEEDED" in result.stdout
+    assert provider.requests
+    assert (raw_root / "daily_bars.csv").is_file()
+
+
+# --- sync ------------------------------------------------------------------
+
+
+def test_sync_lands_raw_data_and_reports_what_it_wrote(
+    local_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import astock_lens.cli.app as cli_module
+
+    raw_root = local_tmp / "raw"
+    monkeypatch.setattr(cli_module, "_bulk_provider", StubProvider)
+
+    result = CliRunner().invoke(
+        app,
+        ["sync", "--as-of", DAY],
+        env=_env(local_tmp) | {"ASTOCK_CSV_ROOT": str(raw_root)},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (raw_root / "securities.csv").is_file()
+    assert (raw_root / "daily_bars.csv").is_file()
+    assert "securities" in result.stdout
+    assert "daily_bars" in result.stdout
+
+
+# --- research --------------------------------------------------------------
+
+
+def test_research_refuses_when_no_adapter_is_configured(local_tmp: Path) -> None:
+    result = _invoke(local_tmp, "research", "600519.SH")
+
+    assert result.exit_code == 1
+    assert "ASTOCK_DEEP_RESEARCH_CMD" in result.output
+
+
+def test_research_submits_a_request_built_from_the_watchlist(
+    local_tmp: Path,
+) -> None:
+    _invoke(
+        local_tmp, "watch", "600519.SH", "--thesis", "brand moat", dataset=SHORT_DATASET
+    )
+
+    result = _invoke(
+        local_tmp,
+        "research",
+        "600519.SH",
+        ASTOCK_DEEP_RESEARCH_CMD=RESEARCH_RESPONDER,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "job-brand moat" in result.stdout
+
+
+def test_research_polls_a_job_status(local_tmp: Path) -> None:
+    responder = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import json,sys;"
+                "payload=json.load(sys.stdin);"
+                "print(json.dumps({'job_id': payload['job_id'],"
+                " 'state': 'InProgress',"
+                " 'observed_at': '2026-09-04T15:06:00+00:00'}))"
+            ),
+        ]
+    )
+
+    result = _invoke(
+        local_tmp,
+        "research",
+        "--status",
+        "job-1",
+        ASTOCK_DEEP_RESEARCH_CMD=responder,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "InProgress" in result.stdout
+
+
+def test_research_reports_a_failing_command(local_tmp: Path) -> None:
+    failing = shlex.join(
+        [sys.executable, "-c", "import sys; sys.stderr.write('no token'); sys.exit(2)"]
+    )
+
+    result = _invoke(
+        local_tmp,
+        "research",
+        "600519.SH",
+        ASTOCK_DEEP_RESEARCH_CMD=failing,
+    )
+
+    assert result.exit_code == 1
+    assert "no token" in result.output
+
+
+# --- doctor ----------------------------------------------------------------
+
+
+def test_doctor_reports_dataset_freshness(local_tmp: Path) -> None:
+    result = _invoke(local_tmp, "doctor", dataset=SHORT_DATASET)
+
+    assert result.exit_code == 0, result.output
+    assert "daily_bars" in result.stdout
+    assert "2026-09-04" in result.stdout
+
+
+def test_doctor_reports_the_provider_it_would_use_for_bulk_data() -> None:
+    result = CliRunner().invoke(app, ["doctor"])
+
+    assert result.exit_code == 0, result.output
+    assert "akshare" in result.stdout.lower()
+
+
+def test_the_watchlist_root_can_be_pointed_elsewhere(local_tmp: Path) -> None:
+    """No test writes to the repository's real watchlist directory."""
+    _invoke(local_tmp, "watch", "600519.SH", dataset=SHORT_DATASET)
+
+    assert not (ROOT / "data" / "watchlist" / "600519.SH.json").exists()
+    payload = json.loads(
+        (local_tmp / "watchlist" / "600519.SH.json").read_text(encoding="utf-8")
+    )
+    assert payload["symbol"] == "600519.SH"

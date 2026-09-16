@@ -10,17 +10,29 @@ import os
 import platform
 import sys
 from collections import Counter
-from datetime import date, datetime
+from collections.abc import Callable
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
 import typer
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
+from astock_lens.candidates.models import Candidate
+from astock_lens.data.contracts import DataProvider
+from astock_lens.data.health import raw_datasets
+from astock_lens.data.providers.akshare_provider import AkShareProvider
 from astock_lens.data.snapshots.resolve import resolve_snapshot_store
 from astock_lens.data.snapshots.store import SnapshotStore
+from astock_lens.data.sync import SyncResult, land_raw
+from astock_lens.domain.enums import SnapshotKind, WatchlistState
 from astock_lens.factors.config import FactorConfig, load_factor_config
+from astock_lens.factors.contracts import FactorResult
+from astock_lens.jobs.models import StageOutcome
+from astock_lens.jobs.store import JsonJobStore
+from astock_lens.pipelines import stages
+from astock_lens.pipelines.daily import DailyRunResult, run_daily
 from astock_lens.pipelines.daily_scan import (
     DailyScanResult,
     UniverseBuildResult,
@@ -28,24 +40,54 @@ from astock_lens.pipelines.daily_scan import (
     run_daily_scan,
 )
 from astock_lens.pipelines.first_slice import FirstSliceResult, run_first_slice
+from astock_lens.research.adapters.cli import (
+    CliDeepResearchAdapter,
+    DeepResearchInvocationError,
+    DeepResearchNotConfigured,
+    resolve_adapter,
+)
+from astock_lens.research.models import ResearchRequest
 from astock_lens.settings import load_app_config
-from astock_lens.strategies.config import load_strategy_config
+from astock_lens.strategies.config import StrategyConfig, load_strategy_config
+from astock_lens.strategies.contracts import StrategyResult
+from astock_lens.strategies.registry import (
+    RegisteredStrategy,
+    StrategyNotImplementedError,
+    build_scanner,
+    load_scanners,
+    strategy_paths,
+)
 from astock_lens.universe.config import load_universe_config
+from astock_lens.universe.models import UniverseSnapshot
+from astock_lens.watchlist.models import WatchlistEntry
+from astock_lens.watchlist.state_machine import (
+    WatchlistTransitionError,
+    open_entry,
+    transition,
+)
+from astock_lens.watchlist.store import WatchlistStore, resolve_watchlist_store
 
 MINIMUM_PYTHON = (3, 12)
 
 CSV_ROOT_ENV = "ASTOCK_CSV_ROOT"
 SNAPSHOT_ROOT_ENV = "ASTOCK_SNAPSHOT_ROOT"
+WATCHLIST_ROOT_ENV = "ASTOCK_WATCHLIST_ROOT"
+WATCHLIST_BACKEND_ENV = "ASTOCK_WATCHLIST_BACKEND"
+JOB_ROOT_ENV = "ASTOCK_JOB_ROOT"
 DATASET_ENV = "ASTOCK_DATASET"
 SECURITIES_DATASET_ENV = "ASTOCK_SECURITIES_DATASET"
 FACTOR_CONFIG_DIR_ENV = "ASTOCK_FACTOR_CONFIG_DIR"
 UNIVERSE_CONFIG_ENV = "ASTOCK_UNIVERSE_CONFIG"
+STRATEGY_CONFIG_DIR_ENV = "ASTOCK_STRATEGY_CONFIG_DIR"
 DEFAULT_CSV_ROOT = Path("data/raw")
 DEFAULT_SNAPSHOT_ROOT = Path("data/snapshots")
+DEFAULT_WATCHLIST_ROOT = Path("data/watchlist")
+DEFAULT_JOB_ROOT = Path("var/jobs")
 DEFAULT_DATASET = "daily_bars"
 DEFAULT_SECURITIES_DATASET = "securities"
 DEFAULT_FACTOR_CONFIG_DIR = Path("configs/factors")
 DEFAULT_UNIVERSE_CONFIG = Path("configs/universe.yaml")
+DEFAULT_STRATEGY_CONFIG_DIR = Path("configs/strategies")
 
 STRATEGY_CONFIG_PATH = Path("configs/strategies/momentum.yaml")
 
@@ -173,6 +215,46 @@ def _universe_config_path() -> Path:
     return Path(os.getenv(UNIVERSE_CONFIG_ENV, str(DEFAULT_UNIVERSE_CONFIG)))
 
 
+def _strategy_dir() -> Path:
+    return Path(os.getenv(STRATEGY_CONFIG_DIR_ENV, str(DEFAULT_STRATEGY_CONFIG_DIR)))
+
+
+def _watchlist_store() -> WatchlistStore:
+    root = Path(os.getenv(WATCHLIST_ROOT_ENV, str(DEFAULT_WATCHLIST_ROOT)))
+    return resolve_watchlist_store(root)
+
+
+def _job_store() -> JsonJobStore:
+    return JsonJobStore(Path(os.getenv(JOB_ROOT_ENV, str(DEFAULT_JOB_ROOT))))
+
+
+def _bulk_provider() -> DataProvider:
+    """The bulk provider `astock sync` lands data from.
+
+    Named once so a test (or a future provider swap) can replace it without
+    touching the commands that use it.
+    """
+    return AkShareProvider()
+
+
+def _today_close() -> datetime:
+    """The A-share close on the current date in Shanghai."""
+    today = datetime.now(SHANGHAI).date()
+    return datetime(today.year, today.month, today.day, CLOSE_HOUR, tzinfo=SHANGHAI)
+
+
+def _snapshot_records[T: BaseModel](
+    kind: SnapshotKind, as_of: datetime, model: type[T]
+) -> tuple[T, ...]:
+    """Read one snapshot and parse it back into the model that wrote it."""
+    return tuple(model.model_validate(record) for record in _store().read(kind, as_of))
+
+
+def _value_text(value: float | None, status: object) -> str:
+    """Show a measurement, or the reason there is none."""
+    return "no value" if value is None else f"{value} ({status})"
+
+
 @app.command()
 def doctor() -> None:
     """Check local configuration and runtime health.
@@ -238,6 +320,33 @@ def doctor() -> None:
         )
         typer.echo(f"strategy {strategy.id} {strategy.version} [ok]")
         typer.echo(f"  weights: {weights}")
+
+    # Data Health (`docs/DATA_SOURCES.md` §4): what a scan would read, and how
+    # fresh it is. This reads local files only — it never fetches, so it cannot
+    # turn a health check into a data-pipeline run.
+    csv_root = _csv_root()
+    presence = "ok" if csv_root.is_dir() else "missing"
+    typer.echo(f"provider local-csv: {csv_root} [{presence}]")
+    datasets = raw_datasets(csv_root)
+    if not datasets:
+        typer.echo("  datasets: none landed under this root")
+    for freshness in datasets:
+        span = (
+            f"{freshness.first_trade_date} .. {freshness.last_trade_date}"
+            if freshness.covers_dates
+            else "no trade_date column"
+        )
+        unreadable = (
+            f", {freshness.unreadable_trade_dates} unreadable trade dates"
+            if freshness.unreadable_trade_dates
+            else ""
+        )
+        typer.echo(f"  {freshness.dataset}: {freshness.rows} rows, {span}{unreadable}")
+
+    provider_health = _bulk_provider().health()
+    provider_state = "ok" if provider_health.healthy else "unavailable"
+    detail = f" ({provider_health.message})" if provider_health.message else ""
+    typer.echo(f"provider {provider_health.provider} [{provider_state}]{detail}")
 
     if failures:
         typer.echo("doctor found problems:", err=True)
@@ -309,3 +418,531 @@ def scan(as_of: Annotated[str, AS_OF_OPTION]) -> None:
         )
         typer.echo(f"  {candidate.symbol} -> {candidate.next_action} ({score})")
     typer.echo(f"snapshot: {result.candidate_snapshot_path}")
+
+
+strategy_app = typer.Typer(
+    no_args_is_help=True,
+    help="Strategy scanner commands.",
+)
+app.add_typer(strategy_app, name="strategy")
+
+
+@strategy_app.command("run")
+def strategy_run(
+    strategy: Annotated[str, typer.Argument(help="Strategy id, e.g. momentum.")],
+    as_of: Annotated[str, AS_OF_OPTION],
+) -> None:
+    """Score the Universe with one scanner and print its ranking.
+
+    This runs one scanner against the current data and prints where it placed
+    each symbol. It writes no snapshot: the daily pipeline owns the day's
+    snapshots, and a targeted run must not overwrite them with a subset.
+    """
+    day = _as_of(as_of)
+    try:
+        config = _strategy_config(strategy)
+        scanner = build_scanner(config)
+    except StrategyNotImplementedError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+
+    outcome = stages.normalize_stage(
+        csv_root=_csv_root(),
+        as_of=day,
+        dataset=_dataset(),
+        securities_dataset=_securities_dataset(),
+    )
+    factor_results = stages.factor_stage(
+        outcome=outcome, factor_configs=_factor_configs(), as_of=day
+    )
+    universe = stages.universe_stage(
+        outcome=outcome,
+        factor_results=factor_results,
+        config=load_universe_config(_universe_config_path()),
+        as_of=day,
+    )
+    results = stages.strategy_stage(
+        scanners=(RegisteredStrategy(config=config, plugin=scanner),),
+        universe=universe,
+        factor_results=factor_results,
+        as_of=day,
+    )
+
+    typer.echo(f"strategy {config.id} {config.version} ({as_of})")
+    for result in _ranked(results):
+        score = "no score" if result.score is None else f"score {result.score:.2f}"
+        rank = (
+            "-" if result.rank_percentile is None else f"{result.rank_percentile:.3f}"
+        )
+        verdict = "eligible" if result.eligible else "not eligible"
+        typer.echo(f"  {result.symbol} {score} rank_percentile {rank} ({verdict})")
+
+    typer.echo(f"universe: {len(universe.included)} symbols considered", err=True)
+    typer.echo(
+        f"quality: {outcome.quality_report.accepted}/"
+        f"{outcome.quality_report.checked} bars accepted",
+        err=True,
+    )
+
+
+def _strategy_config(strategy_id: str) -> StrategyConfig:
+    """Load one scanner's configuration, refusing an id nobody configured."""
+    for path in strategy_paths(_strategy_dir()):
+        config = load_strategy_config(path)
+        if config.id == strategy_id:
+            return config
+    configured = sorted(
+        load_strategy_config(path).id for path in strategy_paths(_strategy_dir())
+    )
+    raise StrategyNotImplementedError(
+        f"strategy {strategy_id!r} has no configuration under "
+        f"{_strategy_dir()}; configured scanners are {configured}"
+    )
+
+
+def _ranked(results: tuple[StrategyResult, ...]) -> tuple[StrategyResult, ...]:
+    """Order a scanner's results from best to worst, unscored ones last."""
+    return tuple(
+        sorted(results, key=lambda item: (item.score is None, -(item.score or 0.0)))
+    )
+
+
+@app.command()
+def stock(symbol: str, as_of: Annotated[str, AS_OF_OPTION]) -> None:
+    """Show everything the stored snapshots say about one symbol.
+
+    This is the Stock Profile in the terminal (`spec §12.4`): what the Universe
+    decided, which factors were measured, how each scanner scored it, what the
+    candidate says, and what the watchlist records. Nothing is recomputed —
+    every line comes from the snapshots a scan already wrote.
+    """
+    day = _as_of(as_of)
+    universes = _snapshot_records(SnapshotKind.UNIVERSE, day, UniverseSnapshot)
+    if not universes:
+        typer.echo(
+            f"no UNIVERSE snapshot for {as_of}; run "
+            f"`astock scan --as-of {as_of}` first",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    universe = universes[0]
+    typer.echo(f"{symbol} ({as_of})")
+    if symbol in universe.included:
+        typer.echo(f"  universe: included (snapshot {universe.snapshot_id})")
+    else:
+        rules = [
+            exclusion.rule.value
+            for exclusion in universe.exclusions
+            if exclusion.symbol == symbol
+        ]
+        named = ", ".join(rules) if rules else "no recorded rule"
+        typer.echo(f"  universe: excluded by {named}")
+
+    factors = [
+        item
+        for item in _snapshot_records(SnapshotKind.FACTOR, day, FactorResult)
+        if item.symbol == symbol
+    ]
+    typer.echo("  factors:" if factors else "  factors: none stored for this symbol")
+    for factor in factors:
+        value = _value_text(factor.raw_value, factor.status)
+        typer.echo(f"    {factor.factor} {factor.factor_version}: {value}")
+
+    strategies = [
+        item
+        for item in _snapshot_records(SnapshotKind.STRATEGY, day, StrategyResult)
+        if item.symbol == symbol
+    ]
+    typer.echo(
+        "  strategies:" if strategies else "  strategies: none scored this symbol"
+    )
+    for result in strategies:
+        score = "no score" if result.score is None else f"score {result.score:.2f}"
+        rank = (
+            "-"
+            if result.rank_percentile is None
+            else f"rank_percentile {result.rank_percentile:.3f}"
+        )
+        typer.echo(
+            f"    {result.strategy_id} {result.strategy_version}: "
+            f"{score} {rank} eligible={result.eligible}"
+        )
+        for reason in result.reasons:
+            typer.echo(f"      {reason}")
+
+    candidates = [
+        item
+        for item in _snapshot_records(SnapshotKind.CANDIDATE, day, Candidate)
+        if item.symbol == symbol
+    ]
+    if candidates:
+        candidate = candidates[0]
+        typer.echo(f"  candidate: {candidate.next_action}")
+        lineage = candidate.lineage
+    elif strategies:
+        typer.echo("  candidate: none (no scanner found it eligible)")
+        lineage = strategies[0].lineage
+    else:
+        lineage = universe.lineage
+    typer.echo(
+        f"  lineage: universe={lineage.universe_snapshot} "
+        f"factor={lineage.factor_version} strategy={lineage.strategy_version}"
+    )
+
+    entry = _watchlist_store().read(symbol)
+    if entry is not None:
+        _echo_entry(entry)
+
+
+@app.command()
+def watch(
+    symbol: Annotated[
+        str | None, typer.Argument(help="Symbol to track; omit to list the watchlist.")
+    ] = None,
+    thesis: Annotated[str | None, typer.Option("--thesis")] = None,
+    key_question: Annotated[list[str] | None, typer.Option("--key-question")] = None,
+    risk_condition: Annotated[
+        list[str] | None, typer.Option("--risk-condition")
+    ] = None,
+    waiting_for: Annotated[list[str] | None, typer.Option("--waiting-for")] = None,
+    state: Annotated[
+        str | None, typer.Option("--state", help="Move the entry to this state.")
+    ] = None,
+    note: Annotated[str | None, typer.Option("--note")] = None,
+) -> None:
+    """Track a symbol, or list what is already tracked.
+
+    A new entry starts at `DISCOVERED`. `--state` moves it along the path the
+    design confirms — `DISCOVERED → WATCH → DEEP_RESEARCH → TRACK_SIGNAL` — and
+    refuses anything else, including the states V1 must not reach.
+    """
+    store = _watchlist_store()
+    if symbol is None:
+        symbols = store.symbols()
+        if not symbols:
+            typer.echo("watchlist: empty")
+            return
+        for tracked in symbols:
+            entry = store.read(tracked)
+            if entry is not None:
+                typer.echo(
+                    f"{entry.symbol} {entry.state} updated {entry.updated_at.isoformat()}"
+                )
+        return
+
+    now = datetime.now(UTC)
+    entry = store.read(symbol)
+    if entry is None:
+        entry = open_entry(
+            symbol,
+            at=now,
+            thesis=thesis,
+            key_questions=key_question or (),
+            risk_conditions=risk_condition or (),
+            waiting_for=waiting_for or (),
+        )
+    else:
+        entry = _edited(entry, now, thesis, key_question, risk_condition, waiting_for)
+
+    if state is not None:
+        try:
+            entry = transition(entry, _watchlist_state(state), at=now, note=note)
+        except WatchlistTransitionError as error:
+            typer.echo(str(error), err=True)
+            raise typer.Exit(code=1) from error
+
+    store.write(entry)
+    typer.echo(f"{entry.symbol} {entry.state}")
+    _echo_entry(entry)
+
+
+def _watchlist_state(value: str) -> WatchlistState:
+    """Parse a state name, naming the vocabulary when it does not match."""
+    try:
+        return WatchlistState(value.upper())
+    except ValueError as error:
+        known = ", ".join(item.value for item in WatchlistState)
+        raise typer.BadParameter(
+            f"{value!r} is not a watchlist state; known states are {known}"
+        ) from error
+
+
+def _edited(
+    entry: WatchlistEntry,
+    now: datetime,
+    thesis: str | None,
+    key_question: list[str] | None,
+    risk_condition: list[str] | None,
+    waiting_for: list[str] | None,
+) -> WatchlistEntry:
+    """Apply the fields the caller actually supplied, and nothing else."""
+    updates: dict[str, object] = {}
+    if thesis is not None:
+        updates["thesis"] = thesis
+    if key_question:
+        updates["key_questions"] = tuple(key_question)
+    if risk_condition:
+        updates["risk_conditions"] = tuple(risk_condition)
+    if waiting_for:
+        updates["waiting_for"] = tuple(waiting_for)
+    if not updates:
+        return entry
+    return entry.model_copy(update=updates | {"updated_at": now})
+
+
+def _echo_entry(entry: WatchlistEntry) -> None:
+    """Print one watchlist entry with the reasoning that put it there."""
+    typer.echo(f"  watchlist: {entry.state} (since {entry.updated_at.isoformat()})")
+    if entry.thesis is not None:
+        typer.echo(f"    thesis: {entry.thesis}")
+    for question in entry.key_questions:
+        typer.echo(f"    key question: {question}")
+    for risk in entry.risk_conditions:
+        typer.echo(f"    risk: {risk}")
+    for waiting in entry.waiting_for:
+        typer.echo(f"    waiting for: {waiting}")
+    for event in entry.timeline:
+        origin = event.from_state.value if event.from_state else "new"
+        detail = f" ({event.note})" if event.note else ""
+        typer.echo(
+            f"    timeline: {event.at.isoformat()} {origin} -> {event.to_state}{detail}"
+        )
+
+
+@app.command()
+def daily(
+    as_of: Annotated[str, AS_OF_OPTION],
+    land: Annotated[
+        bool, typer.Option("--sync", help="Land raw data from the bulk provider first.")
+    ] = False,
+    allow_incomplete: Annotated[
+        bool,
+        typer.Option(
+            "--allow-incomplete",
+            help="Exit 0 even though some stages are blocked.",
+        ),
+    ] = False,
+) -> None:
+    """Run the daily pipeline stage by stage and report every verdict.
+
+    Six of the design's eleven stages can run today. The rest are reported as
+    `BLOCKED` with the decision they wait for, so an incomplete pipeline is
+    visible rather than implied by a short summary.
+    """
+    day = _as_of(as_of)
+    result = _run_daily(day, land=land)
+
+    for run in result.runs:
+        counts = ""
+        if run.rows_in is not None or run.rows_out is not None:
+            counts = f" rows {run.rows_in} -> {run.rows_out}"
+        typer.echo(f"{run.job_type} {run.status}{counts}")
+        if run.error is not None:
+            typer.echo(f"  {run.error}")
+        if run.note is not None:
+            typer.echo(f"  note: {run.note}")
+
+    typer.echo(f"candidates: {len(result.candidates)}")
+    if result.missing_snapshot_kinds:
+        missing = ", ".join(kind.value for kind in result.missing_snapshot_kinds)
+        typer.echo(f"missing snapshots: {missing}")
+    typer.echo(f"job manifest: {_job_store().path_for(day)}")
+
+    if not result.is_complete:
+        typer.echo(
+            "daily pipeline incomplete: "
+            f"{len(result.blocked_stages)} blocked, "
+            f"{len(result.failed_stages)} failed",
+            err=True,
+        )
+        if not allow_incomplete:
+            raise typer.Exit(code=1)
+
+
+def _run_daily(day: datetime, *, land: bool) -> DailyRunResult:
+    """Run the daily pipeline with the configured paths."""
+    scanners = load_scanners(_strategy_dir())
+    return run_daily(
+        csv_root=_csv_root(),
+        as_of=day,
+        universe_config=load_universe_config(_universe_config_path()),
+        factor_configs=_factor_configs(),
+        scanners=scanners,
+        strategy_directory=_strategy_dir(),
+        store=_store(),
+        job_store=_job_store(),
+        dataset=_dataset(),
+        securities_dataset=_securities_dataset(),
+        sync=_sync_stage(day) if land else None,
+    )
+
+
+def _sync_stage(day: datetime) -> Callable[[], StageOutcome]:
+    """Land raw data, and report the landing as a stage outcome."""
+
+    def stage() -> StageOutcome:
+        result = _land(day)
+        return StageOutcome(
+            rows_in=len(result.landings),
+            rows_out=sum(landing.rows_written for landing in result.landings),
+            note=", ".join(
+                f"{landing.dataset} {landing.status.value}"
+                for landing in result.landings
+            ),
+        )
+
+    return stage
+
+
+def _land(day: datetime) -> SyncResult:
+    """Land raw data from the bulk provider, failing loudly when unusable."""
+    provider = _bulk_provider()
+    health = provider.health()
+    if not health.healthy:
+        raise RuntimeError(
+            f"provider {health.provider} is not usable: {health.message}"
+        )
+    return land_raw(provider=provider, root=_csv_root(), as_of=day)
+
+
+@app.command()
+def sync(
+    as_of: Annotated[
+        str | None,
+        typer.Option(
+            "--as-of", help="Trade date, YYYY-MM-DD; defaults to today's close."
+        ),
+    ] = None,
+    symbol: Annotated[
+        list[str] | None,
+        typer.Option("--symbol", help="Limit the sync to these symbols."),
+    ] = None,
+) -> None:
+    """Land raw data for one date, skipping what is already there.
+
+    Symbols already carrying the target date are not fetched again, which is
+    the incremental rule `spec §15` requires. Without `--symbol`, the listing
+    decides which symbols to fetch, so the scan covers the market it claims to.
+    """
+    day = _as_of(as_of) if as_of is not None else _today_close()
+    provider = _bulk_provider()
+    health = provider.health()
+    if not health.healthy:
+        typer.echo(
+            f"provider {health.provider} is not usable: {health.message}", err=True
+        )
+        raise typer.Exit(code=1)
+
+    result = land_raw(
+        provider=provider,
+        root=_csv_root(),
+        as_of=day,
+        symbols=tuple(symbol) if symbol else None,
+    )
+    for landing in result.landings:
+        typer.echo(
+            f"{landing.dataset} {landing.status}: {landing.rows_written} rows "
+            f"written, {landing.rows_total} in {landing.path}"
+        )
+        if landing.symbols_skipped:
+            typer.echo(
+                f"  skipped {len(landing.symbols_skipped)} symbols already "
+                "landed for this date"
+            )
+        if landing.note is not None:
+            typer.echo(f"  {landing.note}")
+
+    if not result.is_complete:
+        typer.echo(f"sync incomplete: {', '.join(result.failed_datasets)}", err=True)
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def research(
+    symbol: Annotated[
+        str | None, typer.Argument(help="Symbol to research, or a job id below.")
+    ] = None,
+    status: Annotated[
+        str | None, typer.Option("--status", help="Poll this job instead.")
+    ] = None,
+    result: Annotated[
+        str | None, typer.Option("--result", help="Read this job's summary instead.")
+    ] = None,
+    thesis: Annotated[
+        str | None, typer.Option("--thesis", help="Override the watchlist thesis.")
+    ] = None,
+) -> None:
+    """Hand a research request to the deep research adapter.
+
+    The request is built from the watchlist entry's own reasoning, so the
+    other system receives the questions this one was tracking. No adapter is
+    configured by default: without `ASTOCK_DEEP_RESEARCH_CMD` there is nothing
+    to submit to, and nothing is invented in its place.
+    """
+    try:
+        adapter = resolve_adapter()
+    except DeepResearchNotConfigured as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+
+    try:
+        _research_action(
+            adapter, symbol=symbol, status=status, result=result, thesis=thesis
+        )
+    except (DeepResearchInvocationError, ValidationError) as error:
+        typer.echo(f"deep research adapter failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+
+
+def _research_action(
+    adapter: CliDeepResearchAdapter,
+    *,
+    symbol: str | None,
+    status: str | None,
+    result: str | None,
+    thesis: str | None,
+) -> None:
+    """Poll a job, read a summary, or submit a new request."""
+    if status is not None:
+        observed = adapter.status(status)
+        typer.echo(
+            f"{observed.job_id} {observed.state} "
+            f"(terminal: {observed.is_terminal}) observed "
+            f"{observed.observed_at.isoformat()}"
+        )
+        if observed.message is not None:
+            typer.echo(f"  {observed.message}")
+        return
+
+    if result is not None:
+        summary = adapter.result(result)
+        typer.echo(
+            f"{summary.job_id} {summary.symbol} completed "
+            f"{summary.completed_at.isoformat()}"
+        )
+        typer.echo(f"  summary: {summary.summary}")
+        typer.echo(f"  artifact: {summary.artifact_reference}")
+        return
+
+    if symbol is None:
+        typer.echo(
+            "research needs a symbol to submit, or --status/--result with a job id",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    entry = _watchlist_store().read(symbol)
+    job = adapter.submit(
+        ResearchRequest(
+            symbol=symbol,
+            as_of=datetime.now(UTC),
+            thesis=thesis if thesis is not None else (entry.thesis if entry else None),
+            key_questions=entry.key_questions if entry else (),
+            risk_conditions=entry.risk_conditions if entry else (),
+            waiting_for=entry.waiting_for if entry else (),
+        )
+    )
+    typer.echo(
+        f"{job.job_id} submitted for {job.symbol} at {job.submitted_at.isoformat()}"
+    )
