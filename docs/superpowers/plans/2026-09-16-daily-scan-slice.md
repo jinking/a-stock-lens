@@ -78,6 +78,7 @@ Named so their absence is a decision, not an omission: Market Regime, Strategy R
 - Modify: `configs/universe.yaml`
 - Create: `tests/fixtures/csv/securities.csv`
 - Create: `tests/unit/test_universe_config.py`
+- Create: `tests/unit/test_csv_security_normalizer.py`
 - Create: `tests/unit/test_universe_builder.py`
 
 **Interfaces:**
@@ -89,13 +90,14 @@ Named so their absence is a decision, not an omission: Market Regime, Strategy R
   - `UniverseExclusion(symbol, rule, detail)`
   - `DeferredRule(rule, reason)`
   - `UniverseSnapshot(as_of, snapshot_id, config_digest, included, exclusions, deferred_rules, lineage)`
-  - `UniverseBuilder(config).build(profiles, as_of, *, bars, liquidity) -> UniverseSnapshot`
-  - `CsvSecurityNormalizer().normalize_into(dataset, as_of) -> NormalizedDataset`
+  - `UniverseBuilder(config).build(profiles, *, as_of, bars, liquidity) -> UniverseSnapshot`
+  - `CsvSecurityNormalizer().normalize(dataset, *, as_of) -> NormalizedDataset`
 
 **Error model (stated, not implied):**
 
-- A universe configuration that enables a rule whose threshold is `null` raises at load time. Deferral is expressed by `exclude_*: true` + `*_days: null`, and the builder reports it as deferred; a *missing* key is a configuration error, not a default.
-- `liquidity` is a mapping of symbol to that symbol's `avg_amount_20d` result. A symbol absent from the mapping, or carrying a non-`VALUE` status, is excluded with rule `NO_LIQUIDITY_MEASURE` only when `require_valid_market_data` is set; otherwise it is included and the gap is reported in `exclusions` as a warning-level note. The builder never substitutes `0`.
+- A *required* key that is absent is a configuration error, and `extra="forbid"` makes a mistyped key an error too — a misspelled threshold must not leave the previous value silently in force. The liquidity floor and the minimum listing age are required, so neither has a code default.
+- Deferral is expressed by `exclude_long_suspension: true` together with `long_suspension_days: null`. The configuration still loads, the builder excludes nobody on that rule, and `UniverseSnapshot.deferred_rules` records why. A rule that cannot be evaluated is reported; it is never dropped and never guessed.
+- `liquidity` is a mapping of symbol to that symbol's `avg_amount_20d` result. A symbol with no `VALUE` result is excluded with rule `NO_LIQUIDITY_MEASURE` when `require_valid_market_data` is set, and included otherwise. A measured value below the floor is excluded with `LOW_LIQUIDITY` regardless of that switch, because that is a product rule rather than a data-availability rule. The builder never substitutes `0`.
 
 **Steps:**
 
