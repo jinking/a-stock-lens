@@ -19,8 +19,10 @@ from astock_lens.factors.contracts import (
     FactorResult,
 )
 from astock_lens.factors.fundamental import (
+    METRIC_DEFINITIONS,
     RATIO_DEFINITIONS,
     FundamentalRatioFactor,
+    MetricPassthroughFactor,
 )
 
 AVERAGE_AMOUNT_FACTOR_NAME = "avg_amount_20d"
@@ -231,6 +233,8 @@ def build_factor(factor_config: FactorConfig) -> Factor:
         return ProximityToHighFactor(factor_config)
     if factor_config.name in RATIO_DEFINITIONS:
         return FundamentalRatioFactor(factor_config)
+    if factor_config.name in METRIC_DEFINITIONS:
+        return MetricPassthroughFactor(factor_config)
     raise ValueError(
         f"no factor implementation is registered for {factor_config.name!r}"
     )

@@ -1,0 +1,16 @@
+# roe_ttm — 净资产收益率 TTM（%）
+#
+# 源站已经给出这个比率，这里只做"取到、标明时点、如实报告状态"，不重算也不套阈值。
+# 单位：%。
+name: roe_ttm
+domain: QUALITY
+description: Trailing-twelve-month return on equity, in percent.
+inputs:
+  - roe_ttm
+frequency: QUARTERLY
+direction: HIGHER_MEANS_MORE_CAPITAL_EFFICIENT
+null_policy: NULL_UNLESS_THE_METRIC_HAS_A_PUBLISHED_VALUE
+version: v1
+params:
+  # Deferred：没有已评审的新鲜度要求，因此不触发 STALE。
+  stale_after_days: null

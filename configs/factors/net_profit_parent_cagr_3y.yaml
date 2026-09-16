@@ -1,0 +1,16 @@
+# net_profit_parent_cagr_3y — 归母净利润三年复合增速（%）
+#
+# 源站已经给出这个比率，这里只做"取到、标明时点、如实报告状态"，不重算也不套阈值。
+# 单位：%。
+name: net_profit_parent_cagr_3y
+domain: GROWTH
+description: Three-year compound parent net profit growth, in percent.
+inputs:
+  - net_profit_parent_cagr_3y
+frequency: QUARTERLY
+direction: HIGHER_MEANS_MORE_PERSISTENT_PROFIT_GROWTH
+null_policy: NULL_UNLESS_THE_METRIC_HAS_A_PUBLISHED_VALUE
+version: v1
+params:
+  # Deferred：没有已评审的新鲜度要求，因此不触发 STALE。
+  stale_after_days: null

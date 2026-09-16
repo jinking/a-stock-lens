@@ -45,6 +45,21 @@ class RatioSpec:
     denominator: str
 
 
+@dataclass(frozen=True)
+class MetricSpec:
+    """One factor that surfaces a single canonical metric.
+
+    The source already computes these figures (growth rates, margins,
+    leverage) and the factor engine's contract is `FactorResult`, so a metric a
+    strategy needs has to exist as a factor to reach it. Nothing is recomputed
+    and no threshold is applied: the factor reports the metric, at the point in
+    time it was published.
+    """
+
+    metric: str
+    unit: str
+
+
 # Code owns which metrics a factor combines; YAML owns its metadata and any
 # threshold. That split is the deliberate choice `ARCHITECTURE.md` §8.3 makes —
 # "algorithms are code, weights and thresholds are configuration" — and it is
@@ -78,6 +93,24 @@ RATIO_DEFINITIONS: Mapping[str, RatioSpec] = {
     ),
 }
 
+# Factors that surface one metric each, for the strategy dimensions the ratio
+# factors above do not cover.
+METRIC_DEFINITIONS: Mapping[str, MetricSpec] = {
+    # Growth: how fast the business is actually expanding.
+    "revenue_yoy": MetricSpec("revenue_yoy", "%"),
+    "net_profit_parent_yoy": MetricSpec("net_profit_parent_yoy", "%"),
+    "revenue_cagr_3y": MetricSpec("revenue_cagr_3y", "%"),
+    "net_profit_parent_cagr_3y": MetricSpec("net_profit_parent_cagr_3y", "%"),
+    # Quality: durable profitability and the balance sheet behind it.
+    "roe_ttm": MetricSpec("roe_ttm", "%"),
+    "gross_margin": MetricSpec("gross_margin", "%"),
+    "debt_to_asset": MetricSpec("debt_to_asset", "%"),
+}
+
+# A ratio of two comparable quantities is dimensionless; the unit is recorded
+# so a reader of a snapshot never has to guess.
+RATIO_UNIT = "x"
+
 # The freshness key a configuration must declare, even when it declares `null`.
 STALE_AFTER_DAYS = "stale_after_days"
 
@@ -107,7 +140,9 @@ class FundamentalRatioFactor:
             numerator, denominator, self._stale_after_days, context
         )
         if reason is not None:
-            return _result(context, self.metadata, status=reason, inputs=inputs)
+            return _result(
+                context, self.metadata, status=reason, inputs=inputs, unit=RATIO_UNIT
+            )
 
         dividend = _value_of(numerator)
         divisor = _value_of(denominator)
@@ -115,7 +150,11 @@ class FundamentalRatioFactor:
             # A zero divisor is a real value, not a missing one; the ratio
             # simply does not exist, and saying so is the honest answer.
             return _result(
-                context, self.metadata, status=DataStatus.INVALID, inputs=inputs
+                context,
+                self.metadata,
+                status=DataStatus.INVALID,
+                inputs=inputs,
+                unit=RATIO_UNIT,
             )
 
         return _result(
@@ -123,7 +162,47 @@ class FundamentalRatioFactor:
             self.metadata,
             status=DataStatus.VALUE,
             inputs=inputs,
+            unit=RATIO_UNIT,
             value=dividend / divisor,
+        )
+
+
+class MetricPassthroughFactor:
+    """A factor that reports one canonical metric, at its point in time."""
+
+    def __init__(self, factor_config: FactorConfig) -> None:
+        spec = METRIC_DEFINITIONS.get(factor_config.name)
+        if spec is None:
+            raise ValueError(
+                f"{factor_config.name!r} is not a passthrough metric factor; "
+                f"implemented metrics are {sorted(METRIC_DEFINITIONS)}"
+            )
+        self._spec = spec
+        self._stale_after_days = _configured_staleness(factor_config)
+        _require_declared_metric(factor_config, spec)
+        self.metadata = _metadata(factor_config)
+
+    def compute(self, context: FactorContext) -> FactorResult:
+        """Report the newest value of the metric that `as_of` could have seen."""
+        item = _latest(context, self._spec.metric)
+        inputs = (item.ref,)
+        reason = _single_status(item, self._stale_after_days, context)
+        if reason is not None:
+            return _result(
+                context,
+                self.metadata,
+                status=reason,
+                inputs=inputs,
+                unit=self._spec.unit,
+            )
+
+        return _result(
+            context,
+            self.metadata,
+            status=DataStatus.VALUE,
+            inputs=inputs,
+            unit=self._spec.unit,
+            value=_value_of(item),
         )
 
 
@@ -199,6 +278,13 @@ def _blocking_status(
     return None
 
 
+def _single_status(
+    item: _Input, stale_after_days: int | None, context: FactorContext
+) -> DataStatus | None:
+    """The same precedence, for a factor that needs only one metric."""
+    return _blocking_status(item, item, stale_after_days, context)
+
+
 def _value_of(item: _Input) -> float:
     """Read an input's value, which `_blocking_status` has already vetted."""
     assert item.observation is not None
@@ -241,6 +327,16 @@ def _require_declared_inputs(factor_config: FactorConfig, spec: RatioSpec) -> No
         )
 
 
+def _require_declared_metric(factor_config: FactorConfig, spec: MetricSpec) -> None:
+    """Keep the configuration and the algorithm from drifting apart."""
+    declared = set(factor_config.inputs)
+    if declared != {spec.metric}:
+        raise ValueError(
+            f"factor configuration for {factor_config.name!r} must declare "
+            f"inputs [{spec.metric!r}], got {sorted(declared)}"
+        )
+
+
 def _metadata(factor_config: FactorConfig) -> FactorMetadata:
     """Copy declared metadata; the factor invents none of it."""
     return FactorMetadata(
@@ -262,6 +358,7 @@ def _result(
     status: DataStatus,
     inputs: Sequence[FactorInputRef],
     value: float | None = None,
+    unit: str | None = None,
 ) -> FactorResult:
     """Build a result; a status that is not `VALUE` carries no number."""
     return FactorResult(
@@ -273,4 +370,5 @@ def _result(
         lineage=SnapshotLineage(factor_version=metadata.version),
         raw_value=value if status is DataStatus.VALUE else None,
         inputs=tuple(inputs),
+        unit=unit,
     )

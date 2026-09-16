@@ -56,6 +56,7 @@ class FactorResult(DomainRecord):
     lineage: SnapshotLineage
     raw_value: float | None = None
     inputs: tuple["FactorInputRef", ...] = ()
+    unit: str | None = None
 
 
 class FactorInputRef(DomainRecord):
