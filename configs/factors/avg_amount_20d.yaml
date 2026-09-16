@@ -1,0 +1,22 @@
+# avg_amount_20d — trailing average of daily turnover amount.
+#
+# The 20-day window is not invented here. docs/ARCHITECTURE.md §6 and the
+# design spec §6 both name a "20-day average turnover amount" as the Universe's
+# liquidity measure; this factor computes exactly that quantity. The *threshold*
+# it will eventually be compared against stays deferred — configs/universe.yaml
+# keeps min_average_turnover_20d: null.
+#
+# `direction` and `null_policy` are free-form because the design enumerates
+# neither vocabulary. They are declared here, in configuration, so a reviewer
+# can change the wording without touching code.
+name: avg_amount_20d
+domain: MARKET_MOMENTUM
+description: Trailing average of daily turnover amount over a fixed window.
+inputs:
+  - amount
+frequency: DAILY
+direction: HIGHER_MEANS_MORE_LIQUID
+null_policy: NULL_UNLESS_THE_WHOLE_WINDOW_IS_PRESENT
+version: v1
+params:
+  window: 20
