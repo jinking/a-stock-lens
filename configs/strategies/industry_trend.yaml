@@ -1,0 +1,15 @@
+id: industry_trend
+enabled: true
+version: v1
+description: Structural industry trend, market confirmation, and stock mapping.
+dimensions:
+  - industry revenue and profit
+  - demand
+  - prices
+  - inventory
+  - policy
+  - capital expenditure
+  - industry-index trend
+  - turnover
+  - breadth
+  - leading-stock relative strength

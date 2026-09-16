@@ -1,0 +1,10 @@
+id: garp
+enabled: true
+version: v1
+description: Growth quality versus valuation, reusing Growth output.
+dimensions:
+  - PE to growth
+  - PEG
+  - historical valuation percentile
+  - ROE and FCF
+  - growth stability

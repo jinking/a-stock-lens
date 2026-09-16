@@ -1,0 +1,11 @@
+exchanges:
+  - SSE
+  - SZSE
+  - BSE
+exclude_st: true
+exclude_delisting_board: true
+exclude_long_suspension: true
+min_listing_days: 120
+# The exact V1 minimum 20-day average turnover amount is deferred.
+min_average_turnover_20d: null
+require_valid_market_data: true

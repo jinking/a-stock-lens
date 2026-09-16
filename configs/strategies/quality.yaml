@@ -1,0 +1,11 @@
+id: quality
+enabled: true
+version: v1
+description: Durable profitability, capital efficiency, cash flow, and balance-sheet quality.
+dimensions:
+  - ROE and ROIC
+  - gross margin and net margin
+  - OCF and FCF
+  - debt
+  - earnings stability
+  - cash-flow quality

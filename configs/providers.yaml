@@ -1,0 +1,7 @@
+bulk_sources:
+  - akshare
+  - exchange_public_datasets
+  - free_fallback_providers
+deep_research:
+  integration: a-share-deep-research
+  mode: adapter
