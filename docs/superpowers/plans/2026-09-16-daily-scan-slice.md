@@ -333,9 +333,13 @@ the one missing it).
 
 **Steps:**
 
-- [ ] Write the validator and its tests first, driving it with deliberately corrupted records — the validator must be seen failing before it is trusted passing.
-- [ ] Run it against the real snapshots produced by Task 6.
-- [ ] Run the full gate; commit: `test(artifacts): add independent snapshot validator`.
+- [x] Write the validator and its tests first, driving it with deliberately corrupted records — the validator must be seen failing before it is trusted passing.
+- [x] Run it against the real snapshots produced by Task 6 (`test_real_snapshots_from_a_daily_scan_validate_cleanly` — zero findings across UNIVERSE/FACTOR/STRATEGY/CANDIDATE).
+- [x] Run the full gate; commit: `test(artifacts): add independent snapshot validator`.
+
+**Note.** The validator imports nothing from `astock_lens` (pure standard
+library), and works on the dict records `SnapshotStore.read` returns — the
+same shape an external auditor would read off disk.
 
 ---
 
