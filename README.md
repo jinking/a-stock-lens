@@ -43,27 +43,30 @@ V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学�
 
 ## 当前状态
 
-项目处于**第一条垂直切片已贯通**：`CSV → Raw → Normalized → Quality Gate → Factor → Scanner → Candidate → 快照` 可以端到端跑通，且不需要网络、不需要可选依赖。
+项目处于**每日扫描切片已贯通**：`CSV → Raw → Normalized → Quality Gate → Universe → Factor → Strategy（横截面评分排名）→ Candidate → 四类快照` 可以端到端跑通，且不需要网络、不需要可选依赖。
 
 | 已具备 | 尚未实现 |
 | --- | --- |
-| 设计三件套（spec / PRODUCT / ARCHITECTURE） | Universe 引擎与 `UniverseSnapshot` |
-| 类型化配置加载；因子与策略参数写在 YAML | 策略评分与排名（权重待评审） |
-| 领域枚举、时间模型、扩展契约 Protocol | Market Regime、Market Validation、Signal |
-| 本地 CSV Provider、Normalizer、Data Quality Gate | `next_action` 的路由规则（当前恒为 `IGNORE`） |
-| `avg_amount_20d` 因子与 Factor Registry | DuckDB / Parquet 持久化（当前是 JSON 快照） |
-| Momentum Scanner（资格判定 + 因子级解释） | AkShare Provider 与真实抓取 |
-| Candidate Builder 与 JSON 快照存储 | Watchlist 状态机、深研 Adapter 实现、React 前端 |
-| CLI `doctor` / `scan` / `factors compute`；API `/health` `/factors` `/candidates` | |
+| 设计三件套（spec / PRODUCT / ARCHITECTURE） | Market Regime、Market Validation、Signal |
+| 类型化配置加载；阈值/因子/权重全部写在 YAML | Watchlist 状态机、深研 Adapter 实现、React 前端 |
+| 领域枚举、时间模型、扩展契约 Protocol | `confidence` 算法（设计未定义，保持 `null`） |
+| 本地 CSV Provider、Normalizer、Data Quality Gate | 权重正式评审（当前是等权草案 `PENDING REVIEW`） |
+| Universe 引擎与不可变 `UniverseSnapshot`（含 deferred rule 上报） | 停牌天数数据源（设置 `long_suspension_days` 阈值的前置依赖） |
+| 动量因子（`ret_20d` / `ret_60d` / `proximity_52w_high`）+ 流动性因子 | Parquet 行情存储 |
+| 横截面评分与排名（percentile 加权混合）、`next_action` 路由（D5：仅按排序） | |
+| `DuckDBSnapshotStore` 与 JSON store 同协议互换（`ASTOCK_SNAPSHOT_BACKEND=duckdb`） | |
+| AkShare Provider（腾讯域日线 + 三交易所名单）+ 真实录制契约 fixture | |
+| CLI `doctor` / `universe build` / `scan` / `factors compute`；API `/health` `/universe` `/factors` `/candidates` | |
 
 包结构已按 `docs/ARCHITECTURE.md` 建立，`src/astock_lens/` 下的 `backtest`、`portfolio`、`events` 等目录只是预留边界，没有 V1 实现。
 
-### 本条切片刻意留空的部分
+### 本切片刻意留空的部分
 
-- **不做策略评分。** `docs/ARCHITECTURE.md` §8.3 要求权重写进 YAML，而权重尚未评审，所以 `score`、`rank_percentile`、`confidence` 保持 `null`，而不是填一个看起来合理的数。
-- **`next_action` 恒为 `IGNORE`。** 设计文档枚举了允许的动作，但没有定义选择规则。在规则评审通过前，`IGNORE`（无动作）是唯一不会误导人的取值。
-- **快照是 JSON，不是 DuckDB。** DuckDB 属可选依赖 `data` extra；接口先行为准——`SnapshotStore` 协议已定，DuckDB 实现后续按同一协议替换。
-- **窗口不完整即 `NULL`。** 20 日窗口内少一天，输出 `NULL`，而不是用更短的窗口凑一个均值——那等于悄悄回答了另一个问题。
+- **权重仍是等权草案。** `configs/strategies/momentum.yaml` 的 `weights:` 已生效（三条动量因子各 1.0），但标注 `PENDING REVIEW`——正式评审前它只是占位，不是结论。
+- **`confidence` 恒为 `null`。** 设计要求该字段但未定义算法；资格判定已要求全部因子在场，"因子齐备比例"会恒等于 1.0，那是一个看起来有用实则无信息的数。
+- **停牌天数诚实缺失。** 交易所名单不提供停牌天数，`suspended_trading_days` 允许 `None`（缺失 ≠ 0）。给 `long_suspension_days` 设阈值前，必须先有提供停牌天数的数据源。
+- **快照后端可选。** 默认 JSON（零依赖），`ASTOCK_SNAPSHOT_BACKEND=duckdb` 切到 DuckDB，两者同协议。
+- **窗口不完整即 `NULL`。** 60 日窗口内少一天，`ret_60d` 输出 `NULL`，不用更短的窗口凑数。
 
 ## 环境要求与安装
 
@@ -85,20 +88,27 @@ uv run astock doctor
 
 `doctor` 只读本地文件：检查 Python 版本、加载 `configs/app.yaml`、报告配置中的存储路径是否存在。它不会抓取行情、不会连接外部数据源、也不会创建 DuckDB 文件。
 
-### 跑一遍第一条垂直切片
+### 跑一遍每日扫描
 
 数据源指向本地 CSV 目录（默认 `data/raw`），快照写入目录（默认 `data/snapshots`），两者都可用环境变量覆盖：
 
 ```bash
 export ASTOCK_CSV_ROOT=tests/fixtures/csv
 export ASTOCK_SNAPSHOT_ROOT=tests/.tmp/demo
+export ASTOCK_DATASET=daily_bars_long            # 长 fixture：300 个交易日
 
-uv run astock factors compute --as-of 2026-09-04   # 每个因子一行 JSON，走 stdout
-uv run astock scan --as-of 2026-09-04              # 候选数、next_action、快照路径
+uv run astock universe build --as-of 2026-09-04  # 每条规则的判定结果 + UNIVERSE 快照
+uv run astock scan --as-of 2026-09-04            # 排名、评分、next_action、四类快照
+uv run astock factors compute --as-of 2026-09-04 # 每个因子一行 JSON，走 stdout
 
 uv run uvicorn --factory astock_lens.api.app:create_app
+curl "http://127.0.0.1:8000/universe?as_of=2026-09-04"
 curl "http://127.0.0.1:8000/candidates?as_of=2026-09-04"
 ```
+
+`--as-of` 接受交易日 `YYYY-MM-DD`，按当日 A 股收盘（15:00 +08:00）解析。
+
+接真实数据时把 `ASTOCK_CSV_ROOT` 换成 AkShare 抓取落地目录，或等 `providers` 链路直接接 `AkShareProvider`（已实现，fixture 录制脚本见 `scripts/record_akshare_fixture.py`）。
 
 `--as-of` 接受交易日 `YYYY-MM-DD`，按当日 A 股收盘（15:00 +08:00）解析。`factors compute` 的 JSON 走 stdout、运行说明走 stderr，因此可以直接管道给别的工具。
 
@@ -115,12 +125,10 @@ uv run mypy
 
 ## 下一步
 
-按设计文档 §22 的验收链继续往前推进，下一片包含：
-
-1. **Universe 引擎**与不可变 `UniverseSnapshot`。注意 `configs/universe.yaml` 里的 `min_average_turnover_20d` 目前是 `null`——阈值需要先定下来。
-2. **策略评分、排名与 `next_action` 路由规则**。三者都需要先评审权重，评审结果写进 `configs/strategies/*.yaml`。
-3. **DuckDB / Parquet 存储**替换 JSON 快照，按已有的 `SnapshotStore` 协议实现。
-4. **AkShare Provider**，把离线链路换成真实全市场数据。
+1. **独立 Artifact Validator**（`tests/artifacts/`）：不经过生产代码，直接校验真实扫描产物的键、取值范围、版本与时间戳。
+2. **AkShare 全市场落地**：`securities` 名单（5564 只）与全市场日线的批量抓取与限流。
+3. **权重正式评审**：把等权草案换成评审后的权重。
+4. **Market Regime / Signal / Watchlist**：按设计文档顺序继续。
 
 每条切片的计划都放在 `docs/superpowers/plans/`，设计权威仍是 `docs/superpowers/specs/2026-09-16-a-stock-lens-design.md`。
 

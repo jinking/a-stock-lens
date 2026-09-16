@@ -20,6 +20,7 @@ import pytest
 pytest.importorskip("duckdb")
 
 from astock_lens.data.snapshots.duckdb_store import DuckDBSnapshotStore
+from astock_lens.data.snapshots.resolve import resolve_snapshot_store
 from astock_lens.data.snapshots.store import JsonSnapshotStore, SnapshotStore
 from astock_lens.domain.enums import SnapshotKind
 from astock_lens.domain.models import DailyBar
@@ -199,3 +200,33 @@ def test_satisfies_the_snapshot_store_protocol(local_tmp: Path) -> None:
     store: SnapshotStore = _duck(local_tmp)
 
     assert isinstance(store, DuckDBSnapshotStore)
+
+
+def test_the_backend_resolver_defaults_to_json(local_tmp: Path) -> None:
+    """No configuration means the JSON store: the default env must stay
+    dependency-free."""
+    store = resolve_snapshot_store(local_tmp)
+
+    assert isinstance(store, JsonSnapshotStore)
+
+
+def test_the_backend_resolver_selects_duckdb_by_configuration(
+    local_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ASTOCK_SNAPSHOT_BACKEND", "duckdb")
+
+    store = resolve_snapshot_store(local_tmp)
+
+    assert isinstance(store, DuckDBSnapshotStore)
+    # Writes and reads go to the same file the resolver chose.
+    store.write(SnapshotKind.FACTOR, AS_OF, (_bar(),))
+    assert resolve_snapshot_store(local_tmp).read(SnapshotKind.FACTOR, AS_OF)
+
+
+def test_the_backend_resolver_rejects_an_unknown_backend(
+    local_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ASTOCK_SNAPSHOT_BACKEND", "sqlite")
+
+    with pytest.raises(ValueError, match="backend"):
+        resolve_snapshot_store(local_tmp)

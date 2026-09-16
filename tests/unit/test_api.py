@@ -17,6 +17,11 @@ from astock_lens.data.snapshots.store import JsonSnapshotStore
 from astock_lens.domain.enums import DataStatus, NextAction, SnapshotKind
 from astock_lens.domain.models import SnapshotLineage
 from astock_lens.factors.contracts import FactorResult
+from astock_lens.universe.models import (
+    UniverseExclusion,
+    UniverseRule,
+    UniverseSnapshot,
+)
 
 AS_OF = datetime(2026, 9, 4, 15, 0, tzinfo=UTC)
 DAY = "2026-09-04"
@@ -110,6 +115,41 @@ def test_candidate_route_404s_when_nothing_was_scanned(local_tmp: Path) -> None:
     response = client.get("/candidates", params={"as_of": DAY})
 
     assert response.status_code == 404
+
+
+def test_universe_route_reads_the_stored_snapshot(local_tmp: Path) -> None:
+    universe = UniverseSnapshot(
+        as_of=AS_OF,
+        snapshot_id="2026-09-04:abc123",
+        config_digest="abc123",
+        lineage=SnapshotLineage(universe_snapshot="2026-09-04:abc123"),
+        included=("600000.SH",),
+        exclusions=(
+            UniverseExclusion(
+                symbol="000002.SZ", rule=UniverseRule.ST, detail="flagged"
+            ),
+        ),
+        deferred_rules=(),
+    )
+    JsonSnapshotStore(local_tmp).write(SnapshotKind.UNIVERSE, AS_OF, [universe])
+    client = TestClient(create_app(snapshot_root=local_tmp))
+
+    response = client.get("/universe", params={"as_of": DAY})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["as_of"] == DAY
+    assert payload["snapshot"]["included"] == ["600000.SH"]
+    assert payload["snapshot"]["exclusions"][0]["rule"] == "ST"
+
+
+def test_universe_route_404s_when_no_universe_was_built(local_tmp: Path) -> None:
+    client = TestClient(create_app(snapshot_root=local_tmp))
+
+    response = client.get("/universe", params={"as_of": DAY})
+
+    assert response.status_code == 404
+    assert DAY in response.json()["detail"]
 
 
 def test_api_never_imports_the_computation_engines() -> None:

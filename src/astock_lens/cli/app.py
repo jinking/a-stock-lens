@@ -9,6 +9,7 @@ import json
 import os
 import platform
 import sys
+from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
@@ -17,22 +18,34 @@ from zoneinfo import ZoneInfo
 import typer
 from pydantic import ValidationError
 
-from astock_lens.data.snapshots.store import JsonSnapshotStore
+from astock_lens.data.snapshots.resolve import resolve_snapshot_store
+from astock_lens.data.snapshots.store import SnapshotStore
 from astock_lens.factors.config import FactorConfig, load_factor_config
+from astock_lens.pipelines.daily_scan import (
+    DailyScanResult,
+    UniverseBuildResult,
+    build_universe,
+    run_daily_scan,
+)
 from astock_lens.pipelines.first_slice import FirstSliceResult, run_first_slice
 from astock_lens.settings import load_app_config
 from astock_lens.strategies.config import load_strategy_config
+from astock_lens.universe.config import load_universe_config
 
 MINIMUM_PYTHON = (3, 12)
 
 CSV_ROOT_ENV = "ASTOCK_CSV_ROOT"
 SNAPSHOT_ROOT_ENV = "ASTOCK_SNAPSHOT_ROOT"
 DATASET_ENV = "ASTOCK_DATASET"
+SECURITIES_DATASET_ENV = "ASTOCK_SECURITIES_DATASET"
 FACTOR_CONFIG_DIR_ENV = "ASTOCK_FACTOR_CONFIG_DIR"
+UNIVERSE_CONFIG_ENV = "ASTOCK_UNIVERSE_CONFIG"
 DEFAULT_CSV_ROOT = Path("data/raw")
 DEFAULT_SNAPSHOT_ROOT = Path("data/snapshots")
 DEFAULT_DATASET = "daily_bars"
+DEFAULT_SECURITIES_DATASET = "securities"
 DEFAULT_FACTOR_CONFIG_DIR = Path("configs/factors")
+DEFAULT_UNIVERSE_CONFIG = Path("configs/universe.yaml")
 
 STRATEGY_CONFIG_PATH = Path("configs/strategies/momentum.yaml")
 
@@ -52,6 +65,11 @@ factors_app = typer.Typer(
     help="Factor engine commands.",
 )
 app.add_typer(factors_app, name="factors")
+universe_app = typer.Typer(
+    no_args_is_help=True,
+    help="Universe engine commands.",
+)
+app.add_typer(universe_app, name="universe")
 
 
 @app.callback()
@@ -97,15 +115,62 @@ def _factor_configs() -> tuple[FactorConfig, ...]:
 def _run_slice(as_of_value: str) -> FirstSliceResult:
     """Run the first slice using the configured paths."""
     return run_first_slice(
-        csv_root=Path(os.getenv(CSV_ROOT_ENV, str(DEFAULT_CSV_ROOT))),
+        csv_root=_csv_root(),
         as_of=_as_of(as_of_value),
         factor_configs=_factor_configs(),
         strategy_config=load_strategy_config(STRATEGY_CONFIG_PATH),
-        store=JsonSnapshotStore(
-            Path(os.getenv(SNAPSHOT_ROOT_ENV, str(DEFAULT_SNAPSHOT_ROOT)))
-        ),
-        dataset=os.getenv(DATASET_ENV, DEFAULT_DATASET),
+        store=_store(),
+        dataset=_dataset(),
     )
+
+
+def _csv_root() -> Path:
+    return Path(os.getenv(CSV_ROOT_ENV, str(DEFAULT_CSV_ROOT)))
+
+
+def _dataset() -> str:
+    return os.getenv(DATASET_ENV, DEFAULT_DATASET)
+
+
+def _securities_dataset() -> str:
+    return os.getenv(SECURITIES_DATASET_ENV, DEFAULT_SECURITIES_DATASET)
+
+
+def _store() -> SnapshotStore:
+    return resolve_snapshot_store(
+        Path(os.getenv(SNAPSHOT_ROOT_ENV, str(DEFAULT_SNAPSHOT_ROOT)))
+    )
+
+
+def _run_universe(as_of_value: str) -> UniverseBuildResult:
+    """Run the Universe stage using the configured paths."""
+    return build_universe(
+        csv_root=_csv_root(),
+        as_of=_as_of(as_of_value),
+        universe_config=load_universe_config(_universe_config_path()),
+        factor_configs=_factor_configs(),
+        store=_store(),
+        dataset=_dataset(),
+        securities_dataset=_securities_dataset(),
+    )
+
+
+def _run_daily_scan(as_of_value: str) -> DailyScanResult:
+    """Run the daily scan using the configured paths."""
+    return run_daily_scan(
+        csv_root=_csv_root(),
+        as_of=_as_of(as_of_value),
+        universe_config=load_universe_config(_universe_config_path()),
+        factor_configs=_factor_configs(),
+        strategy_config=load_strategy_config(STRATEGY_CONFIG_PATH),
+        store=_store(),
+        dataset=_dataset(),
+        securities_dataset=_securities_dataset(),
+    )
+
+
+def _universe_config_path() -> Path:
+    return Path(os.getenv(UNIVERSE_CONFIG_ENV, str(DEFAULT_UNIVERSE_CONFIG)))
 
 
 @app.command()
@@ -200,19 +265,38 @@ def factors_compute(as_of: Annotated[str, AS_OF_OPTION]) -> None:
     typer.echo(f"snapshot: {result.factor_snapshot_path}", err=True)
 
 
+@universe_app.command("build")
+def universe_build(as_of: Annotated[str, AS_OF_OPTION]) -> None:
+    """Apply the Universe rules and write the UNIVERSE snapshot.
+
+    Every verdict is printed: a symbol missing from the universe must always
+    be answerable with the rule that removed it, and a deferred rule is
+    reported as deferred rather than silently skipped.
+    """
+    result = _run_universe(as_of)
+    universe = result.universe
+
+    typer.echo(f"included: {len(universe.included)}")
+    typer.echo(f"excluded: {len(universe.exclusions)}")
+    by_rule = Counter(exclusion.rule.value for exclusion in universe.exclusions)
+    for rule, count in sorted(by_rule.items()):
+        typer.echo(f"  {rule}: {count}")
+    for deferred in universe.deferred_rules:
+        typer.echo(f"deferred: {deferred.rule.value} ({deferred.reason})")
+    report = result.quality_report
+    typer.echo(f"quality: {report.accepted}/{report.checked} bars accepted", err=True)
+    typer.echo(f"snapshot: {result.universe_snapshot_path}")
+
+
 @app.command()
 def scan(as_of: Annotated[str, AS_OF_OPTION]) -> None:
-    """Run the first slice and report the candidates it produced.
+    """Run the daily scan and report the ranked candidates it produced.
 
     A candidate is a research object, not a recommendation. `next_action`
     follows from the score by ordering alone: an eligible symbol carrying a
     measured score is worth watching, and nothing else is.
-
-    This command reports no score, because the first slice evaluates one symbol
-    at a time and a percentile needs a population. Cross-sectional ranking
-    belongs to the daily scan.
     """
-    result = _run_slice(as_of)
+    result = _run_daily_scan(as_of)
     by_symbol = {item.symbol: item for item in result.strategy_results}
 
     typer.echo(f"candidates: {len(result.candidates)}")

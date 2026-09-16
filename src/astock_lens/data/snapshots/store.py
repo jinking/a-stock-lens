@@ -99,3 +99,14 @@ class JsonSnapshotStore:
     def path_for(self, kind: SnapshotKind, as_of: datetime) -> Path:
         """Return the file a snapshot for this kind and date would occupy."""
         return self._root / kind.value / f"{as_of.date().isoformat()}.json"
+
+    def dates(self, kind: SnapshotKind) -> tuple[str, ...]:
+        """Return the dates that actually have a snapshot for this kind.
+
+        ISO filenames sort chronologically, so the tuple is ordered. An absent
+        kind is a normal answer, not an error — the same rule `read` follows.
+        """
+        directory = self._root / kind.value
+        if not directory.is_dir():
+            return ()
+        return tuple(sorted(path.stem for path in directory.glob("*.json")))

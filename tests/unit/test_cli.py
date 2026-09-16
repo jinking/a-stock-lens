@@ -70,23 +70,46 @@ def test_factors_compute_prints_one_document_per_symbol_and_factor(
     assert len(lines) == len(SHORT_SYMBOLS) * len(FACTOR_NAMES)
 
 
-def test_scan_reports_candidates_and_writes_a_snapshot(local_tmp: Path) -> None:
-    """Eleven symbols carry bars; 000004.SZ is 34 days old, so ret_60d is NULL."""
+def test_scan_reports_ranked_candidates_and_writes_every_snapshot(
+    local_tmp: Path,
+) -> None:
+    """The daily scan: 7 symbols survive the Universe, all carry scores."""
     result = _invoke(local_tmp, "scan", "--as-of", DAY, dataset=LONG_DATASET)
 
     assert result.exit_code == 0
-    assert "candidates: 10" in result.stdout
-    assert "300750.SZ -> IGNORE" in result.stdout
-    assert (local_tmp / "CANDIDATE" / "2026-09-04.json").is_file()
+    assert "candidates: 7" in result.stdout
+    # Ranking top: fastest riser, scored, watched.
+    assert "300750.SZ -> WATCH (score 95.24)" in result.stdout
+    for kind in ("UNIVERSE", "FACTOR", "STRATEGY", "CANDIDATE"):
+        assert (local_tmp / kind / "2026-09-04.json").is_file(), kind
 
 
-def test_scan_says_it_has_no_score_rather_than_omitting_it(
-    local_tmp: Path,
-) -> None:
-    """The first slice evaluates one symbol at a time, so no score exists."""
+def test_scan_reports_every_candidate_with_a_score(local_tmp: Path) -> None:
+    """Cross-sectional scoring means every candidate line carries a number;
+    a bare symbol with no score would mean the scan ranked nothing."""
     result = _invoke(local_tmp, "scan", "--as-of", DAY, dataset=LONG_DATASET)
 
-    assert "score -" in result.stdout
+    candidate_lines = [
+        line
+        for line in result.stdout.splitlines()
+        if line.strip().startswith(("6", "0", "3", "8", "9"))
+    ]
+    assert candidate_lines
+    assert all("score" in line for line in candidate_lines)
+
+
+def test_universe_build_reports_the_verdicts_and_writes_the_snapshot(
+    local_tmp: Path,
+) -> None:
+    result = _invoke(
+        local_tmp, "universe", "build", "--as-of", DAY, dataset=LONG_DATASET
+    )
+
+    assert result.exit_code == 0
+    assert "included: 7" in result.stdout
+    assert "ST: 1" in result.stdout
+    assert "LONG_SUSPENSION" in result.stdout
+    assert (local_tmp / "UNIVERSE" / "2026-09-04.json").is_file()
 
 
 def test_scan_rejects_a_malformed_date(local_tmp: Path) -> None:

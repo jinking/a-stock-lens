@@ -302,13 +302,20 @@ from the plan's text, all proven live on 2026-09-16:
 
 **Steps:**
 
-- [ ] Write `tests/integration/test_daily_scan.py` first: the full chain over `daily_bars_long.csv`, asserting that each Universe exclusion reason fires on the symbol designed to trigger it, that the ranking order matches the hand-computed order, that `next_action` follows D5, and that a second run for the same date overwrites rather than duplicates.
-- [ ] Update `tests/unit/test_cli.py` and `tests/unit/test_api.py` to the new commands, using the long fixture. The assertions' *intent* is unchanged; only the fixture moves.
-- [ ] Implement the pipeline, CLI, and API.
-- [ ] Confirm `tests/integration/test_first_slice.py` still passes. It now states its own single-factor strategy pairing instead of borrowing `momentum.yaml`, because the previous slice's pairing is historical: the momentum strategy ranks on returns, not on liquidity. `run_first_slice` itself gained the multi-factor loop in Task 3.
-- [ ] Run the whole chain by hand through the CLI and paste the real output into the PR body.
-- [ ] Update `README.md`: the status table, the new commands, and an explicit list of what is still missing.
-- [ ] Run the full gate; commit: `feat(pipeline): add daily scan pipeline with universe and scoring`.
+**Deviation recorded during execution.** Two additions beyond the plan's
+file list: `data/snapshots/resolve.py` (both the CLI and the API must select
+the snapshot backend the same way, so the resolver is shared rather than
+duplicated) and `JsonSnapshotStore.dates()` (the overwrite test asserts on
+`dates`, and the DuckDB store already had that method — the JSON store was
+the one missing it).
+
+- [x] Write `tests/integration/test_daily_scan.py` first: the full chain over `daily_bars_long.csv`, asserting that each Universe exclusion reason fires on the symbol designed to trigger it, that the ranking order matches the hand-computed order, that `next_action` follows D5, and that a second run for the same date overwrites rather than duplicates.
+- [x] Update `tests/unit/test_cli.py` and `tests/unit/test_api.py` to the new commands, using the long fixture. The assertions' *intent* is unchanged; only the fixture moves.
+- [x] Implement the pipeline, CLI, and API.
+- [x] Confirm `tests/integration/test_first_slice.py` still passes. It now states its own single-factor strategy pairing instead of borrowing `momentum.yaml`, because the previous slice's pairing is historical: the momentum strategy ranks on returns, not on liquidity. `run_first_slice` itself gained the multi-factor loop in Task 3.
+- [x] Run the whole chain by hand through the CLI and paste the real output into the PR body. Output captured 2026-09-16: `universe build` reports 7 included, 6 exclusions across five rules, the deferred LONG_SUSPENSION; `scan` prints 7 candidates, all WATCH, top `300750.SZ -> WATCH (score 95.24)`.
+- [x] Update `README.md`: the status table, the new commands, and an explicit list of what is still missing.
+- [x] Run the full gate; commit: `feat(pipeline): add daily scan pipeline with universe and scoring`.
 
 ---
 

@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException
 
-from astock_lens.data.snapshots.store import JsonSnapshotStore
+from astock_lens.data.snapshots.resolve import resolve_snapshot_store
 from astock_lens.domain.enums import SnapshotKind
 
 SERVICE_NAME = "A-Stock Lens"
@@ -53,6 +53,12 @@ def create_app(snapshot_root: Path | None = None) -> FastAPI:
             "records": [record for record in records if record.get("symbol") == symbol],
         }
 
+    @application.get("/universe")
+    def universe(as_of: str) -> dict[str, object]:
+        """Read the stored universe snapshot for one date."""
+        records = _read(root(), SnapshotKind.UNIVERSE, as_of)
+        return {"as_of": as_of, "snapshot": records[0] if records else None}
+
     @application.get("/candidates")
     def candidates(as_of: str) -> dict[str, object]:
         """Read the stored candidate snapshot for one date."""
@@ -71,7 +77,7 @@ def _read(root: Path, kind: SnapshotKind, as_of: str) -> tuple[dict[str, object]
             status_code=422, detail=f"as_of must be YYYY-MM-DD, got {as_of!r}"
         ) from error
 
-    records = JsonSnapshotStore(root).read(
+    records = resolve_snapshot_store(root).read(
         kind,
         datetime(day.year, day.month, day.day, CLOSE_HOUR, tzinfo=SHANGHAI),
     )
