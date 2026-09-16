@@ -59,7 +59,8 @@ V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学�
 | AkShare Provider（腾讯域日线 + 三交易所名单）+ 真实录制契约 fixture | |
 | WeStock CLI Provider（三大表，含 `EndDate` + `InfoPublDate`，批量 100 只 / 11 秒）+ 录制 fixture | 财报的 Normalized / Quality Gate / 基本面因子（下一片） |
 | 财务 Normalized（48 个指标）+ Financial Quality Gate + 观测进入因子上下文 | 基本面因子本身（下一片）、全市场财报同步的限流验证 |
-| 5 个基本面因子（`ocf_to_net_profit` / `interest_bearing_debt_to_equity` / `goodwill_to_equity` / `dividend_payout_ttm` / `revenue_ttm_to_inventory`），带时点选择与证据引用 | 估值类因子（需要市值/股本口径评审）、行业适用的豁免规则 |
+| 12 个基本面因子（5 个比值 + 7 个指标透传），带时点选择、证据引用与单位 | 估值类因子（需要市值/股本口径评审）、行业适用的豁免规则 |
+| Growth / Quality / Dividend 三个 Scanner 的**资格判定**（打分待权重评审） | Value / GARP（缺估值口径）、Industry Trend（缺行业数据） |
 | Job Run 记录与 Manifest（每阶段独立可重跑）、`astock daily`；CLI `sync` / `stock` / `watch` / `research` / `strategy run`；API `/health` `/universe` `/factors` `/candidates` `/watchlist` | |
 | 独立 Artifact Validator（快照 + Job Manifest，不导入生产代码） | |
 
@@ -183,6 +184,30 @@ uv run astock factors compute --as-of 2026-09-04 | grep ocf_to_net_profit
 
 一个已知的解读边界：银行的经营现金流包含存款变动，`ocf_to_net_profit` 对金融企业不具"利润含金量"的含义（实测 000001.SZ = 8.20）。因子本身是客观数字，是否按行业豁免属于策略层决定，设计尚未确认，因此这里只记录不改写。
 
+### 策略 Scanner 的当前状态
+
+```bash
+uv run astock strategy run quality --as-of 2026-09-04
+```
+
+| Scanner | 状态 |
+| --- | --- |
+| `momentum` | 有排名与分数（权重是等权草案，标注 `PENDING REVIEW`） |
+| `growth` / `quality` / `dividend` | **只给资格判定，不给分数**：设计把权重与评分阈值列为 `Deferred`（`docs/STRATEGY_SYSTEM.md` §5），打分会是没人评审过的判断 |
+| `value` / `garp` | 未实现：需要估值类因子（PE/PB/PS、FCF yield、历史估值分位、行业相对估值），而它们需要先评审股本/市值口径 |
+| `industry_trend` | 未实现：需要行业数据（板块成分、行业汇总），目前没有落地 |
+
+资格判定的含义是"证据是否完整到足以让这个 Scanner 考虑它"，可证伪且有用。实测（3 只有财报 + 8 只没有）：
+
+```
+quality : 300750.SZ 合格、600519.SH 合格、000001.SZ 不合格（银行报表没有毛利率这一行）
+growth  : 000001.SZ 合格、300750.SZ 合格、600519.SH 合格
+dividend: 000001.SZ 合格、300750.SZ 合格、600519.SH 合格
+其余 8 只（未落地财报）：三个 Scanner 全部不合格，理由写明缺哪个因子
+```
+
+银行在 Growth/Dividend 上合格、在 Quality 上不合格——这正是 6 态缺失词表要表达的区别：不是"数据坏了"，而是"这张报表没有这一行"。
+
 ## 测试与质量检查
 
 ```bash
@@ -197,9 +222,9 @@ uv run mypy
 ## 下一步
 
 1. **AkShare 全市场落地**：`securities` 名单（5564 只）与全市场日线的批量抓取、限流与断点续跑（`astock sync` 的机制已就绪，缺的是全量运行的验证）。
-2. **基本面因子**：观测已经在因子上下文里，但还没有 Factor 读它们（`roe` / `gross_margin` / `debt_to_asset` / `net_operating_cashflow` … 都是现成字段）。
-3. **全市场财报同步**：100 只/批 ≈ 11 秒/表，三大表全市场约 30 分钟，属季度任务；限流与断点续跑尚未验证。
-4. **权重正式评审**：把等权草案换成评审后的权重。
+2. **全市场财报同步**：100 只/批 ≈ 11 秒/表，三大表全市场约 30 分钟，属季度任务；限流与断点续跑尚未验证。
+3. **策略权重正式评审**：把等权草案换成评审后的权重，并给 Growth / Quality / Dividend 定评分口径（现在是资格判定）。
+4. **估值口径评审**：定了股本/市值口径，Value 与 GARP 才能落地。
 5. **Market Regime / Market Validation / Signal 检测器**：需要先确认各输入的阈值，否则只能继续保持 `BLOCKED`。
 6. **其余 6 个 Scanner**：依赖基本面因子落地。
 7. **React 前端 6 个页面**：目前只有 `web/README.md`。

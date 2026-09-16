@@ -177,3 +177,37 @@ cash flow includes deposit movements, so `ocf_to_net_profit` does not mean
 "profit quality" for financial companies (measured: 000001.SZ = 8.20). Whether
 a factor should be exempt for some industries is a strategy-layer decision the
 design has not made, so no industry guard was added.
+
+## Eligibility slice (2026-09-16, same day)
+
+Three scanners now run. Decisions taken here:
+
+- **Eligibility only, no score.** `docs/STRATEGY_SYSTEM.md` §5 defers every
+  scanner's weights, thresholds, `rank_percentile` and `confidence`. Momentum
+  shipped with a draft weight set marked `PENDING REVIEW`; these three have no
+  weights at all, so a score would be invented. Eligibility — "this symbol's
+  evidence is complete enough for this scanner to consider it" — is a real,
+  falsifiable verdict and the first half of the designed funnel.
+- **One class serves the three scanners.** With scoring deferred, the only
+  thing that distinguishes them is which factors they demand, and that lives
+  in `configs/strategies/*.yaml`. Three identical classes would be duplicated
+  code pretending to be three algorithms; when a scanner's weights are
+  reviewed it gets its own scoring implementation, and the registry binding is
+  where that swap happens.
+- **Seven passthrough factors were added** (`revenue_yoy`,
+  `net_profit_parent_yoy`, `revenue_cagr_3y`, `net_profit_parent_cagr_3y`,
+  `roe_ttm`, `gross_margin`, `debt_to_asset`). The engine's contract is
+  `FactorResult`, so a metric a strategy needs has to exist as a factor to
+  reach it. Nothing is recomputed and no threshold is applied.
+- **`FactorResult.unit` was added.** A snapshot carrying `17.7179` without
+  saying whether that is a ratio or a percent is not explainable; the unit now
+  travels with the value.
+- **The three unbuilt scanners name the input they wait for**, not an opinion:
+  `value` and `garp` need a reviewed share-count/market-cap convention before
+  any valuation factor can exist, and `industry_trend` needs industry data
+  that has not been landed.
+
+Evidence that eligibility does real work rather than rubber-stamping: on the
+same run, `000001.SZ` (a bank) is eligible for `growth` and `dividend` but not
+for `quality`, because its income statement carries no gross margin. That is
+the `NULL` state doing its job, not a data outage.
