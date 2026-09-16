@@ -53,8 +53,21 @@ class UniverseBuilder:
 
         included: list[str] = []
         exclusions: list[UniverseExclusion] = []
+        seen: set[str] = set()
 
         for profile in sorted(profiles, key=lambda item: item.symbol):
+            if profile.symbol in seen:
+                exclusions.append(
+                    _exclusion(
+                        profile.symbol,
+                        UniverseRule.DUPLICATE_SECURITY,
+                        "the listing carries this instrument more than once, so "
+                        "only the first profile is kept",
+                    )
+                )
+                continue
+            seen.add(profile.symbol)
+
             found = self._evaluate(
                 profile, as_of=as_of, traded=traded, liquidity=liquidity
             )

@@ -281,3 +281,38 @@ def test_an_unknown_suspension_count_does_not_trip_the_rule() -> None:
 
     assert UniverseRule.LONG_SUSPENSION not in _rules(snapshot, "600000.SH")
     assert "600000.SH" in snapshot.included
+
+
+def test_a_duplicated_instrument_is_excluded_rather_than_admitted_twice() -> None:
+    """A listing that repeats an instrument must not duplicate a cross-section.
+
+    The end-to-end scan crashed on exactly this before the rule existed: two
+    profiles for one symbol produced two contexts, and cross-sectional scoring
+    refuses a population with a repeated member. Excluding the duplicate keeps
+    the scan running *and* keeps the reason visible.
+    """
+    profile = next(item for item in _profiles() if item.symbol == "600000.SH")
+
+    snapshot = _build_with((profile, profile))
+
+    assert snapshot.included == ("600000.SH",)
+    assert _rules(snapshot, "600000.SH") == (UniverseRule.DUPLICATE_SECURITY,)
+
+
+def _build_with(profiles: tuple[SecurityProfile, ...]) -> UniverseSnapshot:
+    return UniverseBuilder(_config()).build(
+        profiles,
+        as_of=AS_OF,
+        bars=(DailyBar(symbol="600000.SH", trade_date=AS_OF.date(), close=10.0),),
+        liquidity={
+            "600000.SH": FactorResult(
+                symbol="600000.SH",
+                factor="avg_amount_20d",
+                as_of=AS_OF,
+                status=DataStatus.VALUE,
+                factor_version="v1",
+                lineage=SnapshotLineage(factor_version="v1"),
+                raw_value=HEALTHY_LIQUIDITY_VALUE,
+            )
+        },
+    )

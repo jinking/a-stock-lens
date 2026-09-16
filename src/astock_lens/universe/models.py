@@ -28,6 +28,11 @@ class UniverseRule(StrEnum):
     LOW_LIQUIDITY = "LOW_LIQUIDITY"
     NO_MARKET_DATA = "NO_MARKET_DATA"
     NO_LIQUIDITY_MEASURE = "NO_LIQUIDITY_MEASURE"
+    # A listing that carries the same instrument twice. The duplicate is
+    # excluded rather than merged: silently keeping one of two rows would make
+    # "which profile won" unanswerable, and letting both through would put one
+    # symbol into a cross-section twice.
+    DUPLICATE_SECURITY = "DUPLICATE_SECURITY"
 
 
 class UniverseExclusion(DomainRecord):
