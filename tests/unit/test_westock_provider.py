@@ -49,17 +49,23 @@ class ReplayRunner:
         returncode: int = 0,
         stderr: str = "",
         by_code: str | None = None,
+        stop_after: int | None = None,
     ) -> None:
         self.argv: list[list[str]] = []
         self._stdout = stdout
         self._returncode = returncode
         self._stderr = stderr
+        # When set, calls after this many answer with nothing, so a test can
+        # isolate batching from the top-up pass that follows it.
+        self._stop_after = stop_after
         # When set, only a batch containing this code gets the recorded output;
         # every other batch answers with nothing.
         self._by_code = by_code
 
     def __call__(self, argv: Sequence[str]) -> CommandResult:
         self.argv.append(list(argv))
+        if self._stop_after is not None and len(self.argv) > self._stop_after:
+            return CommandResult(returncode=0, stdout="", stderr="")
         if self._by_code is not None and self._by_code not in argv[2]:
             return CommandResult(returncode=0, stdout="", stderr="")
         return CommandResult(
@@ -149,6 +155,8 @@ def test_each_dataset_maps_to_its_statement(dataset: str, statement: str) -> Non
 
 def test_symbols_the_source_did_not_return_are_named() -> None:
     """The CLI's own batch summary cannot be trusted for coverage."""
+    # Two calls: the batch omits 601398.SH, and the top-up pass does too, so
+    # the gap survives as a real coverage gap.
     runner = ReplayRunner(_recorded("financial_income"))
 
     raw = _provider(runner).fetch(
@@ -157,6 +165,43 @@ def test_symbols_the_source_did_not_return_are_named() -> None:
 
     assert raw.missing_symbols == ("601398.SH",)
     assert raw.status is DataStatus.VALUE
+    assert len(runner.argv) == 2  # the batch, then the top-up for the gap
+
+
+def test_a_code_the_batch_skipped_is_asked_for_once_more() -> None:
+    """A code omitted from a busy batch usually answers on the next attempt.
+
+    Measured on the 2026-09-16 whole-market run: 58 of 5,576 symbols came back
+    empty from their batch and each answered normally when asked again, so the
+    run ends with one top-up pass rather than reporting a 1% coverage hole.
+    """
+    full = _recorded("financial_income")
+    without_last = "\n".join(
+        line for line in full.splitlines() if not line.startswith("| sz300750")
+    )
+
+    class SkipsThenAnswers:
+        def __init__(self) -> None:
+            self.argv: list[list[str]] = []
+
+        def __call__(self, argv: Sequence[str]) -> CommandResult:
+            self.argv.append(list(argv))
+            # First call omits one symbol; the top-up call returns everything.
+            return CommandResult(
+                returncode=0,
+                stdout=without_last + "\n" if len(self.argv) == 1 else full,
+                stderr="",
+            )
+
+    runner = SkipsThenAnswers()
+    raw = _provider(runner).fetch(_request("financial_income"))
+
+    assert len(runner.argv) == 2
+    assert runner.argv[1][2] == "sz300750"  # the top-up asks only for the gap
+    assert raw.missing_symbols == ()
+    # 16 rows from the batch (one symbol was skipped) plus the 24-row recorded
+    # answer the top-up replays: the gap is filled and nothing is lost.
+    assert raw.row_count == 40
 
 
 def test_an_empty_answer_is_null_with_every_symbol_missing() -> None:
@@ -250,8 +295,9 @@ def test_a_failed_batch_does_not_discard_the_other_batches() -> None:
     assert "batch 2/2" in raw.message
     assert "rate limited" in raw.message
     assert raw.missing_symbols == ("601398.SH",)
-    # One retry per failed batch: the good batch is fetched once, the bad twice.
-    assert runner.calls == 3
+    # The good batch once, the bad batch twice (it retries once), then the same
+    # two calls again for the top-up pass over the symbol that never arrived.
+    assert runner.calls == 5
 
 
 def test_every_batch_failing_is_a_source_error_with_the_reason() -> None:
@@ -266,15 +312,17 @@ def test_every_batch_failing_is_a_source_error_with_the_reason() -> None:
 
 
 def test_batching_calls_once_per_batch_and_concatenates_rows() -> None:
-    runner = ReplayRunner(_recorded("financial_income"))
+    runner = ReplayRunner(_recorded("financial_income"), stop_after=2)
 
     raw = _provider(runner, batch_size=2).fetch(
         _request("financial_income", (*FIXTURE_SYMBOLS, "601398.SH"))
     )
 
-    assert len(runner.argv) == 2
     assert runner.argv[0][2] == "sh600519,sz000001"
     assert runner.argv[1][2] == "sz300750,sh601398"
+    # The third call is the top-up pass for the code no batch returned.
+    assert len(runner.argv) == 3
+    assert runner.argv[2][2] == "sh601398"
     assert raw.row_count == 48  # the recorded table twice: rows concatenate
 
 

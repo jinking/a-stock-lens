@@ -31,6 +31,12 @@ caller:
 - **A failed batch does not discard the others.** A batch that still fails
   after one retry is recorded in `message` and its symbols are named in
   `missing_symbols`; the rows the other batches delivered are landed anyway.
+- **A code can be silently omitted even from a batch that succeeds.** Measured
+  on the 2026-09-16 whole-market run: 58 of 5,576 symbols came back empty from
+  their batch, and each of them answered normally when asked again. So a batch
+  run ends with one top-up pass over whatever `missing_symbols` names, and what
+  is still missing afterwards is a real coverage gap rather than a transient
+  one.
 
 Failure modes, kept apart on purpose:
 
@@ -310,6 +316,21 @@ class WestockCliProvider:
                 missing=tuple(symbols),
             )
 
+        missing = tuple(
+            symbol for symbol, code in codes.items() if code not in returned
+        )
+        if missing:
+            # One top-up pass: a code the service skipped in a busy batch is
+            # usually answered on the next attempt.
+            for table, batch_symbols in self._refetch(
+                [codes[symbol] for symbol in missing], statement
+            ):
+                _merge(merged_columns, merged_rows, table)
+                returned.update(_codes_in(table))
+            missing = tuple(
+                symbol for symbol, code in codes.items() if code not in returned
+            )
+
         return RawDataset(
             provider=self._provider,
             dataset=request.dataset,
@@ -317,9 +338,7 @@ class WestockCliProvider:
             provider_version=self._version,
             status=DataStatus.VALUE,
             row_count=len(merged_rows),
-            missing_symbols=tuple(
-                symbol for symbol, code in codes.items() if code not in returned
-            ),
+            missing_symbols=missing,
             message=summary or None,
             report_period=_single(
                 tuple(merged_columns), merged_rows, REPORT_PERIOD_COLUMN
@@ -339,6 +358,34 @@ class WestockCliProvider:
                 return result, None
         detail = result.stderr.strip()[:200] or "(no stderr)"
         return result, f"exited {result.returncode}: {detail}"
+
+    def _refetch(
+        self, codes: Sequence[str], statement: str
+    ) -> tuple[tuple[Table, tuple[str, ...]], ...]:
+        """Ask once more for the codes a batch run did not return."""
+        results: list[tuple[Table, tuple[str, ...]]] = []
+        for batch in _chunks(tuple(codes), self._batch_size):
+            argv = [
+                str(self._binary),
+                "finance",
+                ",".join(batch),
+                "--type",
+                statement,
+                "--limit",
+                str(self._periods),
+                "--fields",
+                FIELDS,
+            ]
+            completed, failure = self._invoke(argv)
+            if failure is not None:
+                continue
+            try:
+                tables = parse_tables(completed.stdout)
+            except MalformedTable:
+                continue
+            for table in tables:
+                results.append((table, batch))
+        return tuple(results)
 
     def _emptied(
         self,
