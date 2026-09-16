@@ -228,7 +228,9 @@ def test_a_provider_failure_is_reported_and_writes_nothing(local_tmp: Path) -> N
     assert not result.is_complete
 
 
-def test_a_mismatched_shape_is_refused_rather_than_appended(local_tmp: Path) -> None:
+def test_a_file_of_another_dataset_is_refused_rather_than_appended(
+    local_tmp: Path,
+) -> None:
     (local_tmp / "daily_bars.csv").write_text(
         "code,date,price\n600519.SH,2026-09-03,10.0\n", encoding="utf-8"
     )
@@ -240,6 +242,50 @@ def test_a_mismatched_shape_is_refused_rather_than_appended(local_tmp: Path) -> 
             as_of=AS_OF,
             symbols=("600519.SH",),
         )
+
+
+def test_a_row_shape_the_file_has_not_seen_widens_it_instead_of_failing(
+    local_tmp: Path,
+) -> None:
+    """Instrument-specific columns appear as the market is covered.
+
+    A whole-market statement legitimately gains columns when a bank or an
+    insurer is in the batch; the file widens, and the rows that never carried
+    the column stay empty rather than being refused or filled with a zero.
+    """
+    (local_tmp / "daily_bars.csv").write_text(
+        "symbol,trade_date,close\n600519.SH,2026-09-03,10.0\n", encoding="utf-8"
+    )
+
+    class WiderProvider(StubProvider):
+        def fetch(self, request: FetchRequest) -> RawDataset:
+            self.requests.append(request)
+            return RawDataset(
+                provider="stub",
+                dataset=request.dataset,
+                fetched_at=FETCHED_AT,
+                provider_version="v1",
+                status=DataStatus.VALUE,
+                row_count=1,
+                payload=RawPayload(
+                    columns=("symbol", "trade_date", "close", "deposit"),
+                    rows=(("600519.SH", "2026-09-04", "11.0", "777.0"),),
+                ),
+            )
+
+    land_raw(
+        provider=WiderProvider(),
+        root=local_tmp,
+        as_of=AS_OF,
+        symbols=("600519.SH",),
+    )
+
+    columns, rows = read_raw_rows(local_tmp / "daily_bars.csv")
+    assert columns == ("symbol", "trade_date", "close", "deposit")
+    assert rows == (
+        ("600519.SH", "2026-09-03", "10.0", ""),  # never had a deposit
+        ("600519.SH", "2026-09-04", "11.0", "777.0"),
+    )
 
 
 def test_landed_symbols_reads_only_the_dates_it_was_asked_about(

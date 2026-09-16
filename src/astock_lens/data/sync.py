@@ -307,26 +307,71 @@ def _write_merged(
     *,
     keys: Sequence[str] = (SYMBOL_COLUMN, TRADE_DATE_COLUMN),
 ) -> tuple[int, int]:
-    """Merge one payload into a raw file, replacing rows it already covers."""
+    """Merge one payload into a raw file, replacing rows it already covers.
+
+    The file widens to the union of both column sets. This source's shape
+    depends on the instruments involved — a batch holding a bank carries
+    balance-sheet columns a batch of manufacturers does not, and one holding an
+    insurer carries a third set — so a whole-market file legitimately ends up
+    with columns only some instruments report. A cell the row's own shape did
+    not carry stays empty, which the normalizer reads as a missing value.
+
+    What is still refused is mixing two *instruments of different kinds*: if
+    the file and the payload do not share the key columns, one of them is not
+    the dataset the other one is, and appending would corrupt both.
+    """
     columns, rows = read_raw_rows(path)
-    if columns and columns != payload.columns:
+    missing_keys = [key for key in keys if key not in payload.columns]
+    if missing_keys:
         raise ValueError(
-            f"{path} has shape {list(columns)}, but the provider delivered "
-            f"{list(payload.columns)}; refusing to mix two shapes in one file"
+            f"the provider delivered {list(payload.columns)}, which lacks the "
+            f"key columns {missing_keys}, so rows cannot be merged into {path}"
+        )
+    if columns:
+        file_missing_keys = [key for key in keys if key not in columns]
+        if file_missing_keys:
+            raise ValueError(
+                f"{path} has shape {list(columns)}, which lacks the key columns "
+                f"{file_missing_keys}; refusing to merge a different dataset "
+                "into it"
+            )
+
+    union = list(columns)
+    union.extend(column for column in payload.columns if column not in union)
+    if len(union) != len(set(union)):
+        raise ValueError(
+            f"the merged column set for {path} would contain duplicates: {union}"
         )
 
-    key_columns = _key_columns(payload.columns, keys)
-    seen = {_key(row, key_columns) for row in payload.rows}
-    kept = tuple(row for row in rows if _key(row, key_columns) not in seen)
-    merged = (*kept, *payload.rows)
+    widened = tuple(_pad(row, columns, union) for row in rows) if columns else ()
+    incoming = tuple(_pad(row, payload.columns, union) for row in payload.rows)
+
+    key_columns = _key_columns(tuple(union), keys)
+    seen = {_key(row, key_columns) for row in incoming}
+    kept = tuple(row for row in widened if _key(row, key_columns) not in seen)
+    merged = (*kept, *incoming)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.writer(stream, lineterminator="\n")
-        writer.writerow(payload.columns)
+        writer.writerow(union)
         writer.writerows(merged)
 
-    return len(payload.rows), len(merged)
+    return len(incoming), len(merged)
+
+
+def _pad(
+    row: tuple[str, ...], current: Sequence[str], target: Sequence[str]
+) -> tuple[str, ...]:
+    """Re-order one row onto a wider column set, filling what it never had."""
+    if tuple(current) == tuple(target):
+        return row
+    position = {column: index for index, column in enumerate(target)}
+    padded = [""] * len(target)
+    for index, column in enumerate(current):
+        if index < len(row):
+            padded[position[column]] = row[index]
+    return tuple(padded)
 
 
 def _key_columns(columns: tuple[str, ...], keys: Sequence[str]) -> tuple[int, ...]:
