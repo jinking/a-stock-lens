@@ -28,8 +28,10 @@ uv run astock doctor
 - `src/astock_lens/domain/`：领域枚举与不可变模型；
 - `src/astock_lens/data/`：Provider、Normalizer、Quality Gate、Repository 契约与实现；
 - `src/astock_lens/universe|factors|strategies|market|signals|candidates|watchlist/`：对应 Pipeline 阶段；
-- `src/astock_lens/research/`：深研适配器契约与模型；
-- `src/astock_lens/pipelines|jobs/`：编排与运行状态；
+- `src/astock_lens/research/`：深研适配器契约、模型与 CLI Adapter（`adapters/cli.py`）；
+- `src/astock_lens/watchlist/`：Watchlist 模型、状态机与存储（JSON / DuckDB 同协议）；
+- `src/astock_lens/pipelines/`：阶段函数（`stages.py`）、每日扫描（`daily_scan.py`）与 11 阶段 Pipeline（`daily.py`）；
+- `src/astock_lens/jobs/`：Job Run 模型与 Manifest 存储；
 - `src/astock_lens/api|cli/`：对外入口；
 - `src/astock_lens/backtest|portfolio|events/`：预留边界，V1 无业务实现；
 - `configs/`：YAML 配置，只放已确认的值；
