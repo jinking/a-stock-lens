@@ -2,6 +2,14 @@ id: growth
 enabled: true
 version: v1
 description: Operating growth speed, persistence, and earnings/cash-flow conversion.
+# 这四项是 Growth 回答"经营是否真的在增长"所必需、且财报链路已经能提供的因子。
+# 权重与评分阈值仍是 Deferred（docs/STRATEGY_SYSTEM.md §5），因此本 Scanner 目前
+# 只做资格判定、不给分数：打分会是没人评审过的产品判断。
+required_factors:
+  - revenue_yoy
+  - revenue_cagr_3y
+  - net_profit_parent_yoy
+  - net_profit_parent_cagr_3y
 dimensions:
   - revenue and profit year-over-year growth
   - three-year CAGR

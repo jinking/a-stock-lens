@@ -13,10 +13,35 @@ from pathlib import Path
 
 from astock_lens.strategies.config import StrategyConfig, load_strategy_config
 from astock_lens.strategies.contracts import StrategyPlugin
+from astock_lens.strategies.eligibility import EligibilityScanner
 from astock_lens.strategies.momentum import MomentumScanner
 
 IMPLEMENTATIONS: Mapping[str, Callable[[StrategyConfig], StrategyPlugin]] = {
     "momentum": MomentumScanner,
+    # Eligibility only: their weights and thresholds are deferred, so a score
+    # would be a number nobody reviewed.
+    "growth": EligibilityScanner,
+    "quality": EligibilityScanner,
+    "dividend": EligibilityScanner,
+}
+
+# Why the remaining scanners are not built yet. Each reason names a missing
+# input rather than a missing opinion, so nobody reads "unimplemented" as a
+# data outage.
+UNIMPLEMENTED_REASONS: Mapping[str, str] = {
+    "value": (
+        "it needs valuation factors (PE/PB/PS, FCF yield, historical valuation "
+        "percentile, industry-relative valuation); those need a reviewed "
+        "share-count and market-cap convention, and none exists yet"
+    ),
+    "garp": (
+        "it reuses the Growth output and adds a valuation comparison, so its "
+        "valuation half is blocked for the same reason as value"
+    ),
+    "industry_trend": (
+        "it scores an industry first and then maps that score onto stocks; no "
+        "industry data (sector membership, industry aggregates) has been landed"
+    ),
 }
 
 
@@ -36,9 +61,10 @@ def build_scanner(config: StrategyConfig) -> StrategyPlugin:
     """Return the scanner implementation for one configuration."""
     factory = IMPLEMENTATIONS.get(config.id)
     if factory is None:
+        reason = UNIMPLEMENTED_REASONS.get(config.id, "no implementation is registered")
         raise StrategyNotImplementedError(
-            f"strategy {config.id!r} has no implementation; implemented "
-            f"scanners are {sorted(IMPLEMENTATIONS)}"
+            f"strategy {config.id!r} has no implementation: {reason}; "
+            f"implemented scanners are {sorted(IMPLEMENTATIONS)}"
         )
     return factory(config)
 
@@ -76,6 +102,17 @@ def unimplemented_scanners(directory: Path) -> tuple[str, ...]:
         config.id
         for config in _enabled_configs(directory)
         if config.id not in IMPLEMENTATIONS
+    )
+
+
+def unimplemented_reasons(directory: Path) -> tuple[tuple[str, str], ...]:
+    """Return each unbuilt scanner with the input it waits for."""
+    return tuple(
+        (
+            strategy_id,
+            UNIMPLEMENTED_REASONS.get(strategy_id, "no reason recorded"),
+        )
+        for strategy_id in unimplemented_scanners(directory)
     )
 
 

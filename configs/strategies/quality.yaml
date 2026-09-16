@@ -2,6 +2,13 @@ id: quality
 enabled: true
 version: v1
 description: Durable profitability, capital efficiency, cash flow, and balance-sheet quality.
+# ROE TTM / 毛利率 / 资产负债率 / 现金流覆盖，对应设计里 Quality 的盈利能力、
+# 资本效率、负债与现金流质量四个维度。权重与阈值同样 Deferred。
+required_factors:
+  - roe_ttm
+  - gross_margin
+  - debt_to_asset
+  - ocf_to_net_profit
 dimensions:
   - ROE and ROIC
   - gross margin and net margin

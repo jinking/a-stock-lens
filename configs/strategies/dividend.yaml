@@ -2,6 +2,11 @@ id: dividend
 enabled: true
 version: v1
 description: Dividend sustainability and cash-flow coverage, not yield alone.
+# 设计要求分红看"可持续性与现金流覆盖"而不是只看股息率：支付率 + 现金流覆盖是
+# 两个现在就能算的维度（股息率还需要市值口径，属 Deferred）。权重与阈值同样 Deferred。
+required_factors:
+  - dividend_payout_ttm
+  - ocf_to_net_profit
 dimensions:
   - dividend yield
   - dividend sustainability

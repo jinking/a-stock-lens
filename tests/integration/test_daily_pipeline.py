@@ -220,11 +220,32 @@ def test_the_pipeline_reports_the_scan_it_produced(local_tmp: Path) -> None:
 
     assert result.universe is not None
     assert len(result.universe.included) == 7
-    assert len(result.strategy_results) == 7
+    # One result per admitted symbol per scanner that ran. The fixture has no
+    # landed statements, so the fundamental scanners report ineligible — a
+    # verdict, not a missing row.
+    scanners = len(load_scanners(CONFIGS / "strategies"))
+    assert scanners >= 2
+    assert len(result.strategy_results) == 7 * scanners
     assert len(result.candidates) == 7
     assert all(
         candidate.next_action.value == "WATCH" for candidate in result.candidates
     )
+
+
+def test_the_fundamental_scanners_report_ineligibility_with_a_reason(
+    local_tmp: Path,
+) -> None:
+    """No landed statements means no evidence — said out loud, not scored."""
+    result = _run(local_tmp)
+
+    quality = [
+        item for item in result.strategy_results if item.strategy_id == "quality"
+    ]
+
+    assert len(quality) == 7
+    assert all(item.eligible is False for item in quality)
+    assert all(item.score is None for item in quality)
+    assert all(item.risks for item in quality)
 
 
 def test_a_stage_that_produced_nothing_is_not_a_success_with_a_zero(
