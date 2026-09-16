@@ -57,6 +57,7 @@ V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学�
 | 横截面评分与排名（percentile 加权混合）、`next_action` 路由（D5：仅按排序） | |
 | `DuckDBSnapshotStore` / `DuckDBWatchlistStore` 与 JSON store 同协议互换（`ASTOCK_SNAPSHOT_BACKEND` / `ASTOCK_WATCHLIST_BACKEND`） | |
 | AkShare Provider（腾讯域日线 + 三交易所名单）+ 真实录制契约 fixture | |
+| WeStock CLI Provider（三大表，含 `EndDate` + `InfoPublDate`，批量 100 只 / 11 秒）+ 录制 fixture | 财报的 Normalized / Quality Gate / 基本面因子（下一片） |
 | Job Run 记录与 Manifest（每阶段独立可重跑）、`astock daily`；CLI `sync` / `stock` / `watch` / `research` / `strategy run`；API `/health` `/universe` `/factors` `/candidates` `/watchlist` | |
 | 独立 Artifact Validator（快照 + Job Manifest，不导入生产代码） | |
 
@@ -136,7 +137,19 @@ uv run astock research 300750.SZ                    # 需要 ASTOCK_DEEP_RESEARC
 
 接真实数据时用 `astock sync`（AkShare，落地到 `ASTOCK_CSV_ROOT`）或把该变量指向已有落地目录；fixture 录制脚本见 `scripts/record_akshare_fixture.py`。`factors compute` 的 JSON 走 stdout、运行说明走 stderr，因此可以直接管道给别的工具。
 
-环境变量汇总：`ASTOCK_CSV_ROOT`、`ASTOCK_SNAPSHOT_ROOT`、`ASTOCK_DATASET`、`ASTOCK_SECURITIES_DATASET`、`ASTOCK_FACTOR_CONFIG_DIR`、`ASTOCK_UNIVERSE_CONFIG`、`ASTOCK_STRATEGY_CONFIG_DIR`、`ASTOCK_SNAPSHOT_BACKEND`、`ASTOCK_WATCHLIST_ROOT`、`ASTOCK_WATCHLIST_BACKEND`、`ASTOCK_JOB_ROOT`、`ASTOCK_DEEP_RESEARCH_CMD`。
+环境变量汇总：`ASTOCK_CSV_ROOT`、`ASTOCK_SNAPSHOT_ROOT`、`ASTOCK_DATASET`、`ASTOCK_SECURITIES_DATASET`、`ASTOCK_FACTOR_CONFIG_DIR`、`ASTOCK_UNIVERSE_CONFIG`、`ASTOCK_STRATEGY_CONFIG_DIR`、`ASTOCK_SNAPSHOT_BACKEND`、`ASTOCK_WATCHLIST_ROOT`、`ASTOCK_WATCHLIST_BACKEND`、`ASTOCK_JOB_ROOT`、`ASTOCK_DEEP_RESEARCH_CMD`、`ASTOCK_WESTOCK_BIN`。
+
+### 财务数据源（2026-09-16 设计补遗 §24）
+
+财务三大表的 bulk 源是腾讯 WeStock CLI，因为它同时给出可靠的 `EndDate`（报告期）与 `InfoPublDate`（公告日期），且支持批量。二进制不随仓库分发：
+
+```bash
+export ASTOCK_WESTOCK_BIN=/path/to/westock
+uv run astock doctor                 # 报告 provider westock-cli [ok] / [unavailable]
+uv run python scripts/record_westock_fixture.py   # 需要时重录契约 fixture
+```
+
+`neodata`（自然语言语义检索）留在研究侧，只经 `ResearchRequest` / `DeepResearchAdapter` 使用：它逐标的、输出渲染后的 Markdown、凭证 12 小时有效且只能由 WorkBuddy 平台刷新，不适合做批量因子源。
 
 ## 测试与质量检查
 

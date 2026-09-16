@@ -479,6 +479,28 @@ def test_doctor_reports_the_provider_it_would_use_for_bulk_data() -> None:
     assert "akshare" in result.stdout.lower()
 
 
+def test_doctor_reports_the_financial_statement_provider(
+    local_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The WeStock CLI is an external command, so doctor must say where it is."""
+    binary = local_tmp / "westock"
+    binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    binary.chmod(0o755)
+    monkeypatch.setenv("ASTOCK_WESTOCK_BIN", str(binary))
+
+    configured = CliRunner().invoke(app, ["doctor"])
+
+    assert configured.exit_code == 0, configured.output
+    assert "westock-cli [ok]" in configured.stdout
+
+    monkeypatch.delenv("ASTOCK_WESTOCK_BIN")
+    missing = CliRunner().invoke(app, ["doctor"])
+
+    assert missing.exit_code == 0, missing.output
+    assert "westock-cli [unavailable]" in missing.stdout
+    assert "ASTOCK_WESTOCK_BIN" in missing.stdout
+
+
 def test_the_watchlist_root_can_be_pointed_elsewhere(local_tmp: Path) -> None:
     """No test writes to the repository's real watchlist directory."""
     _invoke(local_tmp, "watch", "600519.SH", dataset=SHORT_DATASET)

@@ -23,6 +23,7 @@ from astock_lens.candidates.models import Candidate
 from astock_lens.data.contracts import DataProvider
 from astock_lens.data.health import raw_datasets
 from astock_lens.data.providers.akshare_provider import AkShareProvider
+from astock_lens.data.providers.westock import WestockCliProvider
 from astock_lens.data.snapshots.resolve import resolve_snapshot_store
 from astock_lens.data.snapshots.store import SnapshotStore
 from astock_lens.data.sync import SyncResult, land_raw
@@ -347,6 +348,13 @@ def doctor() -> None:
     provider_state = "ok" if provider_health.healthy else "unavailable"
     detail = f" ({provider_health.message})" if provider_health.message else ""
     typer.echo(f"provider {provider_health.provider} [{provider_state}]{detail}")
+
+    # The financial-statement source (design spec §24). Reported without being
+    # run: `doctor` stays read-only, and liveness is only proven by a fetch.
+    westock_health = WestockCliProvider().health()
+    westock_state = "ok" if westock_health.healthy else "unavailable"
+    westock_detail = f" ({westock_health.message})" if westock_health.message else ""
+    typer.echo(f"provider {westock_health.provider} [{westock_state}]{westock_detail}")
 
     if failures:
         typer.echo("doctor found problems:", err=True)
