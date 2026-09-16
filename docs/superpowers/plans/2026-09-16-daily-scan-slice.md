@@ -154,9 +154,24 @@ Named so their absence is a decision, not an omission: Market Regime, Strategy R
 - Create: `src/astock_lens/strategies/scoring.py`
 - Modify: `src/astock_lens/strategies/momentum.py` (add `score_cross_section`)
 - Create: `src/astock_lens/candidates/routing.py`
+- Modify: `src/astock_lens/factors/builtin.py` (add `build_factor`)
+- Modify: `src/astock_lens/factors/registry.py` (add `build_registry`)
+- Modify: `src/astock_lens/pipelines/first_slice.py` (compute every configured factor)
+- Modify: `src/astock_lens/cli/app.py` (load every factor config; `ASTOCK_DATASET`)
 - Modify: `configs/strategies/momentum.yaml`
 - Create: `tests/unit/test_strategy_scoring.py`
 - Create: `tests/unit/test_candidate_routing.py`
+- Modify: `tests/unit/test_momentum_scanner.py` (read factor names from configuration)
+- Modify: `tests/unit/test_cli.py` (scan against the long fixture)
+- Modify: `tests/integration/test_first_slice.py` (state its own single-factor pairing)
+
+**Deviation recorded during execution.** Changing `momentum`'s `required_factors`
+turned out to force the CLI and the first-slice pipeline to compute every
+configured factor rather than one hardcoded factor. Left alone, `astock scan`
+would have printed `candidates: 0` — a configuration mismatch that reads
+exactly like a market verdict, which the design's "data problems must be
+visible" principle exists to prevent. That work was pulled forward from Task 6
+into Task 3 instead of being committed as a known-broken intermediate state.
 
 **Interfaces:**
 
@@ -183,7 +198,7 @@ Named so their absence is a decision, not an omission: Market Regime, Strategy R
 - [ ] Write `tests/unit/test_strategy_scoring.py` and `tests/unit/test_candidate_routing.py` first; confirm failure.
 - [ ] Extend the contract, config, scanner, and add `scoring.py` and `routing.py`.
 - [ ] Add the `weights:` block to `momentum.yaml` with the equal-weight draft and a `PENDING REVIEW` comment naming D4.
-- [ ] Confirm the pre-existing `tests/unit/test_momentum_scanner.py` still passes untouched — it exercises `score()`, whose behaviour is deliberately unchanged.
+- [ ] Update `tests/unit/test_momentum_scanner.py` to read factor names from the configuration. Its assertions keep their intent — `score()` still reports no score for a lone symbol — but they must stop naming `avg_amount_20d`, which momentum no longer requires.
 - [ ] Run the full gate; commit: `feat(strategies): add cross-sectional scoring and next-action routing`.
 
 ---
@@ -265,7 +280,7 @@ Named so their absence is a decision, not an omission: Market Regime, Strategy R
 - [ ] Write `tests/integration/test_daily_scan.py` first: the full chain over `daily_bars_long.csv`, asserting that each Universe exclusion reason fires on the symbol designed to trigger it, that the ranking order matches the hand-computed order, that `next_action` follows D5, and that a second run for the same date overwrites rather than duplicates.
 - [ ] Update `tests/unit/test_cli.py` and `tests/unit/test_api.py` to the new commands, using the long fixture. The assertions' *intent* is unchanged; only the fixture moves.
 - [ ] Implement the pipeline, CLI, and API.
-- [ ] Confirm `run_first_slice` and `tests/integration/test_first_slice.py` still pass unmodified — the previous slice's acceptance evidence is not rewritten.
+- [ ] Confirm `tests/integration/test_first_slice.py` still passes. It now states its own single-factor strategy pairing instead of borrowing `momentum.yaml`, because the previous slice's pairing is historical: the momentum strategy ranks on returns, not on liquidity. `run_first_slice` itself gained the multi-factor loop in Task 3.
 - [ ] Run the whole chain by hand through the CLI and paste the real output into the PR body.
 - [ ] Update `README.md`: the status table, the new commands, and an explicit list of what is still missing.
 - [ ] Run the full gate; commit: `feat(pipeline): add daily scan pipeline with universe and scoring`.
