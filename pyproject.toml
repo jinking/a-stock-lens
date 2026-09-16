@@ -26,6 +26,9 @@ data = [
 ]
 providers = ["akshare>=1.14"]
 
+[project.scripts]
+astock = "astock_lens.cli.app:app"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/astock_lens"]
 
