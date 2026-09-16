@@ -25,6 +25,11 @@ Checks, each traceable to `docs/ARCHITECTURE.md` §20.2:
   point-in-time evidence;
 - `cited_strategy_version` — a candidate's lineage version equals the version
   on every strategy result it cites.
+
+`validate_job_manifest` checks the other artifact a daily run leaves behind:
+the job manifest, whose stages an operator reads to see what actually ran.
+Its checks are named the same way, and it shares no code with the pipeline
+that wrote it.
 """
 
 from collections.abc import Collection, Mapping, Sequence
@@ -69,6 +74,32 @@ VERSION_KEYS: dict[str, tuple[str, ...]] = {
     "STRATEGY": ("strategy_version",),
     "CANDIDATE": ("strategy_version",),
 }
+
+# The eleven stages `spec §15` names, in the order the design lists them.
+JOB_STAGES: tuple[str, ...] = (
+    "SYNC_DATA",
+    "NORMALIZE",
+    "BUILD_UNIVERSE",
+    "COMPUTE_FACTORS",
+    "RUN_STRATEGIES",
+    "DETECT_REGIME",
+    "MARKET_VALIDATE",
+    "RUN_SIGNALS",
+    "BUILD_CANDIDATES",
+    "UPDATE_WATCHLIST",
+    "GENERATE_DAILY_SNAPSHOT",
+)
+
+REQUIRED_JOB_KEYS: frozenset[str] = frozenset(
+    {"job_type", "as_of", "status", "started_at"}
+)
+
+TERMINAL_JOB_STATUSES: frozenset[str] = frozenset(
+    {"SUCCEEDED", "FAILED", "BLOCKED", "SKIPPED"}
+)
+
+# Statuses that assert something went wrong, and so must carry the reason.
+PROBLEM_JOB_STATUSES: frozenset[str] = frozenset({"FAILED", "BLOCKED"})
 
 
 @dataclass(frozen=True)
@@ -117,6 +148,183 @@ def validate_snapshot(
         findings.extend(_cited_scores(kind, record, symbol))
 
     return tuple(findings)
+
+
+def validate_job_manifest(
+    records: Sequence[Mapping[str, object]],
+    *,
+    as_of: datetime,
+) -> tuple[ArtifactFinding, ...]:
+    """Judge one day's job manifest: the record of what actually ran.
+
+    An empty manifest is reported rather than accepted: a date with no stage
+    runs means the pipeline never ran, which is a finding about the artifact
+    and not a quiet success.
+    """
+    findings: list[ArtifactFinding] = []
+
+    if not records:
+        return (
+            ArtifactFinding(
+                check="manifest_stages",
+                symbol="",
+                observed="the manifest carries no stage runs at all",
+            ),
+        )
+
+    seen: set[str] = set()
+    for index, record in enumerate(records):
+        stage = _text(record.get("job_type"))
+        label = stage or f"record #{index}"
+        findings.extend(_job_keys(record, label))
+        findings.extend(_job_stage(stage, label))
+        findings.extend(_job_duplicate(stage, label, seen))
+        findings.extend(_job_status(record, label))
+        findings.extend(_job_timestamps(record, label, as_of))
+
+    missing = [stage for stage in JOB_STAGES if stage not in seen]
+    if missing:
+        findings.append(
+            ArtifactFinding(
+                check="manifest_stages",
+                symbol="",
+                observed=f"stages with no run recorded: {', '.join(missing)}",
+            )
+        )
+
+    return tuple(findings)
+
+
+def _job_keys(record: Mapping[str, object], label: str) -> list[ArtifactFinding]:
+    missing = sorted(REQUIRED_JOB_KEYS - set(record))
+    if not missing:
+        return []
+    return [
+        ArtifactFinding(
+            check="required_keys",
+            symbol=label,
+            observed=f"missing keys {missing}",
+        )
+    ]
+
+
+def _job_stage(stage: str, label: str) -> list[ArtifactFinding]:
+    if not stage or stage in JOB_STAGES:
+        return []
+    return [
+        ArtifactFinding(
+            check="known_stage",
+            symbol=label,
+            observed=f"job_type {stage!r} is not one of the design's stages",
+        )
+    ]
+
+
+def _job_duplicate(stage: str, label: str, seen: set[str]) -> list[ArtifactFinding]:
+    if not stage:
+        return []
+    if stage in seen:
+        return [
+            ArtifactFinding(
+                check="duplicate_stage",
+                symbol=label,
+                observed=f"{stage} appears more than once in one manifest",
+            )
+        ]
+    seen.add(stage)
+    return []
+
+
+def _job_status(record: Mapping[str, object], label: str) -> list[ArtifactFinding]:
+    status = _text(record.get("status"))
+    findings: list[ArtifactFinding] = []
+
+    if status not in TERMINAL_JOB_STATUSES and status != "RUNNING":
+        findings.append(
+            ArtifactFinding(
+                check="job_status",
+                symbol=label,
+                observed=f"status {status!r} is not a known job status",
+            )
+        )
+        return findings
+
+    finished = record.get("finished_at")
+    if status == "RUNNING" and finished is not None:
+        findings.append(
+            ArtifactFinding(
+                check="job_status",
+                symbol=label,
+                observed="a RUNNING stage recorded finished_at",
+            )
+        )
+    if status in TERMINAL_JOB_STATUSES and finished is None:
+        findings.append(
+            ArtifactFinding(
+                check="job_status",
+                symbol=label,
+                observed=f"a {status} stage has no finished_at",
+            )
+        )
+
+    error = _text(record.get("error"))
+    if status in PROBLEM_JOB_STATUSES and not error:
+        findings.append(
+            ArtifactFinding(
+                check="job_status",
+                symbol=label,
+                observed=f"a {status} stage carries no error explanation",
+            )
+        )
+    if status not in PROBLEM_JOB_STATUSES and error:
+        findings.append(
+            ArtifactFinding(
+                check="job_status",
+                symbol=label,
+                observed=f"a {status} stage carries an error: {error!r}",
+            )
+        )
+    return findings
+
+
+def _job_timestamps(
+    record: Mapping[str, object], label: str, as_of: datetime
+) -> list[ArtifactFinding]:
+    findings: list[ArtifactFinding] = []
+    for key in ("as_of", "started_at", "finished_at"):
+        value = record.get(key)
+        if value is None and key == "finished_at":
+            continue
+        moment = _parse_datetime(value)
+        if moment is None or moment.tzinfo is None:
+            findings.append(
+                ArtifactFinding(
+                    check="timestamp",
+                    symbol=label,
+                    observed=f"{key} is {value!r}: missing or naive",
+                )
+            )
+            continue
+        if key == "as_of" and moment != as_of:
+            findings.append(
+                ArtifactFinding(
+                    check="timestamp",
+                    symbol=label,
+                    observed=f"{key} is {value!r}, the manifest is for {as_of}",
+                )
+            )
+
+    started = _parse_datetime(record.get("started_at"))
+    finished = _parse_datetime(record.get("finished_at"))
+    if started is not None and finished is not None and finished < started:
+        findings.append(
+            ArtifactFinding(
+                check="timestamp",
+                symbol=label,
+                observed="finished_at is earlier than started_at",
+            )
+        )
+    return findings
 
 
 def _required_keys(
@@ -308,23 +516,37 @@ def _cited_versions(
     if kind != "CANDIDATE":
         return []
 
-    cited_version = _text(_mapping(record.get("lineage")).get("strategy_version"))
+    declared = _versions_declared(
+        _text(_mapping(record.get("lineage")).get("strategy_version"))
+    )
     findings: list[ArtifactFinding] = []
     for index, cited in enumerate(_cited_results(record)):
         result_version = _text(_mapping(cited.get("lineage")).get("strategy_version"))
-        if result_version != cited_version:
+        if result_version not in declared:
             findings.append(
                 ArtifactFinding(
                     check="cited_strategy_version",
                     symbol=_text(cited.get("symbol")) or symbol,
                     observed=(
                         f"strategy_results[{index}] carries "
-                        f"{result_version!r}, the candidate declares "
-                        f"{cited_version!r}"
+                        f"{result_version!r}, which the candidate's lineage "
+                        f"({sorted(declared)}) does not declare"
                     ),
                 )
             )
     return findings
+
+
+def _versions_declared(declared: str) -> frozenset[str]:
+    """Split a lineage version field into the versions it declares.
+
+    A run may score with more than one scanner, and each carries its own
+    version, so a lineage field can list several — comma-separated. An empty
+    field declares nothing, which fails the `empty_version` check elsewhere.
+    """
+    return frozenset(
+        part for part in (item.strip() for item in declared.split(",")) if part
+    )
 
 
 def _cited_results(record: Mapping[str, object]) -> list[Mapping[str, object]]:
