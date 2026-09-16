@@ -1,7 +1,9 @@
 """Provider and normalization contracts."""
 
 from datetime import date, datetime
-from typing import Protocol
+from typing import Protocol, Self
+
+from pydantic import model_validator
 
 from astock_lens.domain.enums import DataStatus
 from astock_lens.domain.models import (
@@ -11,12 +13,38 @@ from astock_lens.domain.models import (
 )
 
 
-class RawDataset(DomainRecord):
-    """Fetch metadata for one provider dataset.
+class RawPayload(DomainRecord):
+    """Source-shaped rows exactly as the provider delivered them.
 
-    Raw payloads keep the source shape and are stored by the raw storage layer;
-    this record carries only the metadata that the architecture requires
-    alongside them.
+    Every cell stays a string. `docs/ARCHITECTURE.md` requires the raw layer to
+    preserve the source shape, and converting values is the normalizer's job —
+    a provider that guessed types would be cleaning data it does not own.
+    Columns and rows keep their source order so a row can be mapped back
+    without a schema.
+    """
+
+    columns: tuple[str, ...]
+    rows: tuple[tuple[str, ...], ...]
+
+    @model_validator(mode="after")
+    def _reject_ragged_rows(self) -> Self:
+        """A short or long row means the file is not shaped as declared."""
+        width = len(self.columns)
+        for index, row in enumerate(self.rows):
+            if len(row) != width:
+                raise ValueError(
+                    f"row {index} has {len(row)} cells but {width} columns are declared"
+                )
+        return self
+
+
+class RawDataset(DomainRecord):
+    """Fetch metadata for one provider dataset, plus its raw payload.
+
+    Raw payloads keep the source shape; this record carries the metadata the
+    architecture requires alongside them. `payload` is `None` when the fetch
+    produced nothing — the `status` field then explains why, and callers must
+    read it rather than assume an empty payload means an empty market.
     """
 
     provider: str
@@ -27,6 +55,7 @@ class RawDataset(DomainRecord):
     row_count: int
     trade_date: date | None = None
     report_period: date | None = None
+    payload: RawPayload | None = None
 
 
 class FetchRequest(DomainRecord):

@@ -11,3 +11,4 @@ htmlcov/
 var/astock.duckdb
 var/logs/*.log
 data/**/*.parquet
+tests/.tmp/
