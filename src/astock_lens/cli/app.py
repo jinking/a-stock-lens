@@ -23,10 +23,15 @@ from astock_lens.candidates.models import Candidate
 from astock_lens.data.contracts import DataProvider
 from astock_lens.data.health import raw_datasets
 from astock_lens.data.providers.akshare_provider import AkShareProvider
-from astock_lens.data.providers.westock import WestockCliProvider
+from astock_lens.data.providers.westock import FINANCIAL_DATASETS, WestockCliProvider
 from astock_lens.data.snapshots.resolve import resolve_snapshot_store
 from astock_lens.data.snapshots.store import SnapshotStore
-from astock_lens.data.sync import SyncResult, land_raw
+from astock_lens.data.sync import (
+    SyncResult,
+    land_financial_statements,
+    land_raw,
+    read_symbols,
+)
 from astock_lens.domain.enums import SnapshotKind, WatchlistState
 from astock_lens.factors.config import FactorConfig, load_factor_config
 from astock_lens.factors.contracts import FactorResult
@@ -227,6 +232,11 @@ def _watchlist_store() -> WatchlistStore:
 
 def _job_store() -> JsonJobStore:
     return JsonJobStore(Path(os.getenv(JOB_ROOT_ENV, str(DEFAULT_JOB_ROOT))))
+
+
+def _financial_provider() -> WestockCliProvider:
+    """The provider financial statements are landed from (design spec §24)."""
+    return WestockCliProvider()
 
 
 def _bulk_provider() -> DataProvider:
@@ -826,6 +836,13 @@ def sync(
         list[str] | None,
         typer.Option("--symbol", help="Limit the sync to these symbols."),
     ] = None,
+    financials: Annotated[
+        bool,
+        typer.Option(
+            "--financials",
+            help="Also land the three financial statements from the WeStock CLI.",
+        ),
+    ] = False,
 ) -> None:
     """Land raw data for one date, skipping what is already there.
 
@@ -848,7 +865,14 @@ def sync(
         as_of=day,
         symbols=tuple(symbol) if symbol else None,
     )
-    for landing in result.landings:
+    landings = list(result.landings)
+    failed = list(result.failed_datasets)
+    if financials:
+        financial_result = _land_financials(day, symbols=symbol)
+        landings.extend(financial_result.landings)
+        failed.extend(financial_result.failed_datasets)
+
+    for landing in landings:
         typer.echo(
             f"{landing.dataset} {landing.status}: {landing.rows_written} rows "
             f"written, {landing.rows_total} in {landing.path}"
@@ -858,12 +882,45 @@ def sync(
                 f"  skipped {len(landing.symbols_skipped)} symbols already "
                 "landed for this date"
             )
+        if landing.symbols_missing:
+            typer.echo(
+                f"  {len(landing.symbols_missing)} symbols were requested but "
+                "the source returned nothing for them"
+            )
         if landing.note is not None:
             typer.echo(f"  {landing.note}")
 
-    if not result.is_complete:
-        typer.echo(f"sync incomplete: {', '.join(result.failed_datasets)}", err=True)
+    if failed:
+        typer.echo(f"sync incomplete: {', '.join(failed)}", err=True)
         raise typer.Exit(code=1)
+
+
+def _land_financials(day: datetime, *, symbols: list[str] | None) -> SyncResult:
+    """Land the three statements for the symbols the listing carries."""
+    wanted = tuple(symbols) if symbols else read_symbols(_csv_root() / "securities.csv")
+    if not wanted:
+        typer.echo(
+            "no symbols to fetch statements for: land the securities listing "
+            "first, or pass --symbol",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    provider = _financial_provider()
+    health = provider.health()
+    if not health.healthy:
+        typer.echo(
+            f"provider {health.provider} is not usable: {health.message}", err=True
+        )
+        raise typer.Exit(code=1)
+
+    return land_financial_statements(
+        provider=provider,
+        root=_csv_root(),
+        as_of=day,
+        symbols=wanted,
+        datasets=tuple(sorted(FINANCIAL_DATASETS)),
+    )
 
 
 @app.command()

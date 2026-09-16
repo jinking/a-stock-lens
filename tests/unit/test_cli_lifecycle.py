@@ -99,6 +99,44 @@ class StubProvider:
         )
 
 
+class StubFinancialProvider:
+    """A WeStock-shaped provider that answers from memory."""
+
+    def __init__(self, *, healthy: bool = True) -> None:
+        self.requests: list[FetchRequest] = []
+        self._healthy = healthy
+
+    def health(self) -> ProviderHealth:
+        return ProviderHealth(
+            provider="westock-cli",
+            healthy=self._healthy,
+            status=DataStatus.VALUE if self._healthy else DataStatus.SOURCE_ERROR,
+            checked_at=datetime(2026, 9, 4, 15, 5, tzinfo=UTC),
+            message=None if self._healthy else "binary missing",
+        )
+
+    def fetch(self, request: FetchRequest) -> RawDataset:
+        self.requests.append(request)
+        symbols: Sequence[str] = request.symbols or ()
+        rows = tuple(
+            (f"sh{symbol[:6]}", "2026-06-30", "2026-08-15", "100.0")
+            for symbol in symbols
+        )
+        return RawDataset(
+            provider="westock-cli",
+            dataset=request.dataset,
+            fetched_at=datetime(2026, 9, 4, 15, 5, tzinfo=UTC),
+            provider_version="v1",
+            status=DataStatus.VALUE if rows else DataStatus.NULL,
+            row_count=len(rows),
+            missing_symbols=(),
+            payload=RawPayload(
+                columns=("code", "EndDate", "InfoPublDate", "OperatingRevenue"),
+                rows=rows,
+            ),
+        )
+
+
 def _env(
     local_tmp: Path, *, dataset: str = LONG_DATASET, **extra: str
 ) -> dict[str, str]:
@@ -388,6 +426,84 @@ def test_sync_lands_raw_data_and_reports_what_it_wrote(
     assert (raw_root / "daily_bars.csv").is_file()
     assert "securities" in result.stdout
     assert "daily_bars" in result.stdout
+
+
+def test_sync_can_also_land_the_financial_statements(
+    local_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import astock_lens.cli.app as cli_module
+
+    raw_root = local_tmp / "raw"
+    financial = StubFinancialProvider()
+    monkeypatch.setattr(cli_module, "_bulk_provider", StubProvider)
+    monkeypatch.setattr(cli_module, "_financial_provider", lambda: financial)
+
+    result = CliRunner().invoke(
+        app,
+        ["sync", "--as-of", DAY, "--financials"],
+        env=_env(local_tmp) | {"ASTOCK_CSV_ROOT": str(raw_root)},
+    )
+
+    assert result.exit_code == 0, result.output
+    for name in ("financial_income", "financial_balance", "financial_cashflow"):
+        assert (raw_root / f"{name}.csv").is_file(), name
+    assert "financial_income" in result.stdout
+    # The listing decided the symbols: the stub listing carries one instrument.
+    assert {
+        symbol for request in financial.requests for symbol in request.symbols or ()
+    } == {"600519.SH"}
+
+
+def test_sync_financials_refuses_an_unusable_provider(
+    local_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import astock_lens.cli.app as cli_module
+
+    monkeypatch.setattr(cli_module, "_bulk_provider", StubProvider)
+    monkeypatch.setattr(
+        cli_module, "_financial_provider", lambda: StubFinancialProvider(healthy=False)
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["sync", "--as-of", DAY, "--financials"],
+        env=_env(local_tmp) | {"ASTOCK_CSV_ROOT": str(local_tmp / "raw")},
+    )
+
+    assert result.exit_code == 1
+    assert "not usable" in result.output
+
+
+def test_sync_financials_needs_a_symbol_list(
+    local_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import astock_lens.cli.app as cli_module
+
+    class NoListingProvider(StubProvider):
+        def fetch(self, request: FetchRequest) -> RawDataset:
+            self.requests.append(request)
+            return RawDataset(
+                provider="stub",
+                dataset=request.dataset,
+                fetched_at=datetime(2026, 9, 4, 15, 5, tzinfo=UTC),
+                provider_version="v1",
+                status=DataStatus.NULL,
+                row_count=0,
+            )
+
+    monkeypatch.setattr(cli_module, "_bulk_provider", NoListingProvider)
+    monkeypatch.setattr(
+        cli_module, "_financial_provider", lambda: StubFinancialProvider()
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["sync", "--as-of", DAY, "--financials"],
+        env=_env(local_tmp) | {"ASTOCK_CSV_ROOT": str(local_tmp / "raw")},
+    )
+
+    assert result.exit_code == 1
+    assert "no symbols" in result.output
 
 
 # --- research --------------------------------------------------------------
