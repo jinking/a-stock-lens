@@ -122,12 +122,18 @@ a-stock-lens/
 Bulk / Screening                Research Enhancement
 ----------------                --------------------
 AkShare                         a-share-deep-research
+腾讯 WeStock CLI（三大表）         ├─ westock-npm
 交易所公开数据                    ├─ westock-npm
 免费备用源                        ├─ westock-cli
                                 └─ neodata
 ```
 
 V1 中 A-Stock Lens 不复制现有深研 Provider 代码，而通过 Research Adapter 使用它。
+
+> 2026-09-16 补遗（设计规格 §24）：财务三大表改用腾讯 WeStock CLI 作为 bulk 源，
+> 因为它同时给出可靠的 `EndDate` + `InfoPublDate`，并支持批量（100 只 / 11 秒，实测）。
+> 调用方式是外部命令；A-Stock Lens 不导入深研项目的 Python 模块与内部状态。
+> `neodata` 仍留在研究侧，只经 `ResearchRequest` / `DeepResearchAdapter` 使用。
 
 ### 4.2 Raw Layer
 

@@ -47,6 +47,10 @@ The existing `a-share-deep-research` repository already separates research data 
 
 A-Stock Lens therefore does not reimplement the deep-research system. It uses bulk-friendly free/public providers for full-market screening, then creates a `ResearchRequest` for selected stocks.
 
+*Amended by §24 (2026-09-16): the bulk financial-statement source moved to the
+same Tencent WeStock CLI the deep-research stack uses. `neodata` keeps the
+candidate-level role described above.*
+
 ## 4. System Boundary
 
 ```text
@@ -116,6 +120,7 @@ Historical computation rule:
 Bulk scanning:
 
 - AkShare;
+- Tencent WeStock CLI (financial statements; see §24);
 - exchange/public datasets;
 - free fallback providers.
 
@@ -509,3 +514,34 @@ Only when this chain is demonstrably functional should V1 be called complete.
 5. Strategy definitions remain distinct; do not converge them into one generic weighted model.
 6. Keep Stock Lens focused on discovery and lifecycle; keep Deep Research focused on evidence-heavy company research.
 7. Keep V1 narrow enough to finish.
+
+## 24. Amendment 2026-09-16 — Data Source Boundary
+
+**Status:** approved by the project owner in conversation, then recorded here.
+
+The archived design package assigned the three deep-research source groups
+(`westock-npm`, `westock-cli`, `neodata`) exclusively to the research side.
+Measurement on 2026-09-16 changed one part of that:
+
+- The Tencent WeStock CLI (`westock finance`) is the only tested source that
+  pairs a **report period with a reliable publication date** (`EndDate` +
+  `InfoPublDate`, both required by §5.1) and that supports **batching**
+  (`westock finance sh600000,sz000001`). 100 symbols cost ~11s with full
+  coverage, which puts a whole-market quarterly refresh near the §21 target.
+  The AkShare/Sina statement endpoints return a `公告日期` that is *not* the
+  original filing date (measured: the FY2025 balance sheet carries
+  `20260815`, while the same period's income statement carries `20260417`),
+  so they cannot carry the point-in-time rule on their own.
+- Therefore **bulk financial statements come from WeStock** and are landed
+  through the ordinary Provider → Raw → Normalized → Quality Gate path.
+  WeStock is invoked as an external command; A-Stock Lens does not import
+  deep-research Python modules and does not read its internal state.
+- **`neodata` keeps its candidate-level role.** It answers natural-language
+  questions with rendered markdown, is queried per entity, and carries a
+  12-hour credential that only the WorkBuddy platform can refresh, so it is
+  not a bulk factor source. It is reached through `ResearchRequest` →
+  `DeepResearchAdapter` like the rest of the research side.
+- AkShare keeps the roles it already holds: the exchange listings (symbol
+  enumeration) and daily bars.
+
+Everything else in §3, §4 and §5.2 stands unchanged.

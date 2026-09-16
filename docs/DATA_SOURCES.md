@@ -6,12 +6,18 @@
 批量扫描 / 选股                     研究增强
 -----------------------            --------------------------
 AkShare                            a-share-deep-research
+腾讯 WeStock CLI（三大表）           ├─ westock-npm
 交易所公开数据                       ├─ westock-npm
 免费备用源                           ├─ westock-cli
                                     └─ neodata
 ```
 
 全市场批量扫描只使用免费或公开数据源。深度研究阶段不重复造数据层，而是通过适配器使用现有 `a-share-deep-research`。
+
+2026-09-16 补遗（设计规格 §24）：财务三大表的 bulk 源是腾讯 WeStock CLI——它同时给出
+`EndDate`（报告期）与 `InfoPublDate`（公告日期），并支持批量拉取（100 只 11 秒，实测）；
+进入系统的路径仍是 Provider → Raw → Normalized → Quality Gate。`neodata` 是自然语言语义
+检索、逐标的、凭证 12 小时有效，属研究侧，只经 Adapter 使用。
 
 ## 2. Provider 分层
 

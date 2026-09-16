@@ -68,3 +68,29 @@ out. That call shape is an integration detail recorded here, not a product
 rule; job states remain the other system's vocabulary and are passed through
 unchanged. With no command configured, `astock research` refuses by name
 rather than pretending to submit.
+
+## Data-source boundary amendment (2026-09-16)
+
+The project owner approved moving the bulk financial-statement source to the
+same Tencent WeStock CLI the deep-research stack uses, and leaving `neodata` on
+the research side. The amendment itself is written into the spec as §24, and
+`docs/PRODUCT.md` §4.2, `docs/ARCHITECTURE.md` §4.1 and `docs/DATA_SOURCES.md`
+§1–2 point at it. What the decision rests on, measured that day:
+
+| Evidence | Result |
+| --- | --- |
+| `westock finance sh600519 --type income --fields all` | `EndDate` (report period) **and** `InfoPublDate` (publication date) |
+| Same call with the default `--fields core` | no publication date at all |
+| AkShare/Sina statements | publication date is not the original filing date (FY2025 balance sheet says `20260815`, the same period's income statement says `20260417`) |
+| 100 symbols in one batch | 11.4s, 100 rows returned — a whole-market quarterly refresh lands near the §21 target |
+| CLI batch summary (`成功: 1`) | says success even for an invalid code, so coverage is computed from returned codes instead |
+| `neodata` query for the latest report | answered with structured markdown including `发布日期` / `统计截止日期` / `报告期` (2026-H1 works when the period is named), but it is per-entity, prose-shaped, and its 12-hour credential can only be refreshed by the WorkBuddy platform |
+
+Consequences recorded in code:
+
+- `RawDataset.missing_symbols` exists because a source can answer a batch
+  partially without saying so;
+- the provider always requests `--fields all`, and that is asserted by a test
+  rather than left to convention;
+- WeStock is invoked as an external command. No deep-research Python module is
+  imported and no internal state is read (`ARCHITECTURE.md` §4.1).
