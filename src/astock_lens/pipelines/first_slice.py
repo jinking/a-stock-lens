@@ -25,20 +25,15 @@ from pathlib import Path
 from astock_lens.candidates.builder import CandidateBuilder
 from astock_lens.candidates.models import Candidate
 from astock_lens.candidates.routing import route_next_action
-from astock_lens.data.contracts import FetchRequest, NormalizedDataset
-from astock_lens.data.normalize.csv_bars import CsvDailyBarNormalizer
-from astock_lens.data.providers.local import LocalCsvProvider
-from astock_lens.data.quality.gate import (
-    DailyBarQualityGate,
-    QualityReport,
-    valid_bars,
-)
+from astock_lens.data.contracts import NormalizedDataset
+from astock_lens.data.quality.gate import QualityReport
 from astock_lens.data.snapshots.store import SnapshotStore
 from astock_lens.domain.enums import SnapshotKind
 from astock_lens.domain.models import DomainRecord, SnapshotLineage
 from astock_lens.factors.config import FactorConfig
 from astock_lens.factors.contracts import FactorContext, FactorResult
 from astock_lens.factors.registry import build_registry
+from astock_lens.pipelines import stages
 from astock_lens.strategies.config import StrategyConfig
 from astock_lens.strategies.contracts import StrategyContext, StrategyResult
 from astock_lens.strategies.momentum import MomentumScanner
@@ -72,18 +67,13 @@ def run_first_slice(
     Configuration is passed in rather than loaded here, so a caller can see
     exactly which factor windows and strategy version a run used.
     """
-    raw = LocalCsvProvider(csv_root).fetch(FetchRequest(dataset=dataset, as_of=as_of))
-    normalized = CsvDailyBarNormalizer().normalize(raw, as_of=as_of)
-    report = DailyBarQualityGate().check(normalized)
-
-    # Only bars the gate did not flag reach the factor engine. The report still
-    # records what was set aside, so the removal stays visible.
-    gated = NormalizedDataset(
-        dataset=normalized.dataset,
-        as_of=normalized.as_of,
-        daily_bars=valid_bars(normalized, report),
-        parse_failures=normalized.parse_failures,
-    )
+    # The same normalization stage the daily pipeline uses, so a factor never
+    # sees a different dataset depending on which command computed it — the
+    # fundamental factors in particular need the observations, and gating them
+    # twice with two different code paths would be two definitions of "usable".
+    outcome = stages.normalize_stage(csv_root=csv_root, as_of=as_of, dataset=dataset)
+    gated = outcome.bars
+    report = outcome.quality_report
 
     registry = build_registry(factor_configs)
     # The registry fixes the order once, so every symbol is measured by the
