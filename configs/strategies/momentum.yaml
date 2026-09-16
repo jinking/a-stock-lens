@@ -2,6 +2,11 @@ id: momentum
 enabled: true
 version: v1
 description: Absolute and relative price strength, trend, and volume confirmation.
+# Only factors that actually exist are listed. Naming a factor the engine cannot
+# compute would make every symbol permanently ineligible, which reads like a
+# market verdict instead of a missing implementation.
+required_factors:
+  - avg_amount_20d
 dimensions:
   - 20/60/120-day returns
   - relative strength versus CSI 300
