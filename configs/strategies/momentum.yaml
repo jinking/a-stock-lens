@@ -5,8 +5,27 @@ description: Absolute and relative price strength, trend, and volume confirmatio
 # Only factors that actually exist are listed. Naming a factor the engine cannot
 # compute would make every symbol permanently ineligible, which reads like a
 # market verdict instead of a missing implementation.
+#
+# These three are the momentum dimensions the design names (spec §8.1) that the
+# daily bars already stored can actually support: two return horizons and the
+# distance from the trailing high. Liquidity is not repeated here — the Universe
+# already gates on it, and requiring it twice would mean two places to change.
 required_factors:
-  - avg_amount_20d
+  - ret_20d
+  - ret_60d
+  - proximity_52w_high
+# PENDING REVIEW.
+#
+# `docs/ARCHITECTURE.md` §8.3 puts weights in YAML. These are a first draft, not
+# a reviewed judgement, and they are equal on purpose: any other split asserts
+# that one momentum horizon matters more than another, which is a product claim
+# nobody has made yet. Edit the numbers here to change the ranking — no code
+# change is required, and tests/unit/test_strategy_scoring.py demonstrates the
+# ranking following the weights.
+weights:
+  ret_20d: 1.0
+  ret_60d: 1.0
+  proximity_52w_high: 1.0
 dimensions:
   - 20/60/120-day returns
   - relative strength versus CSI 300

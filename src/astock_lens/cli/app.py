@@ -18,7 +18,7 @@ import typer
 from pydantic import ValidationError
 
 from astock_lens.data.snapshots.store import JsonSnapshotStore
-from astock_lens.factors.config import load_factor_config
+from astock_lens.factors.config import FactorConfig, load_factor_config
 from astock_lens.pipelines.first_slice import FirstSliceResult, run_first_slice
 from astock_lens.settings import load_app_config
 from astock_lens.strategies.config import load_strategy_config
@@ -27,10 +27,13 @@ MINIMUM_PYTHON = (3, 12)
 
 CSV_ROOT_ENV = "ASTOCK_CSV_ROOT"
 SNAPSHOT_ROOT_ENV = "ASTOCK_SNAPSHOT_ROOT"
+DATASET_ENV = "ASTOCK_DATASET"
+FACTOR_CONFIG_DIR_ENV = "ASTOCK_FACTOR_CONFIG_DIR"
 DEFAULT_CSV_ROOT = Path("data/raw")
 DEFAULT_SNAPSHOT_ROOT = Path("data/snapshots")
+DEFAULT_DATASET = "daily_bars"
+DEFAULT_FACTOR_CONFIG_DIR = Path("configs/factors")
 
-FACTOR_CONFIG_PATH = Path("configs/factors/avg_amount_20d.yaml")
 STRATEGY_CONFIG_PATH = Path("configs/strategies/momentum.yaml")
 
 # A bare trade date means the A-share close on that day.
@@ -76,16 +79,32 @@ def _as_of(value: str) -> datetime:
     return datetime(day.year, day.month, day.day, CLOSE_HOUR, tzinfo=SHANGHAI)
 
 
+def _factor_configs() -> tuple[FactorConfig, ...]:
+    """Load every factor configured under the factor directory.
+
+    Every factor is computed for every symbol; the scanner then uses the subset
+    its own configuration requires. Adding a factor is therefore a new file
+    here rather than a code change.
+    """
+    directory = Path(os.getenv(FACTOR_CONFIG_DIR_ENV, str(DEFAULT_FACTOR_CONFIG_DIR)))
+    paths = sorted(directory.glob("*.yaml"))
+    if not paths:
+        typer.echo(f"no factor configuration found under {directory}", err=True)
+        raise typer.Exit(code=1)
+    return tuple(load_factor_config(path) for path in paths)
+
+
 def _run_slice(as_of_value: str) -> FirstSliceResult:
     """Run the first slice using the configured paths."""
     return run_first_slice(
         csv_root=Path(os.getenv(CSV_ROOT_ENV, str(DEFAULT_CSV_ROOT))),
         as_of=_as_of(as_of_value),
-        factor_config=load_factor_config(FACTOR_CONFIG_PATH),
+        factor_configs=_factor_configs(),
         strategy_config=load_strategy_config(STRATEGY_CONFIG_PATH),
         store=JsonSnapshotStore(
             Path(os.getenv(SNAPSHOT_ROOT_ENV, str(DEFAULT_SNAPSHOT_ROOT)))
         ),
+        dataset=os.getenv(DATASET_ENV, DEFAULT_DATASET),
     )
 
 
@@ -126,6 +145,35 @@ def doctor() -> None:
             presence = "present" if path.exists() else "absent"
             typer.echo(f"{label}: {path} [{presence}]")
 
+    try:
+        configured = _factor_configs()
+    except (OSError, ValueError, ValidationError) as error:
+        typer.echo("factor configs [failed]", err=True)
+        typer.echo(f"  {error}", err=True)
+        failures.append("factor configuration could not be loaded")
+    else:
+        typer.echo(f"factors: {', '.join(config.name for config in configured)}")
+
+    strategy_path = STRATEGY_CONFIG_PATH
+    try:
+        strategy = load_strategy_config(strategy_path)
+    except (OSError, ValueError, ValidationError) as error:
+        typer.echo(f"strategy {strategy_path} [failed]", err=True)
+        typer.echo(f"  {error}", err=True)
+        failures.append(
+            f"strategy configuration could not be loaded from {strategy_path}"
+        )
+    else:
+        weights = (
+            "none reviewed, a scan will not rank"
+            if not strategy.weights
+            else ", ".join(
+                f"{name}={value}" for name, value in strategy.weights.items()
+            )
+        )
+        typer.echo(f"strategy {strategy.id} {strategy.version} [ok]")
+        typer.echo(f"  weights: {weights}")
+
     if failures:
         typer.echo("doctor found problems:", err=True)
         for failure in failures:
@@ -135,7 +183,7 @@ def doctor() -> None:
 
 @factors_app.command("compute")
 def factors_compute(as_of: Annotated[str, AS_OF_OPTION]) -> None:
-    """Compute the configured factors and print one JSON document per result.
+    """Compute every configured factor and print one JSON document per result.
 
     Machine-readable output goes to stdout; run notes go to stderr, so the
     stream can be piped into another tool unchanged.
@@ -156,12 +204,24 @@ def factors_compute(as_of: Annotated[str, AS_OF_OPTION]) -> None:
 def scan(as_of: Annotated[str, AS_OF_OPTION]) -> None:
     """Run the first slice and report the candidates it produced.
 
-    A candidate is a research object, not a recommendation. Every candidate
-    currently carries `IGNORE` because no reviewed routing rule exists yet.
+    A candidate is a research object, not a recommendation. `next_action`
+    follows from the score by ordering alone: an eligible symbol carrying a
+    measured score is worth watching, and nothing else is.
+
+    This command reports no score, because the first slice evaluates one symbol
+    at a time and a percentile needs a population. Cross-sectional ranking
+    belongs to the daily scan.
     """
     result = _run_slice(as_of)
+    by_symbol = {item.symbol: item for item in result.strategy_results}
 
     typer.echo(f"candidates: {len(result.candidates)}")
     for candidate in result.candidates:
-        typer.echo(f"  {candidate.symbol} -> {candidate.next_action}")
+        strategy_result = by_symbol[candidate.symbol]
+        score = (
+            "score -"
+            if strategy_result.score is None
+            else f"score {strategy_result.score:.2f}"
+        )
+        typer.echo(f"  {candidate.symbol} -> {candidate.next_action} ({score})")
     typer.echo(f"snapshot: {result.candidate_snapshot_path}")

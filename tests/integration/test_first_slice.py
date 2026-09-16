@@ -16,21 +16,30 @@ from astock_lens.data.snapshots.store import JsonSnapshotStore, SnapshotStore
 from astock_lens.domain.enums import DataStatus, NextAction, SnapshotKind
 from astock_lens.factors.config import load_factor_config
 from astock_lens.pipelines.first_slice import FirstSliceResult, run_first_slice
-from astock_lens.strategies.config import load_strategy_config
+from astock_lens.strategies.config import StrategyConfig
 
 ROOT = Path(__file__).resolve().parents[2]
 CSV_ROOT = ROOT / "tests" / "fixtures" / "csv"
 AS_OF = datetime(2026, 9, 4, 15, 0, tzinfo=UTC)
 FACTOR_CONFIG = ROOT / "configs" / "factors" / "avg_amount_20d.yaml"
-STRATEGY_CONFIG = ROOT / "configs" / "strategies" / "momentum.yaml"
+
+# This slice pairs one factor with one scanner, and that pairing is now
+# historical: the momentum strategy ranks on returns, not on liquidity. The
+# test states the pairing it needs instead of borrowing a product configuration
+# for a job that configuration no longer describes.
+STRATEGY = StrategyConfig(
+    id="momentum",
+    version="v1",
+    required_factors=("avg_amount_20d",),
+)
 
 
 def _run(local_tmp: Path) -> FirstSliceResult:
     return run_first_slice(
         csv_root=CSV_ROOT,
         as_of=AS_OF,
-        factor_config=load_factor_config(FACTOR_CONFIG),
-        strategy_config=load_strategy_config(STRATEGY_CONFIG),
+        factor_configs=(load_factor_config(FACTOR_CONFIG),),
+        strategy_config=STRATEGY,
         store=JsonSnapshotStore(local_tmp),
     )
 

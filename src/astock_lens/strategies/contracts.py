@@ -28,6 +28,20 @@ class EligibilityResult(DomainRecord):
     reasons: tuple[str, ...] = ()
 
 
+class FactorContribution(DomainRecord):
+    """One factor's share of a score.
+
+    Kept alongside the score so a ranking stays explainable: a reviewer can see
+    which factor moved a symbol and by how much, instead of being asked to
+    trust a single number.
+    """
+
+    factor: str
+    percentile: float
+    weight: float
+    weighted: float
+
+
 class StrategyResult(DomainRecord):
     """One strategy outcome for one symbol at one point in time."""
 
@@ -43,6 +57,7 @@ class StrategyResult(DomainRecord):
     reasons: tuple[str, ...] = ()
     risks: tuple[str, ...] = ()
     factor_snapshot: tuple[FactorResult, ...] = ()
+    contributions: tuple[FactorContribution, ...] = ()
 
 
 class FactorExplanation(DomainRecord):

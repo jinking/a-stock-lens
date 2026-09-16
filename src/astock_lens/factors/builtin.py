@@ -13,6 +13,7 @@ from astock_lens.domain.enums import DataStatus
 from astock_lens.domain.models import DailyBar, SnapshotLineage
 from astock_lens.factors.config import FactorConfig
 from astock_lens.factors.contracts import (
+    Factor,
     FactorContext,
     FactorMetadata,
     FactorResult,
@@ -208,4 +209,22 @@ def _value_result(
         factor_version=metadata.version,
         lineage=_lineage(metadata),
         raw_value=value,
+    )
+
+
+def build_factor(factor_config: FactorConfig) -> Factor:
+    """Return the implementation a configuration names.
+
+    An unknown name raises rather than being skipped. A strategy that requires
+    a factor nobody implemented would otherwise find every symbol ineligible,
+    which reads downstream like a market verdict instead of a missing build.
+    """
+    if factor_config.name == AVERAGE_AMOUNT_FACTOR_NAME:
+        return AverageAmountFactor(factor_config)
+    if factor_config.name.startswith(RETURN_FACTOR_PREFIX):
+        return TrailingReturnFactor(factor_config)
+    if factor_config.name == PROXIMITY_HIGH_FACTOR_NAME:
+        return ProximityToHighFactor(factor_config)
+    raise ValueError(
+        f"no factor implementation is registered for {factor_config.name!r}"
     )

@@ -5,6 +5,10 @@ preserved because it is the order a run will report in, and a stable order
 makes snapshot diffs readable.
 """
 
+from collections.abc import Sequence
+
+from astock_lens.factors.builtin import build_factor
+from astock_lens.factors.config import FactorConfig
 from astock_lens.factors.contracts import Factor
 
 
@@ -30,3 +34,16 @@ class FactorRegistry:
     def names(self) -> tuple[str, ...]:
         """Return registered names in registration order."""
         return tuple(self._factors)
+
+
+def build_registry(configs: Sequence[FactorConfig]) -> FactorRegistry:
+    """Build a registry from configuration files, in the order given.
+
+    An unknown factor name raises here rather than at compute time, so a run
+    fails while it is being set up instead of quietly finding every symbol
+    ineligible.
+    """
+    registry = FactorRegistry()
+    for config in configs:
+        registry.register(build_factor(config))
+    return registry
