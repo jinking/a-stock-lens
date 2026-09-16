@@ -527,7 +527,9 @@ Measurement on 2026-09-16 changed one part of that:
   pairs a **report period with a reliable publication date** (`EndDate` +
   `InfoPublDate`, both required by §5.1) and that supports **batching**
   (`westock finance sh600000,sz000001`). 100 symbols cost ~11s with full
-  coverage, which puts a whole-market quarterly refresh near the §21 target.
+  coverage per statement, so a whole-market pass over all three statements is
+  roughly half an hour — a quarterly refresh job rather than part of the daily
+  scan, which is what the §15 incrementality rule asks for anyway.
   The AkShare/Sina statement endpoints return a `公告日期` that is *not* the
   original filing date (measured: the FY2025 balance sheet carries
   `20260815`, while the same period's income statement carries `20260417`),

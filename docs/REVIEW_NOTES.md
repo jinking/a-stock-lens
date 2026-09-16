@@ -82,7 +82,7 @@ the research side. The amendment itself is written into the spec as §24, and
 | `westock finance sh600519 --type income --fields all` | `EndDate` (report period) **and** `InfoPublDate` (publication date) |
 | Same call with the default `--fields core` | no publication date at all |
 | AkShare/Sina statements | publication date is not the original filing date (FY2025 balance sheet says `20260815`, the same period's income statement says `20260417`) |
-| 100 symbols in one batch | 11.4s, 100 rows returned — a whole-market quarterly refresh lands near the §21 target |
+| 100 symbols in one batch, one statement | 11.4s, 100 rows returned — so a whole-market pass over the three statements is ~30 min: a quarterly job, not part of the 10-minute daily target |
 | CLI batch summary (`成功: 1`) | says success even for an invalid code, so coverage is computed from returned codes instead |
 | `neodata` query for the latest report | answered with structured markdown including `发布日期` / `统计截止日期` / `报告期` (2026-H1 works when the period is named), but it is per-entity, prose-shaped, and its 12-hour credential can only be refreshed by the WorkBuddy platform |
 
@@ -94,3 +94,53 @@ Consequences recorded in code:
   rather than left to convention;
 - WeStock is invoked as an external command. No deep-research Python module is
   imported and no internal state is read (`ARCHITECTURE.md` §4.1).
+
+## Fundamentals slice (2026-09-16, after the amendment)
+
+The provider landed statements; this slice turned them into canonical,
+point-in-time observations the factor engine may read.
+
+Decisions taken here, none of which the design settles:
+
+- **`available_at` is the publication date at the A-share close** (`15:00
+  +08:00`). `InfoPublDate` is a date, not a moment, and a filing can appear
+  before the open or after the close. Taking the close is the conservative
+  reading: it can delay availability, never advance it.
+- **The metric mapping lives in code** (`data/normalize/financials.py`), next
+  to the provider that produced the columns, exactly as
+  `akshare_provider.BAR_COLUMN_MAP` does. A source-column mapping is
+  integration detail, not a threshold.
+- **48 canonical metrics** cover the design's Quality / Growth / Valuation /
+  Dividend / cash-flow dimensions, with units carried per metric (`%`, `x`,
+  `CNY`, `CNY/share`) so a reader never has to guess whether `17.7179` is a
+  ratio or a percent.
+- **Three ways to be absent stay distinct**: a source marker (`-`) becomes a
+  `NULL` observation, unreadable text becomes an `INVALID` key with a failure
+  record naming the raw cell, and a statement that was never landed is named in
+  `absent_datasets`. None of them becomes zero and none of them disappears.
+- **`NULL` observations stay usable** through the gate, unlike `INVALID` ones:
+  a factor has to be able to report "the source has no value here", and
+  dropping the observation would make that indistinguishable from a metric
+  nobody computes.
+- **Statements are re-fetched, not skipped by age.** A freshness-based skip
+  would need a cadence decision (`Deferred`); re-landing is safe because rows
+  merge on `(code, EndDate)`.
+
+### A real defect the end-to-end run found
+
+Syncing into a directory that already held the fixture listing produced **two
+profiles for one symbol**, and the scan then died mid-pipeline with
+`score_cross_section expects at most one context per symbol`. Two causes, both
+fixed:
+
+1. the listing was merged on *every* column, so a reformatted name or listing
+   date appended a second row for the same instrument — the listing is now
+   keyed by `symbol` alone;
+2. `UniverseBuilder` admitted both profiles, so one symbol entered the
+   cross-section twice. A repeated instrument is now excluded with the
+   `DUPLICATE_SECURITY` rule, which keeps the scan running *and* keeps the
+   reason visible instead of silently deduplicating the listing.
+
+The throughput figure in §24 was also corrected: ~11s per 100 symbols is one
+statement, so all three statements over the whole market is a ~30-minute
+quarterly job, not part of the 10-minute daily target.

@@ -58,6 +58,7 @@ V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学�
 | `DuckDBSnapshotStore` / `DuckDBWatchlistStore` 与 JSON store 同协议互换（`ASTOCK_SNAPSHOT_BACKEND` / `ASTOCK_WATCHLIST_BACKEND`） | |
 | AkShare Provider（腾讯域日线 + 三交易所名单）+ 真实录制契约 fixture | |
 | WeStock CLI Provider（三大表，含 `EndDate` + `InfoPublDate`，批量 100 只 / 11 秒）+ 录制 fixture | 财报的 Normalized / Quality Gate / 基本面因子（下一片） |
+| 财务 Normalized（48 个指标）+ Financial Quality Gate + 观测进入因子上下文 | 基本面因子本身（下一片）、全市场财报同步的限流验证 |
 | Job Run 记录与 Manifest（每阶段独立可重跑）、`astock daily`；CLI `sync` / `stock` / `watch` / `research` / `strategy run`；API `/health` `/universe` `/factors` `/candidates` `/watchlist` | |
 | 独立 Artifact Validator（快照 + Job Manifest，不导入生产代码） | |
 
@@ -151,6 +152,20 @@ uv run python scripts/record_westock_fixture.py   # 需要时重录契约 fixtur
 
 `neodata`（自然语言语义检索）留在研究侧，只经 `ResearchRequest` / `DeepResearchAdapter` 使用：它逐标的、输出渲染后的 Markdown、凭证 12 小时有效且只能由 WorkBuddy 平台刷新，不适合做批量因子源。
 
+### 落财务数据
+
+```bash
+export ASTOCK_WESTOCK_BIN=/path/to/westock
+uv run astock sync --as-of 2026-09-04 --financials            # 名单 + 日线 + 三大表
+uv run astock sync --as-of 2026-09-04 --financials --symbol 600519.SH --symbol 000001.SZ
+```
+
+落地的是 CLI 的逐字表格（`code` / `EndDate` / `InfoPublDate` + 各科目列）。合并键：名单按 `symbol`、日线按 `(symbol, trade_date)`、财报按 `(code, EndDate)`，所以重复同步只替换、不追加。
+
+管线随后把三大表归一化为 `FinancialObservation` 并过质量门：实测 3 只股票 → **1152 条观测 / 48 个指标**，每条都带 `report_period`、`announce_date`、`available_at`（= 公告日 A 股收盘，保守取值），且 `available_at <= as_of`。
+
+缺失的处理是三种不同的事实，不会互相冒充：源里没有值（`-`）→ `NULL` 观测；值读不出来 → 失败记录 + `INVALID`；某张表**根本没落地** → `absent_datasets` 里点名，而不是当成"空表"。
+
 ## 测试与质量检查
 
 ```bash
@@ -165,10 +180,12 @@ uv run mypy
 ## 下一步
 
 1. **AkShare 全市场落地**：`securities` 名单（5564 只）与全市场日线的批量抓取、限流与断点续跑（`astock sync` 的机制已就绪，缺的是全量运行的验证）。
-2. **权重正式评审**：把等权草案换成评审后的权重。
-3. **Market Regime / Market Validation / Signal 检测器**：需要先确认各输入的阈值，否则只能继续保持 `BLOCKED`。
-4. **其余 6 个 Scanner**：依赖基本面因子（`FinancialObservation` 已建模，但尚无 Provider 落地财务数据）。
-5. **React 前端 6 个页面**：目前只有 `web/README.md`。
+2. **基本面因子**：观测已经在因子上下文里，但还没有 Factor 读它们（`roe` / `gross_margin` / `debt_to_asset` / `net_operating_cashflow` … 都是现成字段）。
+3. **全市场财报同步**：100 只/批 ≈ 11 秒/表，三大表全市场约 30 分钟，属季度任务；限流与断点续跑尚未验证。
+4. **权重正式评审**：把等权草案换成评审后的权重。
+5. **Market Regime / Market Validation / Signal 检测器**：需要先确认各输入的阈值，否则只能继续保持 `BLOCKED`。
+6. **其余 6 个 Scanner**：依赖基本面因子落地。
+7. **React 前端 6 个页面**：目前只有 `web/README.md`。
 
 每条切片的计划都放在 `docs/superpowers/plans/`，设计权威仍是 `docs/superpowers/specs/2026-09-16-a-stock-lens-design.md`。
 
