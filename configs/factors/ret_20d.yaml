@@ -1,0 +1,20 @@
+# ret_20d — trailing 20-trading-day price return.
+#
+# The window is configuration, not a constant. `docs/ARCHITECTURE.md` §8.3 puts
+# weights and thresholds in YAML, and a window is exactly that kind of number:
+# changing it must not require editing the engine.
+#
+# 20 days is the horizon the design already names for momentum ("20/60/120-day
+# returns", spec §8.1). The 60-day member of that set ships alongside this one;
+# the 120-day member waits until a strategy actually asks for it.
+name: ret_20d
+domain: MARKET_MOMENTUM
+description: Trailing 20-trading-day price return over the window ends.
+inputs:
+  - close
+frequency: DAILY
+direction: HIGHER_MEANS_STRONGER_MOMENTUM
+null_policy: NULL_UNLESS_THE_WHOLE_WINDOW_IS_PRESENT
+version: v1
+params:
+  window: 20

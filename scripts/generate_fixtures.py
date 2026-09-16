@@ -17,6 +17,7 @@ Usage::
 """
 
 import csv
+from datetime import date, timedelta
 from pathlib import Path
 
 FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "csv"
@@ -159,6 +160,121 @@ SECURITIES: tuple[tuple[str, str, str, str, str, str, str, str], ...] = (
 )
 
 
+BAR_COLUMNS = (
+    "symbol",
+    "trade_date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "pre_close",
+    "volume",
+    "amount",
+    "turnover_rate",
+    "pct_change",
+    "adj_factor",
+)
+
+# Long enough to contain a 252-day trailing window with room to spare. The
+# fixture models weekdays only; A-share holidays are not simulated, and no
+# assertion depends on a specific calendar.
+HISTORY_DAYS = 300
+AS_OF_DATE = date(2026, 9, 4)
+
+# The newest listing gets a history short enough to fail a 60-day window while
+# still satisfying a 20-day one, so both branches are observable in one file.
+NEW_LISTING_DAYS = 34
+
+SPIKE_DAYS_BEFORE_END = 30
+DAILY_HIGH_RATIO = 1.01
+DAILY_LOW_RATIO = 0.99
+DEFAULT_AMOUNT = 80_000_000.0
+LOW_AMOUNT = 5_000_000.0
+DEFAULT_VOLUME = 1_000_000.0
+
+# symbol -> (first-day close, daily growth rate, spike ratio)
+#
+# The growth rate makes the momentum ordering unambiguous and checkable by
+# hand: 300750.SZ rises fastest, 000001.SZ falls. The spike plants one high
+# inside the trailing year, so `proximity_52w_high` is not the same constant
+# 1/1.01 for every rising symbol — without it the factor would have no
+# cross-sectional spread to rank.
+PRICE_PATHS: dict[str, tuple[float, float, float]] = {
+    "600000.SH": (10.00, 0.0020, 1.10),
+    "000001.SZ": (20.00, -0.0020, 1.00),
+    "600519.SH": (100.00, 0.0000, 1.05),
+    "300750.SZ": (30.00, 0.0050, 1.20),
+    "830799.BJ": (8.00, 0.0010, 1.08),
+    "900948.SH": (6.00, -0.0010, 1.00),
+    # The four below exist to be excluded by a Universe rule, not to be ranked.
+    # Each still carries a full price history so the only rule it fails is the
+    # one it was designed to fail.
+    "000002.SZ": (5.00, 0.0000, 1.00),
+    "000003.SZ": (4.00, 0.0000, 1.00),
+    "000005.SZ": (7.00, 0.0010, 1.00),
+    "000006.SZ": (9.00, 0.0010, 1.00),
+    "000004.SZ": (12.00, 0.0010, 1.00),
+}
+
+# 000007.SZ is absent on purpose: it is the symbol with no bar on the as-of
+# date, which the NO_MARKET_DATA rule is written to catch.
+
+# Symbols with a full history that are expected to survive every Universe
+# rule, listed in the momentum order their price paths were designed to
+# produce. The generator prints this ordering so a reviewer can check the
+# fixture against the assertions by eye.
+RANKED_SYMBOLS = (
+    "300750.SZ",
+    "600000.SH",
+    "830799.BJ",
+    "600519.SH",
+    "900948.SH",
+    "000001.SZ",
+)
+
+
+def trading_days(*, end: date, count: int) -> list[date]:
+    """Return `count` weekdays ending on `end`, oldest first."""
+    days: list[date] = []
+    cursor = end
+    while len(days) < count:
+        if cursor.weekday() < 5:
+            days.append(cursor)
+        cursor -= timedelta(days=1)
+    return list(reversed(days))
+
+
+def bar_rows(symbol: str, days: list[date]) -> list[list[str]]:
+    """Build one symbol's daily bars from its configured price path."""
+    base, rate, spike_ratio = PRICE_PATHS[symbol]
+    spike_index = len(days) - 1 - SPIKE_DAYS_BEFORE_END
+    closes = [round(base * (1.0 + rate) ** index, 2) for index in range(len(days))]
+
+    rows: list[list[str]] = []
+    for index, day in enumerate(days):
+        close = closes[index]
+        previous = closes[index - 1] if index > 0 else base
+        high = close * (spike_ratio if index == spike_index else DAILY_HIGH_RATIO)
+        amount = LOW_AMOUNT if symbol == "000005.SZ" else DEFAULT_AMOUNT
+        rows.append(
+            [
+                symbol,
+                day.isoformat(),
+                f"{previous:.2f}",
+                f"{round(high, 2):.2f}",
+                f"{round(close * DAILY_LOW_RATIO, 2):.2f}",
+                f"{close:.2f}",
+                f"{previous:.2f}",
+                f"{DEFAULT_VOLUME:.0f}",
+                f"{amount:.0f}",
+                "1.00",
+                f"{rate * 100:.2f}",
+                "1.0",
+            ]
+        )
+    return rows
+
+
 def write_securities() -> Path:
     """Write the securities master fixture and report each row's intent."""
     path = FIXTURE_ROOT / "securities.csv"
@@ -172,9 +288,38 @@ def write_securities() -> Path:
     return path
 
 
+def write_daily_bars_long() -> Path:
+    """Write the long-history daily-bar fixture and report its intended shape."""
+    days = trading_days(end=AS_OF_DATE, count=HISTORY_DAYS)
+    recent = days[-NEW_LISTING_DAYS:]
+
+    rows: list[list[str]] = []
+    for symbol in PRICE_PATHS:
+        symbol_days = recent if symbol == "000004.SZ" else days
+        rows.extend(bar_rows(symbol, symbol_days))
+
+    path = FIXTURE_ROOT / "daily_bars_long.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(BAR_COLUMNS)
+        writer.writerows(rows)
+
+    print(f"{path.name}: {len(rows)} rows over {len(PRICE_PATHS)} symbols")
+    print(f"  window: {days[0].isoformat()} .. {days[-1].isoformat()}")
+    print("  momentum order these paths were designed to produce:")
+    for symbol in RANKED_SYMBOLS:
+        rate = PRICE_PATHS[symbol][1]
+        print(f"    {symbol}  ret_20d ~ {((1 + rate) ** 20 - 1) * 100:+.2f}%")
+    print("  000004.SZ has only the newest days, so ret_60d is NULL for it")
+    print("  000007.SZ has no bars at all, so it fails NO_MARKET_DATA")
+    return path
+
+
 def main() -> None:
     FIXTURE_ROOT.mkdir(parents=True, exist_ok=True)
     write_securities()
+    print()
+    write_daily_bars_long()
 
 
 if __name__ == "__main__":

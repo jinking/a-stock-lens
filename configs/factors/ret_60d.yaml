@@ -1,0 +1,16 @@
+# ret_60d — trailing 60-trading-day price return.
+#
+# Same algorithm as ret_20d with a different configured window, which is why
+# both are produced by one class. The design names the 20/60/120-day horizon
+# set (spec §8.1); this is the middle member.
+name: ret_60d
+domain: MARKET_MOMENTUM
+description: Trailing 60-trading-day price return over the window ends.
+inputs:
+  - close
+frequency: DAILY
+direction: HIGHER_MEANS_STRONGER_MOMENTUM
+null_policy: NULL_UNLESS_THE_WHOLE_WINDOW_IS_PRESENT
+version: v1
+params:
+  window: 60

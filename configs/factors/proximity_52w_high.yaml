@@ -1,0 +1,22 @@
+# proximity_52w_high — how close the latest close sits to the trailing peak.
+#
+# "distance from 52-week high" is named by the design (spec §8.1) as a momentum
+# dimension. Expressed as a ratio rather than a percentage gap so that higher
+# always means stronger: a symbol at its own peak scores 1.0, and one 20% below
+# its peak scores 0.8.
+#
+# The window is 252 trading days. 52 weeks is the design's wording; converting
+# weeks to trading days is stated here, in configuration, rather than buried in
+# the engine where a reviewer would not see it.
+name: proximity_52w_high
+domain: MARKET_MOMENTUM
+description: Latest close divided by the highest high of the trailing window.
+inputs:
+  - close
+  - high
+frequency: DAILY
+direction: HIGHER_MEANS_CLOSER_TO_THE_TRAILING_HIGH
+null_policy: NULL_UNLESS_THE_WHOLE_WINDOW_IS_PRESENT
+version: v1
+params:
+  window: 252
