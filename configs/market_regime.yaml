@@ -1,0 +1,13 @@
+states:
+  - BULL
+  - RANGE_UP
+  - RANGE
+  - RANGE_DOWN
+  - BEAR
+inputs:
+  - broad_index_trends
+  - market_turnover
+  - advancing_stocks
+  - new_highs_new_lows
+  - volatility
+strategy_router: display_and_research_priority_only

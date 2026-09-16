@@ -101,6 +101,7 @@ git commit -m "docs: import approved A-Stock Lens design"
 
 **Files:**
 - Create: `pyproject.toml`
+- Create: `uv.lock`
 - Create: `.env.example`
 - Create: `.gitignore`
 - Create: `Makefile`
@@ -127,7 +128,7 @@ git commit -m "docs: import approved A-Stock Lens design"
 
 **Interfaces:**
 - Consumes: repository root path and `configs/app.yaml`.
-- Produces: `load_app_config(path: Path | None = None) -> AppConfig` and installable console entry point `astock` (implemented in Task 4).
+- Produces: `load_app_config(path: Path | None = None) -> AppConfig` and a valid installable Python package. The `astock` console entry point is added atomically with its implementation in Task 4.
 
 - [ ] **Step 1: Write the failing configuration test**
 
@@ -167,7 +168,7 @@ def load_app_config(path: Path | None = None) -> AppConfig:
 
 - [ ] **Step 4: Add conservative project metadata and dependencies**
 
-Configure Hatchling with the `src` layout. Runtime dependencies are FastAPI, Uvicorn, Pydantic, pydantic-settings, DuckDB, PyArrow, Polars, PyYAML, Typer, and HTTPX. Put AkShare in an optional `providers` extra. Put pytest, pytest-cov, Ruff, mypy, and types-PyYAML in a `dev` dependency group. Configure Ruff for Python 3.12 and mypy for strict package checking.
+Configure Hatchling with the `src` layout. Default runtime dependencies are FastAPI, Uvicorn, Pydantic, pydantic-settings, PyYAML, Typer, and HTTPX. Put DuckDB, PyArrow, and Polars in an optional `data` extra, and AkShare in a separate optional `providers` extra, so bootstrap tests do not install the large data stack. Put pytest, pytest-cov, Ruff, mypy, and types-PyYAML in a `dev` dependency group. Configure Ruff for Python 3.12 and mypy for strict package checking. Exclude `docs` from Ruff so the imported design documents stay byte-identical to the reviewed design package instead of having their embedded Python code fences reformatted.
 
 - [ ] **Step 5: Add configuration files without invented thresholds**
 
@@ -182,7 +183,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit the project foundation**
 
 ```bash
-git add pyproject.toml .env.example .gitignore Makefile configs data var src/astock_lens/__init__.py src/astock_lens/settings.py tests/unit/test_settings.py
+git add pyproject.toml uv.lock .env.example .gitignore Makefile configs data var src/astock_lens/__init__.py src/astock_lens/settings.py tests/unit/test_settings.py
 git commit -m "chore: add Python project foundation"
 ```
 
@@ -338,6 +339,8 @@ git commit -m "feat: define architecture contracts"
 **Files:**
 - Create: `src/astock_lens/cli/app.py`
 - Create: `src/astock_lens/api/app.py`
+- Modify: `pyproject.toml`
+- Modify: `uv.lock`
 - Test: `tests/unit/test_cli.py`
 - Test: `tests/unit/test_api.py`
 - Test: `tests/unit/test_import.py`
@@ -383,7 +386,7 @@ Expected: FAIL because the entry point modules do not exist.
 
 - [ ] **Step 3: Implement the CLI**
 
-Create a Typer app with `no_args_is_help=True`. `doctor` loads local config, checks that Python is at least 3.12, reports configured storage paths, and exits non-zero only when a check fails. It must not fetch market data, connect to an external provider, or create the DuckDB file.
+Create a Typer app with `no_args_is_help=True` and add `astock = "astock_lens.cli.app:app"` under `[project.scripts]` in `pyproject.toml` in the same change. `doctor` loads local config, checks that Python is at least 3.12, reports configured storage paths, and exits non-zero only when a check fails. It must not fetch market data, connect to an external provider, or create the DuckDB file.
 
 - [ ] **Step 4: Implement the API factory**
 
@@ -405,7 +408,7 @@ Expected: all commands exit 0.
 - [ ] **Step 6: Commit the bootstrap entrypoints**
 
 ```bash
-git add src/astock_lens/cli src/astock_lens/api src/astock_lens/__init__.py tests/unit/test_import.py tests/unit/test_cli.py tests/unit/test_api.py
+git add pyproject.toml uv.lock src/astock_lens/cli src/astock_lens/api src/astock_lens/__init__.py tests/unit/test_import.py tests/unit/test_cli.py tests/unit/test_api.py
 git commit -m "feat: add bootstrap entrypoints"
 ```
 

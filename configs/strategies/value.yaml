@@ -1,0 +1,11 @@
+id: value
+enabled: true
+version: v1
+description: Cheapness relative to history, peers, and cash-flow quality.
+dimensions:
+  - PE/PB/PS
+  - FCF yield
+  - dividend yield
+  - historical valuation percentile
+  - industry-relative valuation
+  - earnings and balance-sheet quality

@@ -1,0 +1,11 @@
+id: growth
+enabled: true
+version: v1
+description: Operating growth speed, persistence, and earnings/cash-flow conversion.
+dimensions:
+  - revenue and profit year-over-year growth
+  - three-year CAGR
+  - operating cash flow
+  - ROE change
+  - gross-margin trend
+  - growth persistence and delivery quality

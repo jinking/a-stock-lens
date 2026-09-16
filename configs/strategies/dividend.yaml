@@ -1,0 +1,12 @@
+id: dividend
+enabled: true
+version: v1
+description: Dividend sustainability and cash-flow coverage, not yield alone.
+dimensions:
+  - dividend yield
+  - dividend sustainability
+  - cash-flow coverage
+  - special-dividend risk
+  - cyclical-peak yield risk
+  - debt-funded-dividend risk
+  - deteriorating-earnings risk

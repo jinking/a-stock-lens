@@ -1,0 +1,11 @@
+id: momentum
+enabled: true
+version: v1
+description: Absolute and relative price strength, trend, and volume confirmation.
+dimensions:
+  - 20/60/120-day returns
+  - relative strength versus CSI 300
+  - relative industry strength
+  - distance from 52-week high
+  - moving-average trend
+  - volume trend
