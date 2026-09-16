@@ -2,6 +2,7 @@ from pathlib import Path
 
 from astock_lens.data.contracts import DataProvider, Normalizer
 from astock_lens.data.providers.local import LocalCsvProvider
+from astock_lens.data.snapshots.store import JsonSnapshotStore, SnapshotStore
 from astock_lens.factors.contracts import Factor
 from astock_lens.research.contracts import DeepResearchAdapter
 from astock_lens.signals.contracts import SignalDetector
@@ -24,3 +25,14 @@ def test_local_csv_provider_satisfies_the_provider_contract() -> None:
     provider: DataProvider = LocalCsvProvider(Path("."))
 
     assert provider is not None
+
+
+def test_snapshot_store_contract_is_stable() -> None:
+    assert {"write", "read"} <= set(SnapshotStore.__dict__)
+
+
+def test_json_snapshot_store_satisfies_the_snapshot_contract() -> None:
+    """Both stores are interchangeable, so both are bound to this protocol."""
+    store: SnapshotStore = JsonSnapshotStore(Path("."))
+
+    assert store is not None

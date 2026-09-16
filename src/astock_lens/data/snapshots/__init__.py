@@ -1,5 +1,10 @@
-"""Snapshot persistence implementations."""
+"""Snapshot persistence implementations.
 
+`DuckDBSnapshotStore` imports DuckDB lazily, so importing this package stays
+safe in an environment that never installed the `data` extra.
+"""
+
+from astock_lens.data.snapshots.duckdb_store import DuckDBSnapshotStore
 from astock_lens.data.snapshots.store import JsonSnapshotStore, SnapshotStore
 
-__all__ = ["JsonSnapshotStore", "SnapshotStore"]
+__all__ = ["DuckDBSnapshotStore", "JsonSnapshotStore", "SnapshotStore"]
