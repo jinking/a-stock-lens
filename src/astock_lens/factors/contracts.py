@@ -4,7 +4,7 @@ Factors produce objective raw values. Strategy interpretation and scoring live
 in the strategy layer and are never computed here.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Protocol
 
 from astock_lens.data.contracts import NormalizedDataset
@@ -39,7 +39,14 @@ class FactorContext(DomainRecord):
 
 
 class FactorResult(DomainRecord):
-    """One factor value for one symbol at one point in time."""
+    """One factor value for one symbol at one point in time.
+
+    `inputs` names the normalized evidence behind the value — the metric, the
+    report period it describes and the date it was announced. It is what keeps
+    the explanation chain walkable
+    (`StrategyResult → FactorSnapshot → Normalized Data → Provider`): without
+    it a reader sees a ratio but cannot tell which quarter produced it.
+    """
 
     symbol: str
     factor: str
@@ -48,6 +55,16 @@ class FactorResult(DomainRecord):
     factor_version: str
     lineage: SnapshotLineage
     raw_value: float | None = None
+    inputs: tuple["FactorInputRef", ...] = ()
+
+
+class FactorInputRef(DomainRecord):
+    """One piece of normalized evidence behind a factor value."""
+
+    metric: str
+    report_period: date | None = None
+    announce_date: date | None = None
+    value: float | None = None
 
 
 class Factor(Protocol):

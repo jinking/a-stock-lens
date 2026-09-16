@@ -1,0 +1,17 @@
+# dividend_payout_ttm — 近一年分红总额 / 归母净利润 TTM（分红支付率）。
+#
+# 设计要求分红策略看"可持续性与现金流覆盖"，而不是只看股息率：
+# 支付率配合现金流因子才能区分"真分红"和"举债分红"。
+name: dividend_payout_ttm
+domain: FUNDAMENTAL
+description: Trailing dividends paid divided by trailing parent net profit.
+inputs:
+  - dividend_ttm
+  - net_profit_parent_ttm
+frequency: QUARTERLY
+direction: DESCRIBES_PAYOUT_NOT_A_PREFERENCE
+null_policy: NULL_UNLESS_BOTH_INPUTS_HAVE_A_PUBLISHED_VALUE
+version: v1
+params:
+  # Deferred：见 ocf_to_net_profit.yaml 的说明。
+  stale_after_days: null

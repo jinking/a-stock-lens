@@ -1,0 +1,17 @@
+# revenue_ttm_to_inventory — 近一年营业收入 / 存货（存货周转的粗口径）。
+#
+# 分母用期末存货而非期初期末均值：均值口径需要两个时点的存货都在场，
+# 那是另一个必须先评审的约定，这里只报一个口径明确的数。
+name: revenue_ttm_to_inventory
+domain: QUALITY
+description: Trailing revenue divided by period-end inventory.
+inputs:
+  - revenue_ttm
+  - inventories
+frequency: QUARTERLY
+direction: HIGHER_MEANS_FASTER_INVENTORY_TURN
+null_policy: NULL_UNLESS_BOTH_INPUTS_HAVE_A_PUBLISHED_VALUE
+version: v1
+params:
+  # Deferred：见 ocf_to_net_profit.yaml 的说明。
+  stale_after_days: null

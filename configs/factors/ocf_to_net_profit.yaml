@@ -1,0 +1,21 @@
+# ocf_to_net_profit — 经营性现金流对归母净利润的覆盖倍数（TTM/TTM）。
+#
+# 分子分母都用源站已发布的 TTM 字段：季度累计值不能直接相加成"一年"，
+# 自己拼年度会引入一个没人评审过的换算口径。
+#
+# 缺失口径：任一侧不可用就不给数字，按 fundamental.py 的优先级报
+# NOT_APPLICABLE（该标的报表没有这一行）> NULL（有行但无值）> STALE。
+name: ocf_to_net_profit
+domain: QUALITY
+description: Trailing operating cash flow divided by trailing parent net profit.
+inputs:
+  - net_operating_cashflow_ttm
+  - net_profit_parent_ttm
+frequency: QUARTERLY
+direction: HIGHER_MEANS_BETTER_CASH_CONVERSION
+null_policy: NULL_UNLESS_BOTH_INPUTS_HAVE_A_PUBLISHED_VALUE
+version: v1
+params:
+  # Deferred：没有任何已评审的新鲜度要求，因此不触发 STALE。
+  # 需要时在这里写天数（例如 200）即可启用，无需改代码。
+  stale_after_days: null

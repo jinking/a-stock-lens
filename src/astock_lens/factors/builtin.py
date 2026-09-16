@@ -18,6 +18,10 @@ from astock_lens.factors.contracts import (
     FactorMetadata,
     FactorResult,
 )
+from astock_lens.factors.fundamental import (
+    RATIO_DEFINITIONS,
+    FundamentalRatioFactor,
+)
 
 AVERAGE_AMOUNT_FACTOR_NAME = "avg_amount_20d"
 PROXIMITY_HIGH_FACTOR_NAME = "proximity_52w_high"
@@ -225,6 +229,8 @@ def build_factor(factor_config: FactorConfig) -> Factor:
         return TrailingReturnFactor(factor_config)
     if factor_config.name == PROXIMITY_HIGH_FACTOR_NAME:
         return ProximityToHighFactor(factor_config)
+    if factor_config.name in RATIO_DEFINITIONS:
+        return FundamentalRatioFactor(factor_config)
     raise ValueError(
         f"no factor implementation is registered for {factor_config.name!r}"
     )

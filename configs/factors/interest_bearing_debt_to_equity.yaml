@@ -1,0 +1,17 @@
+# interest_bearing_debt_to_equity — 有息负债 / 股东权益。
+#
+# 只算"要付息的债"，不含应付账款这类无息经营负债：后者是经营占款，
+# 和偿债压力不是一回事。
+name: interest_bearing_debt_to_equity
+domain: QUALITY
+description: Interest-bearing debt divided by total shareholder equity.
+inputs:
+  - interest_bearing_debt
+  - total_equity
+frequency: QUARTERLY
+direction: HIGHER_MEANS_MORE_LEVERAGE
+null_policy: NULL_UNLESS_BOTH_INPUTS_HAVE_A_PUBLISHED_VALUE
+version: v1
+params:
+  # Deferred：见 ocf_to_net_profit.yaml 的说明。
+  stale_after_days: null

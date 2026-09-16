@@ -27,7 +27,10 @@ class FactorConfig(BaseModel):
     direction: str
     null_policy: str
     version: str
-    params: dict[str, int] = Field(default_factory=dict)
+    # A parameter may be explicitly `null`: that is how a configuration records
+    # "this threshold has not been reviewed yet" without inventing a number.
+    # `configs/universe.yaml` uses the same convention for its deferred rules.
+    params: dict[str, int | None] = Field(default_factory=dict)
 
 
 def load_factor_config(path: Path) -> FactorConfig:

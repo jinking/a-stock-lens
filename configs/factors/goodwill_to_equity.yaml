@@ -1,0 +1,16 @@
+# goodwill_to_equity — 商誉 / 股东权益。
+#
+# 商誉不能变现也不能还债，占权益比重越高，账面净资产的质量越需要打折看。
+name: goodwill_to_equity
+domain: QUALITY
+description: Goodwill divided by total shareholder equity.
+inputs:
+  - goodwill
+  - total_equity
+frequency: QUARTERLY
+direction: HIGHER_MEANS_MORE_BALANCE_SHEET_RISK
+null_policy: NULL_UNLESS_BOTH_INPUTS_HAVE_A_PUBLISHED_VALUE
+version: v1
+params:
+  # Deferred：见 ocf_to_net_profit.yaml 的说明。
+  stale_after_days: null

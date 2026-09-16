@@ -100,8 +100,9 @@ def test_the_implemented_stages_succeed_and_count_their_rows(local_tmp: Path) ->
     # Factors are measured for every symbol with usable bars (11 in the long
     # fixture), because the Universe's liquidity rule consumes one of them;
     # only the 7 the Universe admits then reach the scanners.
+    configured = len(list((CONFIGS / "factors").glob("*.yaml")))
     assert factors.rows_in == 11
-    assert factors.rows_out == 44  # four factors each
+    assert factors.rows_out == 11 * configured
     assert by_stage[JobStage.BUILD_UNIVERSE].rows_out == 7
     assert by_stage[JobStage.RUN_STRATEGIES].rows_in == 7
     assert by_stage[JobStage.BUILD_CANDIDATES].rows_out == 7
