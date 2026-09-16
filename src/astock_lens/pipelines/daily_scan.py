@@ -1,8 +1,10 @@
 """The daily scan, wired end to end.
 
-One callable drives the chain the architecture names:
+Two callables drive the chain the architecture names, built out of the same
+stage functions so the CLI, `astock daily` and the tests share one
+implementation:
 
-    NORMALIZE → BUILD_UNIVERSE → COMPUTE_FACTORS → RUN_STRATEGIES
+    NORMALIZE → COMPUTE_FACTORS → BUILD_UNIVERSE → RUN_STRATEGIES
         → BUILD_CANDIDATES → snapshots
 
 Ordering inside the pipeline is load-bearing. Factors are computed for every
@@ -14,40 +16,47 @@ behind its back, and the cross-sectional percentiles rank exactly the
 population a reader was told the strategy considers.
 
 Every stage writes its snapshot, so a run leaves an auditable trail even where
-it produced nothing.
+it produced nothing. `run_daily_scan` stops at the candidate snapshot; the
+design's remaining stages live in `astock_lens.pipelines.daily`, which records
+a job run for each one.
 """
 
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
-from astock_lens.candidates.builder import CandidateBuilder
 from astock_lens.candidates.models import Candidate
-from astock_lens.candidates.routing import route_next_action
-from astock_lens.data.contracts import FetchRequest, NormalizedDataset
-from astock_lens.data.normalize.csv_bars import CsvDailyBarNormalizer
-from astock_lens.data.normalize.csv_securities import CsvSecurityNormalizer
-from astock_lens.data.providers.local import LocalCsvProvider
-from astock_lens.data.quality.gate import (
-    DailyBarQualityGate,
-    QualityReport,
-    valid_bars,
-)
+from astock_lens.data.quality.gate import QualityReport
 from astock_lens.data.snapshots.store import SnapshotStore
 from astock_lens.domain.enums import SnapshotKind
-from astock_lens.domain.models import DomainRecord, SecurityProfile, SnapshotLineage
+from astock_lens.domain.models import DomainRecord
 from astock_lens.factors.config import FactorConfig
-from astock_lens.factors.contracts import FactorContext, FactorResult
-from astock_lens.factors.registry import build_registry
+from astock_lens.factors.contracts import FactorResult
+from astock_lens.pipelines.stages import (
+    DEFAULT_DATASET,
+    DEFAULT_SECURITIES_DATASET,
+    candidate_stage,
+    factor_stage,
+    lineage_for,
+    normalize_stage,
+    strategy_stage,
+    universe_stage,
+)
 from astock_lens.strategies.config import StrategyConfig
-from astock_lens.strategies.contracts import StrategyContext, StrategyResult
+from astock_lens.strategies.contracts import StrategyResult
 from astock_lens.strategies.momentum import MomentumScanner
-from astock_lens.universe.builder import LIQUIDITY_FACTOR, UniverseBuilder
+from astock_lens.strategies.registry import RegisteredStrategy
 from astock_lens.universe.config import UniverseConfig
 from astock_lens.universe.models import UniverseSnapshot
 
-DEFAULT_DATASET = "daily_bars"
-DEFAULT_SECURITIES_DATASET = "securities"
+__all__ = [
+    "DEFAULT_DATASET",
+    "DEFAULT_SECURITIES_DATASET",
+    "DailyScanResult",
+    "UniverseBuildResult",
+    "build_universe",
+    "run_daily_scan",
+]
 
 
 class UniverseBuildResult(DomainRecord):
@@ -86,28 +95,29 @@ def build_universe(
     securities_dataset: str = DEFAULT_SECURITIES_DATASET,
 ) -> UniverseBuildResult:
     """Normalize, measure, and apply the Universe rules for one point in time."""
-    gated, securities, report, factor_results = _prepare(
-        csv_root,
+    outcome = normalize_stage(
+        csv_root=csv_root,
         as_of=as_of,
         dataset=dataset,
         securities_dataset=securities_dataset,
-        factor_configs=factor_configs,
     )
-
-    universe = UniverseBuilder(universe_config).build(
-        securities,
+    factor_results = factor_stage(
+        outcome=outcome, factor_configs=factor_configs, as_of=as_of
+    )
+    universe = universe_stage(
+        outcome=outcome,
+        factor_results=factor_results,
+        config=universe_config,
         as_of=as_of,
-        bars=gated.daily_bars,
-        liquidity=_liquidity(factor_results),
     )
 
     path = store.write(SnapshotKind.UNIVERSE, as_of, (universe,))
     return UniverseBuildResult(
         as_of=as_of,
-        quality_report=report,
+        quality_report=outcome.quality_report,
         universe=universe,
         universe_snapshot_path=path,
-        factor_results=tuple(factor_results),
+        factor_results=factor_results,
     )
 
 
@@ -127,56 +137,42 @@ def run_daily_scan(
     Configuration is passed in rather than loaded here, so a caller can see
     exactly which thresholds, factor windows, and strategy version a run used.
     """
-    gated, securities, report, factor_results = _prepare(
-        csv_root,
+    outcome = normalize_stage(
+        csv_root=csv_root,
         as_of=as_of,
         dataset=dataset,
         securities_dataset=securities_dataset,
-        factor_configs=factor_configs,
     )
-
-    universe = UniverseBuilder(universe_config).build(
-        securities,
+    factor_results = factor_stage(
+        outcome=outcome, factor_configs=factor_configs, as_of=as_of
+    )
+    universe = universe_stage(
+        outcome=outcome,
+        factor_results=factor_results,
+        config=universe_config,
         as_of=as_of,
-        bars=gated.daily_bars,
-        liquidity=_liquidity(factor_results),
     )
 
     # Only admitted symbols are scored: the cross-section is the population
     # the Universe says the strategy considers, no more and no less.
-    registry = build_registry(factor_configs)
-    factors = [registry.get(name) for name in registry.names()]
-    scanner = MomentumScanner(strategy_config)
-    builder = CandidateBuilder()
-    lineage = SnapshotLineage(
-        universe_snapshot=universe.snapshot_id,
-        factor_version=",".join(
-            sorted({factor.metadata.version for factor in factors})
+    scanners = (
+        RegisteredStrategy(
+            config=strategy_config, plugin=MomentumScanner(strategy_config)
         ),
-        strategy_version=strategy_config.version,
     )
-
-    contexts = [
-        StrategyContext(
-            symbol=symbol,
-            as_of=as_of,
-            factors=_results_for(factor_results, symbol),
-        )
-        for symbol in universe.included
-    ]
-    strategy_results = scanner.score_cross_section(contexts)
-
-    candidates = [
-        builder.build(
-            result.symbol,
-            as_of=as_of,
-            strategy_results=(result,),
-            lineage=lineage,
-            next_action=route_next_action(result),
-        )
-        for result in strategy_results
-        if result.eligible
-    ]
+    strategy_results = strategy_stage(
+        scanners=scanners,
+        universe=universe,
+        factor_results=factor_results,
+        as_of=as_of,
+    )
+    candidates = candidate_stage(
+        strategy_results=strategy_results,
+        lineage=lineage_for(
+            universe=universe, factor_configs=factor_configs, scanners=scanners
+        ),
+        as_of=as_of,
+    )
 
     universe_path = store.write(SnapshotKind.UNIVERSE, as_of, (universe,))
     factor_path = store.write(SnapshotKind.FACTOR, as_of, factor_results)
@@ -185,83 +181,13 @@ def run_daily_scan(
 
     return DailyScanResult(
         as_of=as_of,
-        quality_report=report,
+        quality_report=outcome.quality_report,
         universe=universe,
         universe_snapshot_path=universe_path,
         factor_snapshot_path=factor_path,
         strategy_snapshot_path=strategy_path,
         candidate_snapshot_path=candidate_path,
-        factor_results=tuple(factor_results),
-        strategy_results=tuple(strategy_results),
-        candidates=tuple(candidates),
+        factor_results=factor_results,
+        strategy_results=strategy_results,
+        candidates=candidates,
     )
-
-
-def _prepare(
-    csv_root: Path,
-    *,
-    as_of: datetime,
-    dataset: str,
-    securities_dataset: str,
-    factor_configs: Sequence[FactorConfig],
-) -> tuple[
-    NormalizedDataset,
-    tuple[SecurityProfile, ...],
-    QualityReport,
-    list[FactorResult],
-]:
-    """Fetch, normalize, gate, and measure — the stages every caller shares."""
-    provider = LocalCsvProvider(csv_root)
-    raw_bars = provider.fetch(FetchRequest(dataset=dataset, as_of=as_of))
-    raw_securities = provider.fetch(
-        FetchRequest(dataset=securities_dataset, as_of=as_of)
-    )
-
-    normalized_bars = CsvDailyBarNormalizer().normalize(raw_bars, as_of=as_of)
-    securities = CsvSecurityNormalizer().normalize(raw_securities, as_of=as_of)
-    report = DailyBarQualityGate().check(normalized_bars)
-
-    # Only bars the gate did not flag reach the factor engine. The report
-    # still records what was set aside, so the removal stays visible.
-    gated = NormalizedDataset(
-        dataset=normalized_bars.dataset,
-        as_of=normalized_bars.as_of,
-        daily_bars=valid_bars(normalized_bars, report),
-        parse_failures=normalized_bars.parse_failures,
-    )
-
-    registry = build_registry(factor_configs)
-    # The registry fixes the order once, so every symbol is measured by the
-    # same factors in the same sequence.
-    factors = [registry.get(name) for name in registry.names()]
-
-    factor_results: list[FactorResult] = []
-    for symbol in _symbols(gated):
-        factor_results.extend(
-            factor.compute(FactorContext(symbol=symbol, as_of=as_of, dataset=gated))
-            for factor in factors
-        )
-
-    return gated, securities.securities, report, factor_results
-
-
-def _liquidity(
-    factor_results: Sequence[FactorResult],
-) -> dict[str, FactorResult]:
-    """One liquidity measure per symbol, from the factors already computed."""
-    return {
-        result.symbol: result
-        for result in factor_results
-        if result.factor == LIQUIDITY_FACTOR
-    }
-
-
-def _results_for(
-    factor_results: Sequence[FactorResult], symbol: str
-) -> tuple[FactorResult, ...]:
-    return tuple(result for result in factor_results if result.symbol == symbol)
-
-
-def _symbols(dataset: NormalizedDataset) -> tuple[str, ...]:
-    """Return the dataset's symbols in a stable order."""
-    return tuple(sorted({bar.symbol for bar in dataset.daily_bars}))

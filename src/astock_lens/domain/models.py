@@ -100,8 +100,30 @@ class SnapshotLineage(DomainRecord):
     Time is carried by the artifact that owns the lineage, so lineage itself
     records only what is needed to reproduce the decision context: which
     universe snapshot, factor version, and strategy version were used.
+
+    A run may score with more than one scanner, so the version fields carry
+    every version that took part, comma-separated. Neither a factor nor a
+    strategy version may contain a comma — the split below is what reads them
+    back.
     """
 
     universe_snapshot: str | None = None
     factor_version: str | None = None
     strategy_version: str | None = None
+
+    def factor_versions(self) -> frozenset[str]:
+        """Return the distinct factor versions this lineage declares."""
+        return _versions(self.factor_version)
+
+    def strategy_versions(self) -> frozenset[str]:
+        """Return the distinct strategy versions this lineage declares."""
+        return _versions(self.strategy_version)
+
+
+def _versions(declared: str | None) -> frozenset[str]:
+    """Split one lineage field into the versions it declares."""
+    if declared is None:
+        return frozenset()
+    return frozenset(
+        part for part in (item.strip() for item in declared.split(",")) if part
+    )

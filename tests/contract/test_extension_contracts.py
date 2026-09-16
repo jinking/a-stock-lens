@@ -8,6 +8,7 @@ from astock_lens.factors.contracts import Factor
 from astock_lens.research.contracts import DeepResearchAdapter
 from astock_lens.signals.contracts import SignalDetector
 from astock_lens.strategies.contracts import StrategyPlugin
+from astock_lens.watchlist.store import JsonWatchlistStore, WatchlistStore
 
 
 def test_required_contract_methods_are_stable() -> None:
@@ -17,6 +18,7 @@ def test_required_contract_methods_are_stable() -> None:
     assert {"required_factors", "eligibility", "score", "explain"} <= set(
         StrategyPlugin.__dict__
     )
+    assert {"score_cross_section"} <= set(StrategyPlugin.__dict__)
     assert {"detect"} <= set(SignalDetector.__dict__)
     assert {"submit", "status", "result"} <= set(DeepResearchAdapter.__dict__)
 
@@ -42,5 +44,16 @@ def test_snapshot_store_contract_is_stable() -> None:
 def test_json_snapshot_store_satisfies_the_snapshot_contract() -> None:
     """Both stores are interchangeable, so both are bound to this protocol."""
     store: SnapshotStore = JsonSnapshotStore(Path("."))
+
+    assert store is not None
+
+
+def test_watchlist_store_contract_is_stable() -> None:
+    assert {"write", "read", "symbols"} <= set(WatchlistStore.__dict__)
+
+
+def test_json_watchlist_store_satisfies_the_contract() -> None:
+    """Both watchlist backends are bound to the same protocol."""
+    store: WatchlistStore = JsonWatchlistStore(Path("."))
 
     assert store is not None

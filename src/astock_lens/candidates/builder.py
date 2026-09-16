@@ -28,8 +28,9 @@ class CandidateBuilder:
         next_action: NextAction = NextAction.IGNORE,
     ) -> Candidate:
         """Assemble a candidate, refusing evidence that contradicts its lineage."""
+        declared = lineage.strategy_versions()
         for result in strategy_results:
-            if result.lineage.strategy_version != lineage.strategy_version:
+            if result.lineage.strategy_version not in declared:
                 raise ValueError(
                     f"strategy result for {result.strategy_id!r} carries "
                     f"strategy_version {result.lineage.strategy_version!r}, but the "

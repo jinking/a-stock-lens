@@ -4,6 +4,7 @@ Seven independent V1 scanners share this contract. Strategies never call a data
 provider directly and never collapse into one cross-strategy global score.
 """
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
@@ -90,6 +91,18 @@ class StrategyPlugin(Protocol):
 
     def score(self, context: StrategyContext) -> StrategyResult:
         """Score an eligible symbol using factors only."""
+        ...
+
+    def score_cross_section(
+        self, contexts: Sequence[StrategyContext]
+    ) -> tuple[StrategyResult, ...]:
+        """Score a population in one pass.
+
+        `rank_percentile` is defined against a population, so the engine needs
+        an entry point that sees the whole cross-section rather than one symbol
+        at a time. A scanner that cannot rank returns the same results it would
+        return from `score`, with the ranking fields left absent.
+        """
         ...
 
     def explain(self, result: StrategyResult) -> Explanation:
