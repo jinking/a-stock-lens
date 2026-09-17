@@ -721,6 +721,8 @@ def test_doctor_reports_the_financial_statement_provider(
     local_tmp: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The WeStock CLI is an external command, so doctor must say where it is."""
+    import astock_lens.data.providers.westock as westock_module
+
     binary = local_tmp / "westock"
     binary.write_text("#!/bin/sh\n", encoding="utf-8")
     binary.chmod(0o755)
@@ -732,6 +734,13 @@ def test_doctor_reports_the_financial_statement_provider(
     assert "westock-cli [ok]" in configured.stdout
 
     monkeypatch.delenv("ASTOCK_WESTOCK_BIN")
+    # 没有环境变量时 provider 用仓库内的默认路径 `tools/bin/westock`：本机装好
+    # 二进制后那个文件就存在，doctor 会如实报 [ok]。因此这里把默认路径显式指到
+    # 一个不存在的文件，才能断言"找不到二进制"这条分支——否则这条断言实际测的
+    # 是开发机有没有装二进制，而不是 provider 的行为。
+    monkeypatch.setattr(
+        westock_module, "DEFAULT_BINARY", local_tmp / "absent" / "westock"
+    )
     missing = CliRunner().invoke(app, ["doctor"])
 
     assert missing.exit_code == 0, missing.output
