@@ -62,6 +62,7 @@ V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学�
 | 12 个基本面因子（5 个比值 + 7 个指标透传），带时点选择、证据引用与单位 | 估值类因子（需要市值/股本口径评审）、行业适用的豁免规则 |
 | Growth / Quality / Dividend 三个 Scanner 的**资格判定**（打分待权重评审） | Value / GARP（缺估值口径）、Industry Trend（缺行业数据） |
 | 全市场财报同步已验证（5,576 只 × 三大表，37 分钟，缺口 4–6 只且有名有姓） | AkShare 全市场日线（5564 只 × 全history，尚未跑过） |
+| 评分机器（`WeightedPercentileScanner`，支持极性）+ 权重评审工具（真实全市场数据） | **权重本身仍是 `PENDING REVIEW`**——等你定数字 |
 | Job Run 记录与 Manifest（每阶段独立可重跑）、`astock daily`；CLI `sync` / `stock` / `watch` / `research` / `strategy run`；API `/health` `/universe` `/factors` `/candidates` `/watchlist` | |
 | 独立 Artifact Validator（快照 + Job Manifest，不导入生产代码） | |
 
@@ -229,6 +230,33 @@ dividend: 000001.SZ 合格、300750.SZ 合格、600519.SH 合格
 ```
 
 银行在 Growth/Dividend 上合格、在 Quality 上不合格——这正是 6 态缺失词表要表达的区别：不是"数据坏了"，而是"这张报表没有这一行"。
+
+### 权重评审（待你拍板）
+
+评分机器已经就绪：一旦 `configs/strategies/<id>.yaml` 里写上 `weights:`，`WeightedPercentileScanner` 立刻开始打分，无需改代码；没写权重就仍只做资格判定。评审工具用真实全市场数据把候选方案的后果摊开：
+
+```bash
+uv run python scripts/review_strategy_weights.py --root /path/to/raw --as-of 2026-09-16
+```
+
+权重的符号表达极性：正数表示"越大越好"，负数表示"越小越好"（例如 `debt_to_asset: -1.0`）。`weights` 必须**恰好覆盖** `required_factors`，权重为 0 会被拒绝——一个 0 权重意味着这个因子本不该出现在要求里。
+
+实测（5,565 只，2026-09-16 数据）：
+
+| 策略 | 候选方案 | top-12 与等权重重合 | 观察 |
+| --- | --- | --- | --- |
+| Quality | 等权 vs 收益+现金流优先 | **3/12（25%）** | 权重真的改变你看到谁 |
+| Quality | 等权 vs 资产负债表优先 | 6/12（50%） | 是否把杠杆当一票否决，差别很大 |
+| Growth | 等权 vs 3 年持续性优先 | 7/8（88%） | 权重几乎无效 |
+| Growth | 等权 vs 最新一期优先 | 7/8（88%） | 同上 |
+| Dividend | 等权 vs 现金流覆盖优先 | 7/8（88%） | 同上 |
+
+评审同时暴露了两个**因子设计问题**（权重调不动它们，需要你定口径）：
+
+1. **比值在分母塌缩时不可用**。`dividend_payout_ttm` 与 `ocf_to_net_profit` 的分母是 TTM 归母净利润，当它接近 0 时比值爆炸——实测榜首是 `603439.SH` 的支付率 **6407%**、现金流覆盖 **691 倍**，而百分位排名恰好专挑这类公司，与"可持续分红"相反。源站自己发布的年报支付率是正常的（茅台 79.00%、平安银行 27.13%、603439 51.84%），因此可选口径包括：改用源站 `DividendPaidRatio`、或给分母设一个下限（阈值需你确认）、或保留现状并接受噪声。
+2. **Growth 被极端值主导**。榜首的 `revenue_yoy` 高达 1819%、`net_profit_parent_yoy` 达 71528%，而百分位排名让 3000% 与 70000% 的差距被压缩成一个名次——所以换权重也改变不了榜单（88% 重合）。这属于"是否需要稳健化处理"的评审决定。
+
+在你确认之前，三个 Scanner 仍然只给资格判定，不产生任何分数。
 
 ## 测试与质量检查
 

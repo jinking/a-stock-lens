@@ -248,3 +248,55 @@ What the run also validated: re-landing is idempotent (rows merge on
 `(code, EndDate)`, so a gap-filling pass replaced rather than duplicated), and
 a misconfigured run fails loudly — a missing `ASTOCK_WESTOCK_BIN` produced a
 `SOURCE_ERROR` naming the problem instead of a silently empty dataset.
+
+## Weight review (2026-09-17)
+
+The scoring machine and the review instrument were built; the weights
+themselves are still `PENDING REVIEW` and nothing was decided here.
+
+Conventions this slice fixed, because a reviewer has to agree to *something*:
+
+- **A weight's sign carries polarity.** Positive means the higher the value the
+  better the standing; negative orients the factor first, so `debt_to_asset:
+  -1.0` means lower leverage ranks better. One number per factor, and an
+  ambiguous case stays visible instead of hiding behind a second vocabulary.
+- **`weights` must cover `required_factors` exactly, and a zero weight is
+  refused.** A factor with no weight does not belong in the strategy's
+  requirements, and silently ignoring it would leave a requirement nobody
+  measures.
+- **The swap point is the registry**: a configuration with reviewed weights
+  binds `WeightedPercentileScanner` and starts scoring with no code change;
+  without weights it binds `EligibilityScanner` and produces no score.
+
+Measured on the whole market (5,565 symbols, 2026-09-16 data), which is what a
+review is for:
+
+| Strategy | Candidates compared | top-12 overlap |
+| --- | --- | --- |
+| quality | equal vs return-and-cash-first | 3/12 |
+| quality | equal vs balance-sheet-first | 6/12 |
+| growth | equal vs persistence-first | 7/8 |
+| growth | equal vs latest-print-first | 7/8 |
+| dividend | equal vs coverage-first | 7/8 |
+
+Two factor-design problems surfaced, and neither is fixable by choosing weights:
+
+1. **A ratio whose denominator can collapse is not a usable ranking input.**
+   `dividend_payout_ttm` and `ocf_to_net_profit` both divide by trailing parent
+   net profit; when that is near zero the ratio explodes and percentile ranking
+   selects exactly those instruments. Measured: `603439.SH` shows a payout of
+   6,407% and cash coverage of 691x. The source publishes its own annual
+   `DividendPaidRatio` (茅台 79.00%, 平安银行 27.13%, `603439.SH` 51.84%), so
+   the options are: adopt the source's ratio, floor the denominator (a
+   threshold the owner must set), or keep the noise knowingly.
+2. **Growth is dominated by extreme values.** The top names carry
+   `revenue_yoy` up to 1,819% and `net_profit_parent_yoy` up to 71,528%, and
+   percentile ranking compresses 3,000% and 70,000% into adjacent ranks — which
+   is why changing the weights moved only one name in eight. Robustifying
+   (winsorising, or requiring both horizons) is a review decision.
+
+A third finding is about performance rather than policy: `factor_stage` used to
+hand every factor the whole market, so each fundamental factor call scanned
+2.1M observations. Contexts now carry only the symbol's own rows
+(`stages.DatasetIndex`), which is both faster and a truer statement of what a
+factor may read.
