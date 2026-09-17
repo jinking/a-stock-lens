@@ -6,14 +6,21 @@ import pytest
 
 from astock_lens.domain.models import SnapshotLineage
 from astock_lens.qualifications.contracts import (
-    AbsoluteQualificationRule,
     QualificationRuleNotConfigured,
-    StrategyQualifier,
 )
+from astock_lens.qualifications.dividend import DividendQualifier
+from astock_lens.qualifications.garp import GARPQualifier
+from astock_lens.qualifications.growth import GrowthQualifier
 from astock_lens.qualifications.models import (
     AbsoluteQualificationVerdict,
-    StrategyQualification,
 )
+from astock_lens.qualifications.momentum import MomentumQualifier
+from astock_lens.qualifications.quality import QualityQualifier
+from astock_lens.qualifications.registry import (
+    CANONICAL_STRATEGY_IDS,
+    build_qualifiers,
+)
+from astock_lens.qualifications.value import ValueQualifier
 from astock_lens.strategies.contracts import StrategyResult
 
 AS_OF = datetime(2026, 9, 4, 15, 0, tzinfo=UTC)
@@ -53,27 +60,12 @@ class _AlwaysFailAbsoluteRule:
         return AbsoluteQualificationVerdict(passed=False, risks=("absolute fail",))
 
 
-class _DummyQualifier:
-    strategy_id = "value"
-    qualification_version = "qual-v1"
-
-    def __init__(self, rule: AbsoluteQualificationRule) -> None:
-        self.rule = rule
-
-    def qualify(self, result: StrategyResult) -> StrategyQualification:
-        from astock_lens.qualifications.common import build_qualification
-
-        return build_qualification(
-            result=result,
-            expected_strategy_id=self.strategy_id,
-            qualification_version=self.qualification_version,
-            absolute_rule=self.rule,
-        )
-
-
 def test_percentile_below_top_ten_percent_cannot_qualify() -> None:
     result = _strategy_result(rank_percentile=0.899999)
-    qualifier = _DummyQualifier(_AlwaysPassAbsoluteRule())
+    qualifier = ValueQualifier(
+        absolute_rule=_AlwaysPassAbsoluteRule(),
+        qualification_version="v1",
+    )
     qualification = qualifier.qualify(result)
     assert qualification.percentile_pass is False
     assert qualification.absolute_pass is True
@@ -82,7 +74,10 @@ def test_percentile_below_top_ten_percent_cannot_qualify() -> None:
 
 def test_percentile_and_absolute_gate_must_both_pass() -> None:
     result = _strategy_result(rank_percentile=0.90)
-    qualifier = _DummyQualifier(_AlwaysPassAbsoluteRule())
+    qualifier = ValueQualifier(
+        absolute_rule=_AlwaysPassAbsoluteRule(),
+        qualification_version="v1",
+    )
     qualification = qualifier.qualify(result)
     assert qualification.percentile_pass is True
     assert qualification.absolute_pass is True
@@ -91,23 +86,84 @@ def test_percentile_and_absolute_gate_must_both_pass() -> None:
 
 def test_qualification_version_is_pinned_and_non_empty() -> None:
     result = _strategy_result(rank_percentile=0.92)
-    qualifier = _DummyQualifier(_AlwaysPassAbsoluteRule())
+    qualifier = ValueQualifier(
+        absolute_rule=_AlwaysPassAbsoluteRule(),
+        qualification_version="val-qual-v2",
+    )
     qualification = qualifier.qualify(result)
-    assert qualification.qualification_version
-    assert len(qualification.qualification_version.strip()) > 0
+    assert qualification.qualification_version == "val-qual-v2"
 
 
 def test_absolute_failure_blocks_qualification_even_with_high_percentile() -> None:
     result = _strategy_result(rank_percentile=0.99)
-    qualifier = _DummyQualifier(_AlwaysFailAbsoluteRule())
+    qualifier = ValueQualifier(
+        absolute_rule=_AlwaysFailAbsoluteRule(),
+        qualification_version="v1",
+    )
     qualification = qualifier.qualify(result)
     assert qualification.percentile_pass is True
     assert qualification.absolute_pass is False
     assert qualification.qualified is False
+    assert "absolute fail" in qualification.risks
 
 
 def test_missing_rank_percentile_raises_value_error() -> None:
     result = _strategy_result(rank_percentile=None)
-    qualifier = _DummyQualifier(_AlwaysPassAbsoluteRule())
+    qualifier = ValueQualifier(
+        absolute_rule=_AlwaysPassAbsoluteRule(),
+        qualification_version="v1",
+    )
     with pytest.raises(ValueError, match="rank_percentile"):
         qualifier.qualify(result)
+
+
+def test_qualifier_rejects_mismatched_strategy_id() -> None:
+    result = _strategy_result(strategy_id="momentum")
+    qualifier = ValueQualifier(
+        absolute_rule=_AlwaysPassAbsoluteRule(),
+        qualification_version="v1",
+    )
+    with pytest.raises(ValueError, match="Strategy ID mismatch"):
+        qualifier.qualify(result)
+
+
+def test_six_independent_qualifiers_instantiate_correctly() -> None:
+    rule = _AlwaysPassAbsoluteRule()
+    qualifiers = [
+        ValueQualifier(absolute_rule=rule, qualification_version="v1"),
+        GrowthQualifier(absolute_rule=rule, qualification_version="v1"),
+        GARPQualifier(absolute_rule=rule, qualification_version="v1"),
+        QualityQualifier(absolute_rule=rule, qualification_version="v1"),
+        DividendQualifier(absolute_rule=rule, qualification_version="v1"),
+        MomentumQualifier(absolute_rule=rule, qualification_version="v1"),
+    ]
+    assert [q.strategy_id for q in qualifiers] == [
+        "value",
+        "growth",
+        "garp",
+        "quality",
+        "dividend",
+        "momentum",
+    ]
+    for q in qualifiers:
+        res = _strategy_result(strategy_id=q.strategy_id, rank_percentile=0.95)
+        qual = q.qualify(res)
+        assert qual.qualified is True
+        assert qual.strategy_id == q.strategy_id
+
+
+def test_build_qualifiers_with_missing_rule_raises_not_configured() -> None:
+    rules = {
+        "value": _AlwaysPassAbsoluteRule(),
+        "growth": _AlwaysPassAbsoluteRule(),
+        # garp missing
+    }
+    with pytest.raises(QualificationRuleNotConfigured, match="garp"):
+        build_qualifiers(rules)
+
+
+def test_build_qualifiers_succeeds_when_all_configured() -> None:
+    rules = {s: _AlwaysPassAbsoluteRule() for s in CANONICAL_STRATEGY_IDS}
+    qualifiers = build_qualifiers(rules)
+    assert len(qualifiers) == 6
+    assert set(qualifiers.keys()) == set(CANONICAL_STRATEGY_IDS)
