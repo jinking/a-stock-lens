@@ -85,6 +85,16 @@ def _written_snapshots(snapshot_root: Path) -> tuple[str, ...]:
     )
 
 
+def _snapshot_texts(snapshot_root: Path) -> dict[str, str]:
+    """正式快照目录的完整内容，用来证明一次命令之后什么都没被动过。"""
+    if not snapshot_root.is_dir():
+        return {}
+    return {
+        str(path.relative_to(snapshot_root)): path.read_text(encoding="utf-8")
+        for path in sorted(snapshot_root.rglob("*.json"))
+    }
+
+
 # --- factors compute ---------------------------------------------------------
 
 
@@ -127,19 +137,19 @@ def test_strategy_run_writes_no_formal_snapshot(local_tmp: Path) -> None:
 # --- scan --------------------------------------------------------------------
 
 
-def test_scan_does_not_overwrite_the_daily_candidate_snapshot(local_tmp: Path) -> None:
-    """`daily` 写完的正式候选结果，不能被一次预览覆盖。"""
+def test_scan_leaves_every_formal_snapshot_untouched(local_tmp: Path) -> None:
+    """`daily` 写下的正式快照，不能被一次预览改动哪怕一个字节。"""
     root = _snapshot_root(local_tmp)
 
     daily = _invoke(root, "daily", "--as-of", DAY, "--allow-incomplete")
     assert daily.exit_code == 0, daily.output
-    assert (root / CANDIDATE_JSON).is_file()
-    formal = _candidate_text(root)
+    formal = _snapshot_texts(root)
+    assert formal, "前置条件：daily 必须真的写过正式快照"
 
     after = _invoke(root, "scan", "--as-of", DAY)
 
     assert after.exit_code == 0, after.output
-    assert _candidate_text(root) == formal
+    assert _snapshot_texts(root) == formal
 
 
 def test_scan_does_not_replace_a_formal_candidate_snapshot(local_tmp: Path) -> None:

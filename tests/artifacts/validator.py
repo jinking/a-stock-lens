@@ -75,12 +75,14 @@ VERSION_KEYS: dict[str, tuple[str, ...]] = {
     "CANDIDATE": ("strategy_version",),
 }
 
-# The eleven stages `spec §15` names, in the order the design lists them.
+# The eleven stages `spec §15` names, in the order the canonical pipeline runs
+# them: factors are measured before the Universe (its liquidity rule consumes
+# `avg_amount_20d`), and Candidate is built after the market and signal layers.
 JOB_STAGES: tuple[str, ...] = (
     "SYNC_DATA",
     "NORMALIZE",
-    "BUILD_UNIVERSE",
     "COMPUTE_FACTORS",
+    "BUILD_UNIVERSE",
     "RUN_STRATEGIES",
     "DETECT_REGIME",
     "MARKET_VALIDATE",

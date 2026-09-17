@@ -621,7 +621,12 @@ def stock(symbol: str, as_of: Annotated[str, AS_OF_OPTION]) -> None:
         typer.echo(f"  candidate: {candidate.next_action}")
         lineage = candidate.lineage
     elif strategies:
-        typer.echo("  candidate: none (no scanner found it eligible)")
+        # 有策略结果却没有候选，说明当天的 Candidate 阶段没有产出，而不是
+        # "这只股票没被任何 Scanner 看中"——后者是一句没人验证过的猜测。
+        typer.echo(
+            "  candidate: none stored for this date "
+            "(no approved qualification policy, so BUILD_CANDIDATES is blocked)"
+        )
         lineage = strategies[0].lineage
     else:
         lineage = universe.lineage

@@ -30,10 +30,9 @@ LONG_DATASET = "daily_bars_long"
 # The stages this slice can actually run, in the design's order.
 IMPLEMENTED = (
     JobStage.NORMALIZE,
-    JobStage.BUILD_UNIVERSE,
     JobStage.COMPUTE_FACTORS,
+    JobStage.BUILD_UNIVERSE,
     JobStage.RUN_STRATEGIES,
-    JobStage.BUILD_CANDIDATES,
     JobStage.GENERATE_DAILY_SNAPSHOT,
 )
 
@@ -43,6 +42,7 @@ BLOCKED = (
     JobStage.DETECT_REGIME,
     JobStage.MARKET_VALIDATE,
     JobStage.RUN_SIGNALS,
+    JobStage.BUILD_CANDIDATES,
     JobStage.UPDATE_WATCHLIST,
 )
 
@@ -129,7 +129,23 @@ def test_the_implemented_stages_succeed_and_count_their_rows(local_tmp: Path) ->
     assert factors.rows_out == 11 * configured
     assert by_stage[JobStage.BUILD_UNIVERSE].rows_out == 7
     assert by_stage[JobStage.RUN_STRATEGIES].rows_in == 7
-    assert by_stage[JobStage.BUILD_CANDIDATES].rows_out == 7
+
+
+def test_the_candidate_stage_is_blocked_while_its_layers_are_missing(
+    local_tmp: Path,
+) -> None:
+    """Market 与 Signal 还没有实现，Candidate 就不是"已完成的最终产物"。"""
+    result = _run(local_tmp)
+
+    run = next(
+        item for item in result.runs if item.job_type is JobStage.BUILD_CANDIDATES
+    )
+    assert run.status is JobStatus.BLOCKED
+    assert run.error is not None
+    assert JobStage.DETECT_REGIME.value in run.error
+    assert JobStage.RUN_SIGNALS.value in run.error
+    # 没有任何候选被写出来冒充完整结果。
+    assert result.candidates == ()
 
 
 def test_the_blocked_stages_name_the_decision_they_wait_for(local_tmp: Path) -> None:
@@ -187,19 +203,20 @@ def test_a_failing_stage_is_recorded_and_stops_the_pipeline(local_tmp: Path) -> 
     assert result.universe is None
 
 
-def test_the_four_available_snapshots_are_written(local_tmp: Path) -> None:
+def test_the_snapshots_the_pipeline_can_produce_are_written(local_tmp: Path) -> None:
     result = _run(local_tmp)
 
     for kind in (
         SnapshotKind.UNIVERSE,
         SnapshotKind.FACTOR,
         SnapshotKind.STRATEGY,
-        SnapshotKind.CANDIDATE,
     ):
         assert (local_tmp / "snapshots" / kind.value / "2026-09-04.json").is_file(), (
             kind
         )
 
+    # CANDIDATE 不在其中：Business 层被 BLOCKED，所以它没有生产者。
+    assert not (local_tmp / "snapshots" / "CANDIDATE" / "2026-09-04.json").exists()
     assert result.snapshot_paths
 
 
@@ -215,7 +232,14 @@ def test_the_missing_market_regime_snapshot_is_reported_not_invented(
     assert final.status is JobStatus.SUCCEEDED
     assert final.note is not None
     assert SnapshotKind.MARKET_REGIME.value in final.note
-    assert result.missing_snapshot_kinds == (SnapshotKind.MARKET_REGIME,)
+    # 最后一阶段必须同时说清"写了哪些"和"哪些没有生产者"。
+    assert "snapshots written:" in final.note
+    assert "blocked business stages:" in final.note
+    assert JobStage.BUILD_CANDIDATES.value in final.note
+    assert result.missing_snapshot_kinds == (
+        SnapshotKind.MARKET_REGIME,
+        SnapshotKind.CANDIDATE,
+    )
 
 
 def test_job_runs_are_persisted_for_the_date(local_tmp: Path) -> None:
@@ -288,10 +312,8 @@ def test_the_pipeline_reports_the_scan_it_produced(local_tmp: Path) -> None:
     scanners = len(load_scanners(CONFIGS / "strategies"))
     assert scanners >= 2
     assert len(result.strategy_results) == 7 * scanners
-    assert len(result.candidates) == 7
-    assert all(
-        candidate.next_action.value == "WATCH" for candidate in result.candidates
-    )
+    # 候选资格没有批准的规则，所以这里一个候选都不该出现。
+    assert result.candidates == ()
 
 
 def test_the_fundamental_scanners_report_ineligibility_with_a_reason(

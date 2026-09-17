@@ -50,16 +50,20 @@ SYNC_SKIPPED = (
 # computes factors first because the Universe's liquidity rule consumes the
 # `avg_amount_20d` factor: measuring it twice would give the same quantity two
 # definitions. The deviation is deliberate and recorded in REVIEW_NOTES.md.
+#
+# BUILD_CANDIDATES comes after the market and signal stages, because a
+# Candidate is the object those layers have already spoken about. Building it
+# earlier publishes a partial result under a name that promises a complete one.
 EXECUTION_ORDER: tuple[JobStage, ...] = (
     JobStage.SYNC_DATA,
     JobStage.NORMALIZE,
     JobStage.COMPUTE_FACTORS,
     JobStage.BUILD_UNIVERSE,
     JobStage.RUN_STRATEGIES,
-    JobStage.BUILD_CANDIDATES,
     JobStage.DETECT_REGIME,
     JobStage.MARKET_VALIDATE,
     JobStage.RUN_SIGNALS,
+    JobStage.BUILD_CANDIDATES,
     JobStage.UPDATE_WATCHLIST,
     JobStage.GENERATE_DAILY_SNAPSHOT,
 )
@@ -90,6 +94,27 @@ MISSING_SNAPSHOT_REASON = (
     "it has no producer: DETECT_REGIME is blocked, and a regime snapshot "
     "without a detector would be a fabricated verdict"
 )
+
+# A stage whose inputs are produced by a stage that has no implementation yet is
+# BLOCKED, not FAILED: nothing went wrong in the run, the layer simply does not
+# exist. Candidate qualification is defined on top of the market and signal
+# verdicts, so with those missing a Candidate can only be a partial result.
+_UPSTREAM_DECISIONS: dict[JobStage, tuple[JobStage, ...]] = {
+    JobStage.BUILD_CANDIDATES: (
+        JobStage.DETECT_REGIME,
+        JobStage.MARKET_VALIDATE,
+        JobStage.RUN_SIGNALS,
+    ),
+}
+
+
+def _missing_upstream(stage: JobStage) -> tuple[JobStage, ...]:
+    """The upstream stages this one needs that have no implementation yet."""
+    return tuple(
+        upstream
+        for upstream in _UPSTREAM_DECISIONS.get(stage, ())
+        if upstream in BLOCKED_REASONS
+    )
 
 
 class DailyRunResult(DomainRecord):
@@ -161,6 +186,8 @@ def run_daily(
         run = _execute(stage, context=context, state=state)
         runs.append(run)
         job_store.record(run)
+        if run.status is JobStatus.BLOCKED:
+            state.blocked.append(stage)
         if run.status is JobStatus.FAILED:
             break
 
@@ -205,6 +232,7 @@ class _State:
     strategy_results: tuple[StrategyResult, ...] = ()
     candidates: tuple[Candidate, ...] = ()
     snapshot_paths: list[tuple[SnapshotKind, Path]] = field(default_factory=list)
+    blocked: list[JobStage] = field(default_factory=list)
 
 
 def _execute(stage: JobStage, *, context: _Context, state: _State) -> JobRun:
@@ -228,6 +256,21 @@ def _execute(stage: JobStage, *, context: _Context, state: _State) -> JobRun:
             status=JobStatus.BLOCKED,
             started_at=started_at,
             error=reason,
+        )
+
+    missing = _missing_upstream(stage)
+    if missing:
+        return _run(
+            stage,
+            context,
+            status=JobStatus.BLOCKED,
+            started_at=started_at,
+            error=(
+                "its inputs do not exist yet: "
+                f"{', '.join(upstream.value for upstream in missing)} have no "
+                "implementation, and a result published without them would read "
+                "as a complete one"
+            ),
         )
 
     handler = _HANDLERS[stage]
@@ -376,7 +419,9 @@ def _generate_daily_snapshot(context: _Context, state: _State) -> StageOutcome:
     missing = [kind for kind in SnapshotKind if kind not in written]
     note = (
         f"snapshots written: {', '.join(kind.value for kind in written)}; "
-        f"missing: {', '.join(kind.value for kind in missing)} "
+        f"missing: {', '.join(kind.value for kind in missing)}; "
+        f"blocked business stages: "
+        f"{', '.join(stage.value for stage in state.blocked) or 'none'} "
         f"({MISSING_SNAPSHOT_REASON})"
     )
     return StageOutcome(rows_out=len(written), note=note)
