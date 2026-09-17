@@ -33,7 +33,11 @@ def _raw(dataset: str) -> RawDataset:
     payload = json.loads((FIXTURES / f"{dataset}.json").read_text(encoding="utf-8"))
     blocks = payload["data"]["apiData"]["apiRecall"]
     rows = tuple(
-        (str(b.get("type") or ""), str(b.get("desc") or ""), str(b.get("content") or ""))
+        (
+            str(b.get("type") or ""),
+            str(b.get("desc") or ""),
+            str(b.get("content") or ""),
+        )
         for b in blocks
     )
     return RawDataset(
@@ -91,9 +95,7 @@ def test_a_categorical_label_is_evidence_not_a_number() -> None:
 def test_missing_markers_never_become_zero() -> None:
     """时序表里大量 `--`，它们必须是"没有值"。"""
     outcome = NeodataValuationNormalizer().normalize(_raw("valuation"), as_of=AS_OF)
-    static_pe = [
-        item for item in outcome.observations if item.metric == "pe_static"
-    ]
+    static_pe = [item for item in outcome.observations if item.metric == "pe_static"]
 
     # `静态市盈率（倍）` 这一列在录制响应里全部是 `--`，因此不产生任何指标，
     # 而不是产生一堆 0（该列没有映射到指标，因此这里断言它确实没出现）。
@@ -118,9 +120,7 @@ def test_a_sector_block_without_a_series_is_dated_at_the_query_day() -> None:
 
     assert outcome.observations
     assert outcome.dated_from_query > 0
-    assert all(
-        item.valuation_date == AS_OF.date() for item in outcome.observations
-    )
+    assert all(item.valuation_date == AS_OF.date() for item in outcome.observations)
     sector = outcome.observations[0]
     assert sector.symbol == "01801125.PT"
     assert sector.metric in {"pe_ttm", "pb"}

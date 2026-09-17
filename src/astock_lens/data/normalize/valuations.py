@@ -278,17 +278,13 @@ def _latest_date(table: Table | None) -> date | None:
     index = table.columns.index(DATE_COLUMN)
     days = [
         day
-        for day in (
-            _parse_day(row[index]) for row in table.rows if index < len(row)
-        )
+        for day in (_parse_day(row[index]) for row in table.rows if index < len(row))
         if day is not None
     ]
     return max(days) if days else None
 
 
-def _row_date(
-    row: tuple[str, ...], positions: Mapping[str, int]
-) -> date | None:
+def _row_date(row: tuple[str, ...], positions: Mapping[str, int]) -> date | None:
     index = positions.get(DATE_COLUMN)
     if index is None or index >= len(row):
         return None
@@ -305,6 +301,4 @@ def _parse_day(raw: str) -> date | None:
 
 def _close_of(day: date) -> datetime:
     """估值可用时点：交易日收盘（15:00 +08:00），保守取值。"""
-    return datetime(
-        day.year, day.month, day.day, A_SHARE_CLOSE_HOUR, tzinfo=SHANGHAI
-    )
+    return datetime(day.year, day.month, day.day, A_SHARE_CLOSE_HOUR, tzinfo=SHANGHAI)

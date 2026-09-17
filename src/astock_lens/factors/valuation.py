@@ -147,9 +147,7 @@ def _configured_staleness(factor_config: FactorConfig) -> int | None:
     if configured is None:
         return None
     if configured <= 0:
-        raise ValueError(
-            f"params.{STALE_AFTER_DAYS} 设置时必须为正，收到 {configured}"
-        )
+        raise ValueError(f"params.{STALE_AFTER_DAYS} 设置时必须为正，收到 {configured}")
     return configured
 
 
