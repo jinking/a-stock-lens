@@ -43,27 +43,27 @@ V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学�
 
 ## 当前状态
 
-项目处于**每日 Pipeline 切片已贯通**：`CSV → Raw → Normalized → Quality Gate → Factor → Universe → Strategy（横截面评分排名）→ Candidate → 四类快照`，加上 Watchlist 状态机、Job Manifest 与 CLI 生命周期命令，可以端到端跑通，且不需要网络、不需要可选依赖。
+项目处于**每日 Pipeline 切片已贯通**：`CSV → Raw → Normalized → Quality Gate → Factor → Universe → Strategy（横截面评分排名）`，加上 Watchlist 状态机、Job Manifest 与 CLI 生命周期命令，可以端到端跑通，且不需要网络、不需要可选依赖。Candidate 阶段因为入选规则尚未批准而 `BLOCKED`——它不是"今天没有标的入选"，而是"还没有决定怎么选"（见 `docs/ROADMAP.md` 第一节）。
 
 | 已具备 | 尚未实现 |
 | --- | --- |
 | 设计三件套（spec / PRODUCT / ARCHITECTURE） | Market Regime、Market Validation、Signal 检测器（阈值 `Deferred`） |
-| 类型化配置加载；阈值/因子/权重全部写在 YAML | Watchlist 状态机、深研 Adapter 实现、React 前端 |
+| 类型化配置加载；阈值/因子/权重全部写在 YAML | React 前端（6 个页面） |
 | Watchlist 状态机（`DISCOVERED → WATCH → DEEP_RESEARCH → TRACK_SIGNAL`）+ Timeline + CLI/API | 深研 Adapter 需要外部命令，默认未配置时明确报错 |
 | 领域枚举、时间模型、扩展契约 Protocol | `confidence` 算法（设计未定义，保持 `null`） |
 | 本地 CSV Provider、Normalizer、Data Quality Gate | 权重正式评审（当前是等权草案 `PENDING REVIEW`） |
 | Universe 引擎与不可变 `UniverseSnapshot`（含 deferred rule 上报） | 停牌天数数据源（设置 `long_suspension_days` 阈值的前置依赖） |
 | 动量因子（`ret_20d` / `ret_60d` / `proximity_52w_high`）+ 流动性因子 | Parquet 行情存储 |
-| 横截面评分与排名（percentile 加权混合）、`next_action` 路由（D5：仅按排序） | |
+| 横截面评分与排名（percentile 加权混合，作为共享评分组件）；候选动作改由显式 Candidate Policy 决定，不再由分数推断 | Candidate Qualification 规则（四个方案待所有者裁决） |
 | `DuckDBSnapshotStore` / `DuckDBWatchlistStore` 与 JSON store 同协议互换（`ASTOCK_SNAPSHOT_BACKEND` / `ASTOCK_WATCHLIST_BACKEND`） | |
 | AkShare Provider（腾讯域日线 + 三交易所名单）+ 真实录制契约 fixture | |
 | WeStock CLI Provider（三大表，含 `EndDate` + `InfoPublDate`，批量 100 只 / 11 秒）+ 录制 fixture | 财报的 Normalized / Quality Gate / 基本面因子（下一片） |
 | 财务 Normalized（49 个指标）+ Financial Quality Gate + 观测进入因子上下文 | 全市场日线落地、估值类指标 |
-| 13 个基本面因子（5 个比值 + 8 个指标透传），带时点选择、证据引用与单位 | 估值类因子（需要市值/股本口径评审）、行业适用的豁免规则 |
-| Growth / Quality / Dividend 三个 Scanner **已按等权打分**（2026-09-17 评审通过）；极值稳健化与分红支付率形状仍待定 | Value / GARP（缺估值口径）、Industry Trend（缺行业数据） |
+| 13 个基本面因子 + 7 个估值因子，带时点选择、证据引用（含真实 `available_at`）与单位 | 行业适用的豁免规则（例如银行的毛利率） |
+| **6 个 Scanner 各自独立成类**并在打分：momentum / growth / quality / dividend / value / garp（权重均已于 2026-09-17 评审通过） | Industry Trend（缺行业数据）；Growth 极值稳健化、Dividend payout shape、PEG 值域仍待所有者裁决 |
 | 全市场财报同步已验证（5,576 只 × 三大表，37 分钟，缺口 4–6 只且有名有姓） | AkShare 全市场日线（5564 只 × 全history，尚未跑过） |
-| 评分机器（`WeightedPercentileScanner`，支持极性）+ 权重评审工具（真实全市场数据） | **权重本身仍是 `PENDING REVIEW`**——等你定数字 |
-| neodata 一等 Provider（估值 / 行业 / 单季财报查询模板、批量、缺口补抓、凭证状态进 doctor） | 估值与行业数据的归一化层、Value/GARP/Industry Trend 三个 Scanner |
+| 评分机器（`strategies/percentile_scorer.py` 共享组件，支持极性）+ 权重评审工具（真实全市场数据）；每个策略一个独立 Scanner 类 | 重跑一次权重评审以确认现行数字 |
+| neodata 一等 Provider（估值 / 行业 / 单季财报查询模板、批量、缺口补抓、凭证状态进 doctor）+ 估值归一化 | 行业数据归一化、Industry Trend |
 | Job Run 记录与 Manifest（每阶段独立可重跑）、`astock daily`；CLI `sync` / `stock` / `watch` / `research` / `strategy run`；API `/health` `/universe` `/factors` `/candidates` `/watchlist` | |
 | 独立 Artifact Validator（快照 + Job Manifest，不导入生产代码） | |
 
@@ -76,7 +76,7 @@ V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学�
 - **停牌天数诚实缺失。** 交易所名单不提供停牌天数，`suspended_trading_days` 允许 `None`（缺失 ≠ 0）。给 `long_suspension_days` 设阈值前，必须先有提供停牌天数的数据源。
 - **快照后端可选。** 默认 JSON（零依赖），`ASTOCK_SNAPSHOT_BACKEND=duckdb` 切到 DuckDB，两者同协议。
 - **窗口不完整即 `NULL`。** 60 日窗口内少一天，`ret_60d` 输出 `NULL`，不用更短的窗口凑数。
-- **四个阶段显式 `BLOCKED`。** Market Regime、Market Validation、Signal 的词表已确认但阈值是 `Deferred`，`UPDATE_WATCHLIST` 也没有确认的自动变更规则；`astock daily` 把它们记为 `BLOCKED` 并写明原因，`MARKET_REGIME` 快照因此没有生产者（缺失被显式列出，而不是写占位值）。
+- **五个阶段显式 `BLOCKED`。** Market Regime、Market Validation、Signal 的词表已确认但阈值是 `Deferred`；`UPDATE_WATCHLIST` 没有确认的自动变更规则；`BUILD_CANDIDATES` 的入选规则（Candidate Qualification）也还没有批准——它不是"今天没有标的入选"，而是"还没有决定怎么选"。`astock daily` 把它们记为 `BLOCKED` 并写明原因，`MARKET_REGIME` 与 `CANDIDATE` 快照因此没有生产者（缺失被显式列出，而不是写占位值）。
 - **深研 Adapter 默认不接。** `ASTOCK_DEEP_RESEARCH_CMD` 未配置时 `astock research` 直接报错——没有可提交的对象时不会伪造 job。
 - **Watchlist 只走确认路径。** 后退、跳步与预留状态都会被拒绝并指出涉及的状态；设计没有定义这些转移，接受它们等于替产品做决定。
 - **血缘版本可并列。** 同一只标的可能被多个 Scanner 打分，`SnapshotLineage` 的版本字段因此是逗号分隔的集合，判定"这条结果是否被该血缘覆盖"用成员关系；详见 `docs/REVIEW_NOTES.md`。
@@ -160,9 +160,9 @@ uv run astock doctor                 # 报告 provider westock-cli [ok] / [unava
 uv run python scripts/record_westock_fixture.py   # 需要时重录契约 fixture
 ```
 
-`neodata`（自然语言语义检索）留在研究侧，只经 `ResearchRequest` / `DeepResearchAdapter` 使用：它逐标的、输出渲染后的 Markdown、凭证 12 小时有效且只能由 WorkBuddy 平台刷新，不适合做批量因子源。
+`neodata` **是一等 Provider**（2026-09-17 实测修订）：它承担估值、行业与语义三类主数据，并作为财报的交叉验证源；不做标的枚举（名单仍由 AkShare 提供），查询措辞固化成 Provider 内的模板，凭证 12 小时有效且只能由 WorkBuddy 平台刷新。
 
-> 2026-09-17 修订：上面这句已被实测推翻。neodata **是一等 Provider**，承担估值、行业与语义三类主数据，并作为财报的交叉验证源；它不做标的枚举，查询措辞固化成模板。详见设计补遗 §24.1 与 `docs/REVIEW_NOTES.md` 第九节。
+> 修订缘由：早期判断是"只作研究侧、只经 `ResearchRequest` / `DeepResearchAdapter` 使用"，当日实测推翻了其中两条假设（"只能逐标的"与"Markdown 形态不适合入库"）。详见设计补遗 §24.1 与 `docs/REVIEW_NOTES.md` 第九节。
 
 ### 语义数据源（neodata，2026-09-17）
 
@@ -275,7 +275,7 @@ dividend: 000001.SZ 合格、300750.SZ 合格、600519.SH 合格
 
 ### 权重评审（2026-09-17 已完成）
 
-评分由配置驱动：`configs/strategies/<id>.yaml` 里写上 `weights:` → `WeightedPercentileScanner` 打分；没写权重 → 仍只做资格判定。评审工具用真实全市场数据把候选方案的后果摊开：
+评分由配置驱动，但**实现不由配置推断**：`configs/strategies/<id>.yaml` 提供 `required_factors` 与 `weights`，每个策略在自己的模块里有一个独立 Scanner 类（`GrowthScanner`、`QualityScanner`、…），它拥有资格规则并调用共享评分组件 `strategies/percentile_scorer.py` 做百分位混合。给一个策略加权重不会把它变成另一个策略的实现；换权重是配置动作，换资格规则是代码动作。评审工具用真实全市场数据把候选方案的后果摊开：
 
 ```bash
 uv run python scripts/review_strategy_weights.py --root /path/to/raw --as-of 2026-09-16

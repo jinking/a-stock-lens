@@ -160,8 +160,9 @@ CandidateBuilder 与独立产物校验器都用它。
   `debt_to_asset: -1.0` 表示杠杆越低越好。一个因子一个数字，含糊之处藏不住。
 - **`weights` 必须恰好覆盖 `required_factors`；0 权重被拒绝。** 一个 0 权重意味着这个因子
   本不该出现在要求里，静默忽略会留下没人负责的"要求"。
-- **注册表是切换点**：声明了要求且有权重 → `WeightedPercentileScanner` 打分；
-  有要求但没权重 → `EligibilityScanner` 只判资格；两者都没有 → 报错并说明等待的输入。
+- **注册表是切换点**（本条为 2026-09-17 权重评审当时的记录；同日"核心执行链硬化"
+  已把这条推断规则删除，见 `docs/ROADMAP.md` 第七节）：声明了要求且有权重 → `WeightedPercentileScanner`
+  打分；有要求但没权重 → `EligibilityScanner` 只判资格；两者都没有 → 报错并说明等待的输入。
 - **配置守卫**：`tests/unit/test_strategy_registry.py` 断言出货配置的权重表与要求表完全一致。
   这条守卫有具体来由——写入等权当天，注册表里还硬绑着资格判定实现，导致 19 个测试同时失败。
 

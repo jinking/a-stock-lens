@@ -88,3 +88,44 @@ ResearchRequest → DeepResearchAdapter` 逐项对照：
 2. 完成一项 → 勾掉并补上提交号；
 3. 需要所有者决策的 → 放到第一节，写清选项与影响，等确认再动；
 4. 每完成一小步就 `commit` + `push`，不攒批量（见 2026-09-17 的节奏约定）。
+
+## 七、已关闭：核心执行链硬化（2026-09-17）
+
+这一轮不做新功能，只把"能跑"变成"只有一个真相"。逐项与提交号：
+
+| 已关闭的事 | 提交 |
+| --- | --- |
+| 回归测试钉住快照写入权与候选路由的旧风险 | `1c30c8f` |
+| 收敛为唯一分析执行链：`first_slice.py` / `daily_scan.py` 删除，改为 `pipelines/analysis.py` | `0bdfad3` |
+| `astock daily` 成为唯一正式 Snapshot writer；`factors compute` / `strategy run` / `universe build` 纯计算，`scan` 只预览 | `11e1132` |
+| 同日同 `(kind, as_of)` 内容不同即拒绝覆盖（`SnapshotConflictError`），内容相同幂等 | `dc37709` |
+| Candidate 移到 Market / Signal 之后；上游缺位时 `BLOCKED` 而不是假成功 | `34d5d4e` |
+| 六个策略各自独立 Scanner 类，percentile 加权降级为共享评分组件 | `b663a11` |
+| 删除"有分数即 WATCH"，建立显式 Candidate Policy 边界（未批准即 `BLOCKED`） | `7d58d4c` |
+| `FactorInputRef.available_at` 携带真实证据时间；校验器补时点与跨快照一致性检查 | `ba3ce0e` |
+
+被这一轮**取代**的旧 TODO：不再需要"给通用加权 Scanner 补资格判定"这类条目——
+策略边界已经回到各自的类里；也不再需要讨论"局部命令是否该写快照"——写入权只有
+`daily` 一条路径。
+
+## 八、下一阶段入口（建议按顺序拆成三个独立计划）
+
+不要一次把剩余 Roadmap 塞给一个 Agent，按下面的切分走：
+
+### Plan B — Candidate & Strategy Semantics
+
+- 前提：所有者批准 Candidate Qualification（第一节第一条）、Growth 极值稳健化、
+  Dividend payout shape、PEG 处理规则。
+- 目标：让"5,500 只 StrategyResult → 少量 Research Candidate"的产品语义真正成立，
+  并建立策略特征化 / Golden Dataset。
+
+### Plan C — Full-Market Data Scale
+
+- 目标：Parquet 落地、按标的/批次惰性读取（当前全市场归一化峰值约 2.9 GB）、
+  全市场日线与估值的批量路径、10 分钟日扫目标。
+
+### Plan D — Market Lifecycle & Product Surface
+
+- 目标：Industry Trend → Market Regime → Market Validation → Signal → Candidate →
+  Watchlist → Deep Research → API → React 六页面。
+- 前提：第一节里 Market Regime / Market Validation / Signal 的阈值全部获批。

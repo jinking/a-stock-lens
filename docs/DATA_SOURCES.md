@@ -16,8 +16,12 @@ AkShare                            a-share-deep-research
 
 2026-09-16 补遗（设计规格 §24）：财务三大表的 bulk 源是腾讯 WeStock CLI——它同时给出
 `EndDate`（报告期）与 `InfoPublDate`（公告日期），并支持批量拉取（100 只 11 秒，实测）；
-进入系统的路径仍是 Provider → Raw → Normalized → Quality Gate。`neodata` 是自然语言语义
-检索、逐标的、凭证 12 小时有效，属研究侧，只经 Adapter 使用。
+进入系统的路径仍是 Provider → Raw → Normalized → Quality Gate。
+
+2026-09-17 修订（设计规格 §24.1）：`neodata` **已升为一等 Provider**，不再是研究侧专属。
+它是估值、行业/板块与语义三类主数据的来源，并作为财报的交叉验证源；不做标的枚举（名单
+由 AkShare 提供），查询措辞固化成 Provider 内模板，凭证 12 小时有效且由平台侧刷新。
+全市场估值走"按板块迭代"的批量路径。上面 Provider 分层图里它同样属于批量/筛选一侧。
 
 ## 2. Provider 分层
 

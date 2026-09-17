@@ -13,20 +13,24 @@
 | --- | --- | --- | --- |
 | Unit | `tests/unit/` | 领域模型、时间规则、枚举，以及未来的 Factor / Universe / Strategy / Signal / 状态机 | 已建立 |
 | Contract | `tests/contract/` | 扩展契约的公开签名与外部 schema 适配 | 已建立 |
-| Integration | `tests/integration/` | Provider → Normalize → Factor → Strategy 链路 | 预留，尚无实现 |
+| Integration | `tests/integration/` | 唯一分析执行链（Normalize → Factor → Universe → Strategy）、`daily` 管线、CLI 快照写入权 | 已建立 |
 
 ## 3. 产物测试
 
-`tests/artifacts/` 预留给独立 Artifact Validator。检查项：
+`tests/artifacts/` 是独立 Artifact Validator，**不 import 任何生产代码**，所以实现里的
+系统性错误藏不过去。检查项：
 
 - 快照完整性；
-- Candidate 引用一致性；
+- Candidate 引用一致性（引用的 Strategy 与 Factor 必须在同日快照里存在）；
 - Factor / Strategy 版本是否齐全；
 - score 范围与状态枚举合法性；
-- `available_at <= as_of`；
+- `FactorInputRef.available_at` 必须 timezone-aware 且 `available_at <= factor.as_of`；
 - 因子引用是否存在。
 
 产物测试失败要沉淀为回归用例。
+
+写入权也是被验证的对象：唯一分析执行链（`astock_lens.pipelines.analysis`）只计算，
+只有 `astock daily` 写正式快照；`factors compute` / `strategy run` / `scan` 一个字节都不写。
 
 ## 4. Golden Dataset 与策略特征化
 
