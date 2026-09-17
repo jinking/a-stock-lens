@@ -1,0 +1,16 @@
+# peg — PEG（逐日表）
+#
+# 来自 neodata 的估值事实（逐日估值时序），时点为交易日收盘。
+# 极性由策略权重决定：越低表示成长与价格越匹配
+name: peg
+domain: VALUATION
+description: Price-earnings-to-growth as the source publishes it.
+inputs:
+  - peg
+frequency: DAILY
+direction: LOWER_MEANS_GROWTH_IS_CHEAPER
+null_policy: NULL_UNLESS_THE_METRIC_HAS_A_PUBLISHED_VALUE
+version: v1
+params:
+  # Deferred：没有已评审的新鲜度要求，因此不触发 STALE。
+  stale_after_days: null

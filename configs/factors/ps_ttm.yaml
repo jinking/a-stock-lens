@@ -1,0 +1,16 @@
+# ps_ttm — 滚动市销率（来自 neodata 逐日估值时序）。
+#
+# 设计里 Value 明确点名 PE/PB/PS 三件套，因此 PS 也有独立因子。
+# 极性由策略权重决定：越低越便宜。
+name: ps_ttm
+domain: VALUATION
+description: Trailing-twelve-month price-to-sales as the source publishes it.
+inputs:
+  - ps_ttm
+frequency: DAILY
+direction: LOWER_MEANS_CHEAPER
+null_policy: NULL_UNLESS_THE_METRIC_HAS_A_PUBLISHED_VALUE
+version: v1
+params:
+  # Deferred：没有已评审的新鲜度要求，因此不触发 STALE。
+  stale_after_days: null

@@ -1,0 +1,16 @@
+# pcf_operating_ttm — 滚动市现率-经营现金流（逐日表）
+#
+# 来自 neodata 的估值事实（逐日估值时序），时点为交易日收盘。
+# 极性由策略权重决定：越低越便宜
+name: pcf_operating_ttm
+domain: VALUATION
+description: Price to trailing operating cash flow, the reciprocal of the cash-flow yield.
+inputs:
+  - pcf_operating_ttm
+frequency: DAILY
+direction: LOWER_MEANS_CHEAPER
+null_policy: NULL_UNLESS_THE_METRIC_HAS_A_PUBLISHED_VALUE
+version: v1
+params:
+  # Deferred：没有已评审的新鲜度要求，因此不触发 STALE。
+  stale_after_days: null

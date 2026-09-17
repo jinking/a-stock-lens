@@ -1,0 +1,16 @@
+# pb — 市净率（键值头）
+#
+# 来自 neodata 的估值事实（统一估值查询），时点为交易日收盘。
+# 极性由策略权重决定：越低越便宜
+name: pb
+domain: VALUATION
+description: Price-to-book as the source publishes it.
+inputs:
+  - pb
+frequency: DAILY
+direction: LOWER_MEANS_CHEAPER
+null_policy: NULL_UNLESS_THE_METRIC_HAS_A_PUBLISHED_VALUE
+version: v1
+params:
+  # Deferred：没有已评审的新鲜度要求，因此不触发 STALE。
+  stale_after_days: null
