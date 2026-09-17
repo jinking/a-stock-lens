@@ -2,8 +2,18 @@ id: garp
 enabled: true
 version: v1
 description: Growth quality versus valuation, reusing Growth output.
-# GARP 复用 Growth 的成长维度，再叠加"成长与价格是否匹配"：PEG 与历史估值分位，
-# 并用 ROE 守住质量下限。同样**不写 weights**：评分口径待评审，现在只判资格。
+# 权重已于 2026-09-17 评审通过（等权）。评审依据：等距抽样 40 只里 10 只合格，
+# 三套候选方案 top-6 重合 83%–100%——在这个约束强度下换权重几乎不改变榜单。
+#
+# 已知疑点（未解决，使用前建议复核）：源站的 PEG 值域是 **83–1503**（正常 PEG 在 0–5），
+# 且会出现负值，说明它的定义/尺度与常见口径不同。方向（越低越匹配）仍然可用，
+# 但绝对值不能与外部 PEG 直接比较。倍数非正时因子报 `NOT_APPLICABLE`。
+weights:
+  peg: -1.0
+  pe_percentile: -1.0
+  revenue_cagr_3y: 1.0
+  net_profit_parent_cagr_3y: 1.0
+  roe_ttm: 1.0
 required_factors:
   - peg
   - pe_percentile

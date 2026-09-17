@@ -149,13 +149,14 @@ class FundamentalRatioFactor:
 
         dividend = _value_of(numerator)
         divisor = _value_of(denominator)
-        if divisor == 0:
-            # A zero divisor is a real value, not a missing one; the ratio
-            # simply does not exist, and saying so is the honest answer.
+        if divisor <= 0:
+            # 分母非正时这个比值不存在：净利润为负时"分红支付率"、净资产为负时
+            # "商誉/权益"都没有意义。报 `NOT_APPLICABLE`（该指标对当前标的不适用），
+            # 而不是把负值当成"很低"排到榜首，也不是把 0 当成"没有数据"。
             return _result(
                 context,
                 self.metadata,
-                status=DataStatus.INVALID,
+                status=DataStatus.NOT_APPLICABLE,
                 inputs=inputs,
                 unit=RATIO_UNIT,
             )

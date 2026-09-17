@@ -5,8 +5,19 @@ description: Cheapness relative to history, peers, and cash-flow quality.
 # Value 的判定要素：估值（PE/PB/PS）、历史估值分位、股息率、现金流价格（市现率）
 # 与盈利质量。全部来自 neodata 的估值事实 + 财报链路。
 #
-# 注意：**这里刻意不写 weights**。权重属于已评审的产品判断，Value 的评分口径尚未评审，
-# 因此本 Scanner 现在只给资格判定；评审通过后写上 weights 即自动开始打分。
+# 权重已于 2026-09-17 评审通过（等权）。评审依据：三套候选方案在等距抽样 40 只上
+# top-8 重合 75%——"便宜"本身是相对客观的排序，换权重只挪动 2 个名字，
+# 因此在没有依据说哪个维度更重要之前取等权。
+#
+# 负号表示极性：PE/PB/PS/市现率/历史分位都是越低越便宜；`roe_ttm` 越高越好。
+# 倍数非正（负现金流、负净资产）时因子报 `NOT_APPLICABLE`，不会被当成"最便宜"。
+weights:
+  pe_ttm: -1.0
+  pb: -1.0
+  ps_ttm: -1.0
+  pe_percentile: -1.0
+  pcf_operating_ttm: -1.0
+  roe_ttm: 1.0
 required_factors:
   - pe_ttm
   - pb

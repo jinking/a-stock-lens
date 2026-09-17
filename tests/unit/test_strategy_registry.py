@@ -88,9 +88,9 @@ def test_the_built_scanners_bind_to_the_implementation_their_config_needs() -> N
         # 权重已于 2026-09-17 评审通过，因此这三个走打分实现。
         assert isinstance(loaded[strategy_id], WeightedPercentileScanner)
         assert loaded[strategy_id].required_factors()
+    # Value 与 GARP 的权重均于 2026-09-17 评审通过 → 两者都打分。
     for strategy_id in ("value", "garp"):
-        # 要求已具备、权重尚未评审，因此只判资格、不打分。
-        assert isinstance(loaded[strategy_id], EligibilityScanner)
+        assert isinstance(loaded[strategy_id], WeightedPercentileScanner)
 
 
 def test_a_configuration_without_reviewed_weights_judges_eligibility_only() -> None:

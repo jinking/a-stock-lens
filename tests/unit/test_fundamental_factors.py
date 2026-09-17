@@ -265,7 +265,12 @@ def test_not_applicable_outranks_null() -> None:
     assert factor.compute(context).status is DataStatus.NOT_APPLICABLE
 
 
-def test_a_zero_divisor_is_invalid_rather_than_infinite() -> None:
+def test_a_non_positive_divisor_is_not_applicable() -> None:
+    """分母非正时比值不存在：不是"很低"，也不是无穷大。
+
+    负现金流、负净资产、亏损都会走到这里。原来的实现把它判成 `INVALID`，
+    但那个值本身是合法的（公司确实亏损），不适用的是"这个比值"。
+    """
     factor = build_factor(_config("goodwill_to_equity"))
     context = _context(
         (_observation("goodwill", 5.0), _observation("total_equity", 0.0))
@@ -273,8 +278,13 @@ def test_a_zero_divisor_is_invalid_rather_than_infinite() -> None:
 
     result = factor.compute(context)
 
-    assert result.status is DataStatus.INVALID
+    assert result.status is DataStatus.NOT_APPLICABLE
     assert result.raw_value is None
+
+    negative = factor.compute(
+        _context((_observation("goodwill", 5.0), _observation("total_equity", -1.0)))
+    )
+    assert negative.status is DataStatus.NOT_APPLICABLE
 
 
 def test_a_reviewed_freshness_bound_switches_stale_on() -> None:

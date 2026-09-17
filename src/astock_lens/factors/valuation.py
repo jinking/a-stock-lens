@@ -30,21 +30,27 @@ from astock_lens.factors.fundamental import STALE_AFTER_DAYS
 
 @dataclass(frozen=True)
 class ValuationMetricSpec:
-    """一个估值因子对应的规范指标与单位。"""
+    """一个估值因子对应的规范指标与单位。
+
+    `positive_only` 表示"非正即不适用"：倍数为负时（负现金流、负净资产、
+    负增长）这个量本身不存在，报 `NOT_APPLICABLE` 而不是让它以"越低越便宜"的姿态
+    排到榜首。百分位不受此约束——`0.000` 是完全合法的分位。
+    """
 
     metric: str
     unit: str
+    positive_only: bool = False
 
 
 # 代码拥有"哪个指标"；YAML 拥有元数据与新鲜度阈值。
 VALUATION_FACTORS: Mapping[str, ValuationMetricSpec] = {
-    "pe_ttm": ValuationMetricSpec("pe_ttm", "x"),
-    "pb": ValuationMetricSpec("pb", "x"),
-    "ps_ttm": ValuationMetricSpec("ps_ttm", "x"),
+    "pe_ttm": ValuationMetricSpec("pe_ttm", "x", True),
+    "pb": ValuationMetricSpec("pb", "x", True),
+    "ps_ttm": ValuationMetricSpec("ps_ttm", "x", True),
     "pe_percentile": ValuationMetricSpec("pe_percentile", "%"),
     "dividend_yield_ttm": ValuationMetricSpec("dividend_yield_ttm", "%"),
-    "pcf_operating_ttm": ValuationMetricSpec("pcf_operating_ttm", "x"),
-    "peg": ValuationMetricSpec("peg", "x"),
+    "pcf_operating_ttm": ValuationMetricSpec("pcf_operating_ttm", "x", True),
+    "peg": ValuationMetricSpec("peg", "x", True),
 }
 
 
@@ -78,6 +84,15 @@ class ValuationFactor:
 
         status = _blocking_status(mine, available, self._stale_after_days, context)
         latest = _latest(available)
+        if (
+            status is None
+            and self._spec.positive_only
+            and latest is not None
+            and latest.value is not None
+            and latest.value <= 0
+        ):
+            # 负倍数不是"更便宜"，是这个量不存在（负现金流/负净资产/负增长）。
+            status = DataStatus.NOT_APPLICABLE
         inputs = (
             FactorInputRef(
                 metric=self._spec.metric,
