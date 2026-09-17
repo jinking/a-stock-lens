@@ -448,7 +448,8 @@ def test_the_binary_comes_from_the_environment(
 def test_a_ragged_row_is_refused_rather_than_published() -> None:
     text = "| code | EndDate |\n| --- | --- |\n| sh600519 | 2026-06-30 | extra |\n"
 
-    with pytest.raises(MalformedTable, match="cells"):
+    # 共享解析器的报错信息已改为中文；这里只断言"读不成表就抛错"。
+    with pytest.raises(MalformedTable, match="单元格"):
         parse_tables(text)
 
 

@@ -65,7 +65,22 @@ from astock_lens.data.contracts import (
     RawDataset,
     RawPayload,
 )
+
+# Markdown 解析与 Provider 无关，放在共享模块里；这里再导出，
+# 保持 `from astock_lens.data.providers.westock import parse_tables` 仍然可用。
+from astock_lens.data.markdown import MalformedTable, Table, parse_tables
 from astock_lens.domain.enums import DataStatus
+
+__all__ = [
+    "FINANCIAL_DATASETS",
+    "CommandResult",
+    "MalformedTable",
+    "Table",
+    "WestockCliProvider",
+    "from_westock_code",
+    "parse_tables",
+    "to_westock_code",
+]
 
 BINARY_ENV = "ASTOCK_WESTOCK_BIN"
 DEFAULT_BINARY = Path("tools/bin/westock")
@@ -98,12 +113,6 @@ DEFAULT_TIMEOUT_SECONDS = 120.0
 # a lost table into a hiccup; more would spin on a real outage.
 DEFAULT_ATTEMPTS = 2
 
-_SEPARATOR = "-"
-
-
-class MalformedTable(ValueError):
-    """The command printed something this provider cannot read as one table."""
-
 
 @dataclass(frozen=True)
 class CommandResult:
@@ -112,14 +121,6 @@ class CommandResult:
     returncode: int
     stdout: str
     stderr: str
-
-
-@dataclass(frozen=True)
-class Table:
-    """One markdown table, cells verbatim."""
-
-    columns: tuple[str, ...]
-    rows: tuple[tuple[str, ...], ...]
 
 
 Runner = Callable[[Sequence[str]], CommandResult]
@@ -144,44 +145,6 @@ def from_westock_code(code: str) -> str:
         if prefix == known:
             return f"{digits}.{suffix}"
     raise ValueError(f"{code!r} does not start with a known exchange prefix")
-
-
-def parse_tables(text: str) -> tuple[Table, ...]:
-    """Read every markdown table the command printed.
-
-    The CLI's preamble and status lines are ignored: they are prose about the
-    request, not data. A row whose width disagrees with its header raises,
-    because a table this provider cannot read faithfully must not be published
-    as a partially parsed one.
-    """
-    lines = text.splitlines()
-    tables: list[Table] = []
-    index = 0
-
-    while index < len(lines):
-        if not _is_row(lines[index]):
-            index += 1
-            continue
-        header = _cells(lines[index])
-        if index + 1 >= len(lines) or not _is_separator(lines[index + 1]):
-            index += 1
-            continue
-
-        rows: list[tuple[str, ...]] = []
-        cursor = index + 2
-        while cursor < len(lines) and _is_row(lines[cursor]):
-            row = _cells(lines[cursor])
-            if len(row) != len(header):
-                raise MalformedTable(
-                    f"row {cursor + 1} has {len(row)} cells but the header "
-                    f"declares {len(header)}"
-                )
-            rows.append(row)
-            cursor += 1
-        tables.append(Table(columns=header, rows=tuple(rows)))
-        index = cursor
-
-    return tuple(tables)
 
 
 class WestockCliProvider:
@@ -489,22 +452,3 @@ def _single(
         return date.fromisoformat(next(iter(values))[:10])
     except ValueError:
         return None
-
-
-def _is_row(line: str) -> bool:
-    return line.strip().startswith("|")
-
-
-def _is_separator(line: str) -> bool:
-    cells = _cells(line)
-    return bool(cells) and all(
-        set(cell) <= {_SEPARATOR, ":"} and _SEPARATOR in cell for cell in cells
-    )
-
-
-def _cells(line: str) -> tuple[str, ...]:
-    """Split one markdown row into verbatim cells."""
-    stripped = line.strip()
-    stripped = stripped.removeprefix("|")
-    stripped = stripped.removesuffix("|")
-    return tuple(cell.strip() for cell in stripped.split("|"))
