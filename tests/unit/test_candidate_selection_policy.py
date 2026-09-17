@@ -8,7 +8,6 @@ from astock_lens.candidates.policy import (
     CandidateEvidence,
     CandidateEvidenceIncomplete,
     CandidatePolicy,
-    CandidateSelection,
     RepresentativeCandidatePolicy,
 )
 from astock_lens.domain.enums import MarketValidation, Signal
@@ -164,3 +163,138 @@ def test_missing_market_validation_or_signal_raises_incomplete() -> None:
     ev_no_sig = _make_evidence("600002.SH", signal=None)
     with pytest.raises(CandidateEvidenceIncomplete):
         policy.select([ev_no_sig])
+
+
+def test_strategy_with_fewer_than_three_qualified_contributes_available_only() -> None:
+    policy = RepresentativeCandidatePolicy(soft_reserve_per_strategy=3)
+    ev_single = _make_evidence("600001.SH", strategy_id="momentum", rank_percentile=0.91)
+    selected = policy.select([ev_single])
+    assert len(selected) == 1
+    assert selected[0].symbol == "600001.SH"
+
+
+def test_best_single_strategy_percentile_beats_multi_strategy_match() -> None:
+    policy = RepresentativeCandidatePolicy()
+    # ev_high has 0.99 in single strategy
+    ev_high = _make_evidence("600001.SH", strategy_id="value", rank_percentile=0.99)
+    # ev_multi has 0.95 across two strategies
+    q1 = StrategyQualification(
+        symbol="600002.SH",
+        strategy_id="value",
+        strategy_version="v1",
+        qualification_version="v1",
+        qualified=True,
+        percentile_pass=True,
+        absolute_pass=True,
+        rank_percentile=0.95,
+    )
+    q2 = StrategyQualification(
+        symbol="600002.SH",
+        strategy_id="growth",
+        strategy_version="v1",
+        qualification_version="v1",
+        qualified=True,
+        percentile_pass=True,
+        absolute_pass=True,
+        rank_percentile=0.95,
+    )
+    r1 = StrategyResult(
+        symbol="600002.SH",
+        strategy_id="value",
+        strategy_version="v1",
+        as_of=AS_OF,
+        eligible=True,
+        lineage=SnapshotLineage(strategy_version="v1"),
+        score=85.0,
+        rank_percentile=0.95,
+    )
+    r2 = StrategyResult(
+        symbol="600002.SH",
+        strategy_id="growth",
+        strategy_version="v1",
+        as_of=AS_OF,
+        eligible=True,
+        lineage=SnapshotLineage(strategy_version="v1"),
+        score=85.0,
+        rank_percentile=0.95,
+    )
+    ev_multi = CandidateEvidence(
+        symbol="600002.SH",
+        strategy_results=(r1, r2),
+        strategy_qualifications=(q1, q2),
+        market_validation=MarketValidation.CONFIRMED,
+        signal=Signal.NO_SIGNAL,
+    )
+    selected = policy.select([ev_multi, ev_high])
+    assert [s.symbol for s in selected] == ["600001.SH", "600002.SH"]
+
+
+def test_equal_percentile_uses_qualified_strategy_count_as_second_key() -> None:
+    policy = RepresentativeCandidatePolicy()
+    ev_single = _make_evidence("600001.SH", strategy_id="value", rank_percentile=0.95)
+    q1 = StrategyQualification(
+        symbol="600002.SH",
+        strategy_id="value",
+        strategy_version="v1",
+        qualification_version="v1",
+        qualified=True,
+        percentile_pass=True,
+        absolute_pass=True,
+        rank_percentile=0.95,
+    )
+    q2 = StrategyQualification(
+        symbol="600002.SH",
+        strategy_id="growth",
+        strategy_version="v1",
+        qualification_version="v1",
+        qualified=True,
+        percentile_pass=True,
+        absolute_pass=True,
+        rank_percentile=0.95,
+    )
+    r1 = StrategyResult(
+        symbol="600002.SH",
+        strategy_id="value",
+        strategy_version="v1",
+        as_of=AS_OF,
+        eligible=True,
+        lineage=SnapshotLineage(strategy_version="v1"),
+        score=85.0,
+        rank_percentile=0.95,
+    )
+    r2 = StrategyResult(
+        symbol="600002.SH",
+        strategy_id="growth",
+        strategy_version="v1",
+        as_of=AS_OF,
+        eligible=True,
+        lineage=SnapshotLineage(strategy_version="v1"),
+        score=85.0,
+        rank_percentile=0.95,
+    )
+    ev_multi = CandidateEvidence(
+        symbol="600002.SH",
+        strategy_results=(r1, r2),
+        strategy_qualifications=(q1, q2),
+        market_validation=MarketValidation.CONFIRMED,
+        signal=Signal.NO_SIGNAL,
+    )
+    selected = policy.select([ev_single, ev_multi])
+    # ev_multi has 2 qualified strategies vs 1 for ev_single
+    assert [s.symbol for s in selected] == ["600002.SH", "600001.SH"]
+
+
+def test_equal_percentile_and_strategy_count_uses_confirmed_before_neutral() -> None:
+    policy = RepresentativeCandidatePolicy()
+    ev_neutral = _make_evidence("600001.SH", rank_percentile=0.95, market_validation=MarketValidation.NEUTRAL)
+    ev_confirmed = _make_evidence("600002.SH", rank_percentile=0.95, market_validation=MarketValidation.CONFIRMED)
+    selected = policy.select([ev_neutral, ev_confirmed])
+    assert [s.symbol for s in selected] == ["600002.SH", "600001.SH"]
+
+
+def test_final_ties_are_symbol_deterministic() -> None:
+    policy = RepresentativeCandidatePolicy()
+    ev_b = _make_evidence("600002.SH", rank_percentile=0.95)
+    ev_a = _make_evidence("600001.SH", rank_percentile=0.95)
+    selected = policy.select([ev_b, ev_a])
+    assert [s.symbol for s in selected] == ["600001.SH", "600002.SH"]

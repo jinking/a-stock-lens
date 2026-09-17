@@ -1,31 +1,28 @@
 """候选资格判定必须是显式策略，不能从分数推出来。
 
-计划 `a-stock-lens-core-hardening-plan.md` Task 7 移除的旧规则是：
-
-    只要有任何 Scanner 给出 eligible 且带分数的结果 → WATCH
-
-"有分数"只说明这个策略拿到了输入，它是测量的存在性，不是任何一个被批准过的
-入选规则。本文件钉住替代它的边界：
-
-* 没有批准的 policy 时，Candidate 阶段**明确报错**，而不是安静地返回空集；
+边界规则：
+* 没有批准的 policy 时，Candidate 阶段明确报错，而不是安静地返回空集；
 * policy 说入选，才有 Candidate；policy 说不入选，分数再高也没有 Candidate；
 * Builder 不参与资格判定，它只组装证据。
-
-本阶段**不提供**任何未经批准的 Top-N / 百分位 / 绝对阈值实现。
 """
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 import pytest
 
 from astock_lens.candidates.builder import CandidateBuilder
 from astock_lens.candidates.policy import (
+    CandidateEvidence,
+    CandidatePolicy,
     CandidatePolicyNotConfigured,
     CandidateQualification,
+    CandidateSelection,
 )
-from astock_lens.domain.enums import NextAction
+from astock_lens.domain.enums import MarketValidation, NextAction, Signal
 from astock_lens.domain.models import SnapshotLineage
 from astock_lens.pipelines.stages import candidate_stage
+from astock_lens.qualifications.models import StrategyQualification
 from astock_lens.strategies.contracts import StrategyResult
 
 AS_OF = datetime(2026, 9, 4, 15, 0, tzinfo=UTC)
@@ -33,7 +30,11 @@ LINEAGE = SnapshotLineage(universe_snapshot="2026-09-04:abc", strategy_version="
 
 
 def _result(
-    *, eligible: bool = True, score: float | None = 88.0, symbol: str = "600000.SH"
+    *,
+    eligible: bool = True,
+    score: float | None = 88.0,
+    symbol: str = "600000.SH",
+    percentile: float = 0.95,
 ) -> StrategyResult:
     return StrategyResult(
         symbol=symbol,
@@ -43,11 +44,37 @@ def _result(
         eligible=eligible,
         lineage=SnapshotLineage(strategy_version="v1"),
         score=score,
+        rank_percentile=percentile,
+    )
+
+
+def _qualification(
+    symbol: str = "600000.SH",
+    strategy_id: str = "momentum",
+    qualified: bool = True,
+    percentile: float = 0.95,
+) -> StrategyQualification:
+    return StrategyQualification(
+        symbol=symbol,
+        strategy_id=strategy_id,
+        strategy_version="v1",
+        qualification_version="v1",
+        qualified=qualified,
+        percentile_pass=percentile >= 0.90,
+        absolute_pass=qualified,
+        rank_percentile=percentile,
     )
 
 
 class _ApprovesNothing:
     """一个策略的示例：它什么都不批准。"""
+
+    version = "test-nothing"
+
+    def select(
+        self, evidence: Sequence[CandidateEvidence]
+    ) -> tuple[CandidateSelection, ...]:
+        return ()
 
     def qualify(
         self,
@@ -63,6 +90,20 @@ class _ApprovesNothing:
 class _ApprovesEverything:
     """只用于证明"资格来自 policy 的判定"，它不是任何被批准的业务规则。"""
 
+    version = "test-everything"
+
+    def select(
+        self, evidence: Sequence[CandidateEvidence]
+    ) -> tuple[CandidateSelection, ...]:
+        return tuple(
+            CandidateSelection(
+                symbol=e.symbol,
+                policy_version=self.version,
+                reasons=("policy said so",),
+            )
+            for e in evidence
+        )
+
     def qualify(
         self,
         *,
@@ -74,6 +115,21 @@ class _ApprovesEverything:
         return CandidateQualification(
             qualified=bool(strategy_results), reasons=("policy said so",)
         )
+
+
+def test_cross_sectional_policy_protocol_conformance() -> None:
+    policy: CandidatePolicy = _ApprovesEverything()
+    ev = CandidateEvidence(
+        symbol="600000.SH",
+        strategy_results=(_result(),),
+        strategy_qualifications=(_qualification(),),
+        market_validation=MarketValidation.CONFIRMED,
+        signal=Signal.NO_SIGNAL,
+    )
+    selected = policy.select([ev])
+    assert len(selected) == 1
+    assert selected[0].symbol == "600000.SH"
+    assert selected[0].policy_version == "test-everything"
 
 
 def test_no_reviewed_policy_is_an_error_not_an_empty_scan() -> None:
