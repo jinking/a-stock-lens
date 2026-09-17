@@ -120,6 +120,47 @@ class SnapshotLineage(DomainRecord):
         return _versions(self.strategy_version)
 
 
+class ValuationObservation(DomainRecord):
+    """一个估值事实：某标的在某交易日的一个指标。
+
+    与 `FinancialObservation` 分开建模是刻意的：财务数据的时点是"报告期 + 公告日"，
+    估值数据的时点是"交易日"——两者的可用性规则不同，混进一个模型会让
+    `available_at <= as_of` 的含义变得含糊。
+
+    分类标签（例如"相对行业平均估值标签：低于"）放在 `text_value` 里，只作证据，
+    不参与排名：把"低于/持平/高于"编码成数字是一种解释，设计没有确认，
+    是否需要这种编码留给策略层决定。
+    """
+
+    symbol: str
+    metric: str
+    valuation_date: date
+    available_at: datetime
+    as_of: datetime
+    source: str
+    value: float | None = None
+    unit: str | None = None
+    text_value: str | None = None
+
+    @model_validator(mode="after")
+    def _reject_look_ahead(self) -> Self:
+        """与财务观测同一条时点规则：`available_at <= as_of`，且时间必须带时区。"""
+        for field_name, moment in (
+            ("available_at", self.available_at),
+            ("as_of", self.as_of),
+        ):
+            if moment.tzinfo is None or moment.utcoffset() is None:
+                raise ValueError(
+                    f"{field_name} 必须带时区：naive 时间戳会让前视偏差藏在隐式偏移里"
+                )
+        if self.available_at > self.as_of:
+            raise ValueError(
+                "available_at 不能晚于 as_of："
+                f"{self.available_at.isoformat()} > {self.as_of.isoformat()}"
+            )
+        return self
+
+
 def _versions(declared: str | None) -> frozenset[str]:
     """Split one lineage field into the versions it declares."""
     if declared is None:

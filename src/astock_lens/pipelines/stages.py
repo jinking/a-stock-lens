@@ -88,6 +88,7 @@ class DatasetIndex:
         self._dataset = dataset
         self._bars = _group_by_symbol(dataset.daily_bars)
         self._observations = _group_by_symbol(dataset.observations)
+        self._valuations = _group_by_symbol(dataset.valuations)
 
     def for_symbol(self, symbol: str) -> NormalizedDataset:
         """Return the dataset restricted to one instrument."""
@@ -95,6 +96,7 @@ class DatasetIndex:
             update={
                 "daily_bars": self._bars.get(symbol, ()),
                 "observations": self._observations.get(symbol, ()),
+                "valuations": self._valuations.get(symbol, ()),
             }
         )
 

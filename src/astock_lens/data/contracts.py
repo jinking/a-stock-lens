@@ -11,6 +11,7 @@ from astock_lens.domain.models import (
     DomainRecord,
     FinancialObservation,
     SecurityProfile,
+    ValuationObservation,
 )
 
 
@@ -110,6 +111,7 @@ class NormalizedDataset(DomainRecord):
     as_of: datetime
     daily_bars: tuple[DailyBar, ...] = ()
     observations: tuple[FinancialObservation, ...] = ()
+    valuations: tuple[ValuationObservation, ...] = ()
     securities: tuple[SecurityProfile, ...] = ()
     parse_failures: tuple[ParseFailure, ...] = ()
 
