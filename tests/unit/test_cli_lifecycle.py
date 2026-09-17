@@ -650,6 +650,28 @@ def test_doctor_reports_the_financial_statement_provider(
     assert "ASTOCK_WESTOCK_BIN" in missing.stdout
 
 
+def test_doctor_reports_the_semantic_source_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """neodata 的凭证 12 小时过期，doctor 必须让它一眼可见。"""
+    monkeypatch.setenv("ASTOCK_NEODATA_TOKEN", "dummy")
+
+    configured = CliRunner().invoke(app, ["doctor"])
+
+    assert configured.exit_code == 0, configured.output
+    assert "neodata [ok]" in configured.stdout
+
+    monkeypatch.delenv("ASTOCK_NEODATA_TOKEN")
+    monkeypatch.setattr(
+        "astock_lens.data.providers.neodata.token_candidates", lambda: ()
+    )
+    missing = CliRunner().invoke(app, ["doctor"])
+
+    assert missing.exit_code == 0, missing.output
+    assert "neodata [unavailable]" in missing.stdout
+    assert "凭证" in missing.stdout
+
+
 def test_the_watchlist_root_can_be_pointed_elsewhere(local_tmp: Path) -> None:
     """No test writes to the repository's real watchlist directory."""
     _invoke(local_tmp, "watch", "600519.SH", dataset=SHORT_DATASET)

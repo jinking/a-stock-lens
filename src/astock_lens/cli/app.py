@@ -23,6 +23,7 @@ from astock_lens.candidates.models import Candidate
 from astock_lens.data.contracts import DataProvider
 from astock_lens.data.health import raw_datasets
 from astock_lens.data.providers.akshare_provider import AkShareProvider
+from astock_lens.data.providers.neodata import NeodataProvider
 from astock_lens.data.providers.westock import FINANCIAL_DATASETS, WestockCliProvider
 from astock_lens.data.snapshots.resolve import resolve_snapshot_store
 from astock_lens.data.snapshots.store import SnapshotStore
@@ -366,6 +367,13 @@ def doctor() -> None:
     westock_state = "ok" if westock_health.healthy else "unavailable"
     westock_detail = f" ({westock_health.message})" if westock_health.message else ""
     typer.echo(f"provider {westock_health.provider} [{westock_state}]{westock_detail}")
+
+    # 语义数据源（规格 §24 补遗，2026-09-17 修订）：估值、行业与语义维度的主数据源，
+    # 同时是财报的交叉验证源。凭证 12 小时过期且只能由平台刷新，因此状态必须一眼可见。
+    neodata_health = NeodataProvider().health()
+    neodata_state = "ok" if neodata_health.healthy else "unavailable"
+    neodata_detail = f" ({neodata_health.message})" if neodata_health.message else ""
+    typer.echo(f"provider {neodata_health.provider} [{neodata_state}]{neodata_detail}")
 
     if failures:
         typer.echo("doctor found problems:", err=True)
