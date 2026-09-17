@@ -98,6 +98,7 @@ class ValuationFactor:
                 metric=self._spec.metric,
                 report_period=latest.valuation_date if latest else None,
                 announce_date=latest.valuation_date if latest else None,
+                available_at=latest.available_at if latest else None,
                 value=latest.value if latest else None,
             ),
         )

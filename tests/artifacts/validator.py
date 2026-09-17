@@ -146,8 +146,88 @@ def validate_snapshot(
         )
         findings.extend(_versions(kind, record, symbol))
         findings.extend(_timestamps(kind, record, symbol, as_of))
+        findings.extend(_availability_times(kind, record, symbol, as_of))
         findings.extend(_cited_versions(kind, record, symbol))
         findings.extend(_cited_scores(kind, record, symbol))
+
+    return tuple(findings)
+
+
+def validate_snapshot_set(
+    *,
+    factor_records: Sequence[Mapping[str, object]],
+    strategy_records: Sequence[Mapping[str, object]],
+    candidate_records: Sequence[Mapping[str, object]],
+    as_of: datetime,
+) -> tuple[ArtifactFinding, ...]:
+    """Judge a day's snapshots together: every citation must resolve.
+
+    `validate_snapshot` sees one kind at a time, so it cannot answer the
+    question that matters most for a candidate: do the strategies and factors it
+    cites actually exist in the same day's snapshots? A candidate assembled from
+    evidence that was never stored is unauditable, however well-formed it looks.
+
+    Like the rest of this module, it shares no code with `astock_lens`.
+    """
+    del as_of  # 每个快照自己的时点由 `validate_snapshot` 负责，这里只看引用能否成链
+    findings: list[ArtifactFinding] = []
+
+    stored_strategies = {
+        (
+            _text(record.get("symbol")),
+            _text(record.get("strategy_id")),
+            _text(record.get("strategy_version")),
+        )
+        for record in strategy_records
+    }
+    stored_factors = {
+        (
+            _text(record.get("symbol")),
+            _text(record.get("factor")),
+            _text(record.get("factor_version")),
+        )
+        for record in factor_records
+    }
+
+    for candidate in candidate_records:
+        symbol = _text(candidate.get("symbol"))
+        for cited in _cited_results(candidate):
+            strategy_key = (
+                symbol,
+                _text(cited.get("strategy_id")),
+                _text(cited.get("strategy_version")),
+            )
+            if strategy_key not in stored_strategies:
+                findings.append(
+                    ArtifactFinding(
+                        check="cross_snapshot",
+                        symbol=symbol,
+                        observed=(
+                            f"candidate cites strategy {strategy_key[1]!r} "
+                            f"{strategy_key[2]!r}, which the day's STRATEGY "
+                            "snapshot does not contain"
+                        ),
+                    )
+                )
+
+            for factor in _cited_factors(cited):
+                factor_key = (
+                    symbol,
+                    _text(factor.get("factor")),
+                    _text(factor.get("factor_version")),
+                )
+                if factor_key not in stored_factors:
+                    findings.append(
+                        ArtifactFinding(
+                            check="cross_snapshot",
+                            symbol=symbol,
+                            observed=(
+                                f"candidate cites factor {factor_key[1]!r} "
+                                f"{factor_key[2]!r}, which the day's FACTOR "
+                                "snapshot does not contain"
+                            ),
+                        )
+                    )
 
     return tuple(findings)
 
@@ -537,6 +617,72 @@ def _cited_versions(
                 )
             )
     return findings
+
+
+def _availability_times(
+    kind: str,
+    record: Mapping[str, object],
+    symbol: str,
+    as_of: datetime,
+) -> list[ArtifactFinding]:
+    """FACTOR 快照必须能独立自证没有前视。
+
+    规则只有两条，但都要在快照里看得见：只要一条引用**真的带了证据**（写了报告期），
+    它就必须带上 `available_at`；而带上之后，那个时刻必须是带时区的，并且不晚于
+    计算时点。只写 `metric` 的引用表示"这条证据不存在"，没有时间可写。
+    """
+    if kind != "FACTOR":
+        return []
+
+    findings: list[ArtifactFinding] = []
+    for index, ref in enumerate(_input_refs(record)):
+        label = f"inputs[{index}]"
+        raw = ref.get("available_at")
+        if raw is None:
+            if ref.get("report_period") is None:
+                continue
+            findings.append(
+                ArtifactFinding(
+                    check="available_at",
+                    symbol=symbol,
+                    observed=(
+                        f"{label} cites report period "
+                        f"{ref.get('report_period')!r} without an availability "
+                        "time, so the snapshot cannot show it had no look-ahead"
+                    ),
+                )
+            )
+            continue
+
+        moment = _parse_datetime(raw)
+        if moment is None or moment.tzinfo is None or moment > as_of:
+            findings.append(
+                ArtifactFinding(
+                    check="available_at",
+                    symbol=symbol,
+                    observed=(
+                        f"{label} available_at is {raw!r}: unparseable, naive, or "
+                        "later than the snapshot's as_of"
+                    ),
+                )
+            )
+    return findings
+
+
+def _input_refs(record: Mapping[str, object]) -> list[Mapping[str, object]]:
+    """一条 FACTOR 记录引用的证据。"""
+    return _mappings(record.get("inputs"))
+
+
+def _cited_factors(result: Mapping[str, object]) -> list[Mapping[str, object]]:
+    """一条策略结果引用的因子。"""
+    return _mappings(result.get("factor_snapshot"))
+
+
+def _mappings(value: object) -> list[Mapping[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
 
 
 def _versions_declared(declared: str) -> frozenset[str]:

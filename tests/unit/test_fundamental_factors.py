@@ -113,6 +113,28 @@ def test_a_ratio_is_computed_from_the_newest_published_period() -> None:
     }
     assert {item.report_period for item in result.inputs} == {date(2026, 6, 30)}
     assert {item.announce_date for item in result.inputs} == {date(2026, 8, 15)}
+    # 证据必须带上它真正可用的时刻，而不是被计算时刻顶替：快照要能**独立**
+    # 证明自己没有前视，所以可用时间不能只存在于计算过程里。
+    assert {item.available_at for item in result.inputs} == {
+        datetime(2026, 8, 15, 15, tzinfo=UTC)
+    }
+
+
+def test_the_availability_time_is_the_observation_not_the_scan() -> None:
+    """`available_at` 不是 `as_of` 的复制品——那等于自己给自己发前视许可。"""
+    factor = build_factor(_config("ocf_to_net_profit"))
+    context = _context(
+        (
+            _observation("net_operating_cashflow_ttm", 120.0),
+            _observation("net_profit_parent_ttm", 100.0),
+        )
+    )
+
+    result = factor.compute(context)
+
+    assert all(item.available_at != context.as_of for item in result.inputs)
+    assert all(item.available_at is not None for item in result.inputs)
+    assert all(item.available_at <= context.as_of for item in result.inputs)
 
 
 def test_a_report_published_after_the_scan_is_invisible() -> None:

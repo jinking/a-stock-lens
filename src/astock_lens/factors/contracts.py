@@ -60,11 +60,22 @@ class FactorResult(DomainRecord):
 
 
 class FactorInputRef(DomainRecord):
-    """One piece of normalized evidence behind a factor value."""
+    """One piece of normalized evidence behind a factor value.
+
+    `available_at` records **when this evidence became knowable**. It is not the
+    time the factor ran: filling it with `context.as_of` would make every
+    snapshot certify its own freedom from look-ahead, which is exactly what the
+    point-in-time rule forbids. A reader must be able to check
+    `available_at <= factor.as_of` without trusting the computation.
+
+    A reference that cites nothing (`metric` alone, no period and no value) is
+    an honest "this evidence does not exist" marker and carries no time.
+    """
 
     metric: str
     report_period: date | None = None
     announce_date: date | None = None
+    available_at: datetime | None = None
     value: float | None = None
 
 

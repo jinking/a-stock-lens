@@ -226,6 +226,7 @@ class _Input:
             metric=self.metric,
             report_period=self.observation.report_period,
             announce_date=self.observation.announce_date,
+            available_at=self.observation.available_at,
             value=self.observation.value,
         )
 
