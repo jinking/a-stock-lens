@@ -1,43 +1,20 @@
-"""Next-action routing.
+"""入选判定到候选动作的翻译。
 
-The rule follows from the score by ordering alone, with no percentile cut and
-no threshold: a symbol that cleared eligibility and carries a measured score is
-worth watching, and anything else is left alone. A made-up threshold would read
-downstream as a product judgement that nobody made.
+这个模块只做最后一步：被批准的 Candidate Policy 说"入选"，候选动作就是
+`WATCH`；说"不入选"，就是 `IGNORE`。
 
-`DEEP_RESEARCH` and `TRACK_SIGNAL` are not reachable: both need the signal
-layer, which does not exist yet. Leaving them unreachable is honest; guessing
-what would trigger them is not.
+它**不再**从分数推出动作。旧规则「eligible 且带分数 → WATCH」把"这个策略
+拿到了输入"当成了产品结论，等于用一个没人批准过的阈值取代入选规则；本阶段
+删除了它，判定责任整体移交给 `CandidatePolicy`。
+
+`DEEP_RESEARCH` 与 `TRACK_SIGNAL` 依赖 Signal 层，而该层至今没有实现：让它
+们不可达是诚实的，猜一个触发条件是替项目所有者做决定。
 """
 
-from collections.abc import Sequence
-
+from astock_lens.candidates.policy import CandidateQualification
 from astock_lens.domain.enums import NextAction
-from astock_lens.strategies.contracts import StrategyResult
 
 
-def route_next_action(result: StrategyResult) -> NextAction:
-    """Choose what to do with one strategy result.
-
-    A score of `0.0` routes to `WATCH`, because zero is a measured position at
-    the bottom of the ranking rather than a missing value.
-    """
-    if result.eligible and result.score is not None:
-        return NextAction.WATCH
-    return NextAction.IGNORE
-
-
-def route_candidate_actions(results: Sequence[StrategyResult]) -> NextAction:
-    """Choose what to do with everything one symbol's scanners found.
-
-    The rule is the same one used for a single result, applied to however many
-    scanners fired: a symbol with at least one measured score is worth
-    watching, and a symbol whose evidence carries no score is left alone. No
-    threshold enters, so no scanner's weight can change the verdict.
-
-    `DEEP_RESEARCH` and `TRACK_SIGNAL` stay unreachable: both need the signal
-    and market layers, which this slice does not have.
-    """
-    if any(result.eligible and result.score is not None for result in results):
-        return NextAction.WATCH
-    return NextAction.IGNORE
+def next_action_for(qualification: CandidateQualification) -> NextAction:
+    """把一次入选判定翻译成候选动作。"""
+    return NextAction.WATCH if qualification.qualified else NextAction.IGNORE

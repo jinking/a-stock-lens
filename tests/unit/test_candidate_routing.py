@@ -1,20 +1,21 @@
-"""Next-action routing.
+"""入选判定到候选动作的翻译。
 
-The rule follows from the score by ordering alone: a symbol that cleared
-eligibility and carries a measured score is worth watching, and anything else
-is left alone. No percentile cut is applied, because the design fixes no
-threshold and a made-up one would read as a product judgement.
+这里只做最后一步映射：被批准的 Candidate Policy 说"入选"，候选动作才是
+`WATCH`；说"不入选"，就是 `IGNORE`。动作**不再**由分数推出来——旧规则
+「有分数就 WATCH」已经在 Task 7 被删除，本文件同时钉住它不许回来。
 
-`DEEP_RESEARCH` and `TRACK_SIGNAL` require the signal layer, which does not
-exist yet, so they are unreachable rather than approximated.
+`DEEP_RESEARCH` 与 `TRACK_SIGNAL` 需要 Signal 层，而该层至今没有实现，所以
+它们依然不可达：猜一个触发条件等于替项目所有者做产品决定。
 """
 
 from datetime import UTC, datetime
 
 import pytest
 
+from astock_lens.candidates import routing
 from astock_lens.candidates.builder import CandidateBuilder
-from astock_lens.candidates.routing import route_candidate_actions, route_next_action
+from astock_lens.candidates.policy import CandidateQualification
+from astock_lens.candidates.routing import next_action_for
 from astock_lens.domain.enums import NextAction
 from astock_lens.domain.models import SnapshotLineage
 from astock_lens.strategies.contracts import StrategyResult
@@ -34,37 +35,26 @@ def _result(*, eligible: bool, score: float | None) -> StrategyResult:
     )
 
 
-def test_an_eligible_scored_symbol_is_watched() -> None:
-    assert route_next_action(_result(eligible=True, score=42.0)) is NextAction.WATCH
+def test_a_qualified_verdict_routes_to_watch() -> None:
+    qualification = CandidateQualification(qualified=True, reasons=("policy",))
+
+    assert next_action_for(qualification) is NextAction.WATCH
 
 
-def test_an_eligible_symbol_without_a_score_is_ignored() -> None:
-    """Eligibility alone is not a finding; the scored ranking is."""
-    assert route_next_action(_result(eligible=True, score=None)) is NextAction.IGNORE
+def test_an_unqualified_verdict_routes_to_ignore() -> None:
+    qualification = CandidateQualification(qualified=False, reasons=("policy",))
 
-
-def test_an_ineligible_symbol_is_ignored() -> None:
-    assert route_next_action(_result(eligible=False, score=99.0)) is NextAction.IGNORE
-
-
-def test_a_score_of_zero_routes_to_watch() -> None:
-    """Zero is a measured position, not a missing value."""
-    assert route_next_action(_result(eligible=True, score=0.0)) is NextAction.WATCH
+    assert next_action_for(qualification) is NextAction.IGNORE
 
 
 def test_only_two_of_the_four_actions_are_reachable() -> None:
-    """The other two need a signal layer this slice does not build."""
+    """另外两个动作需要 Signal 层，这一阶段没有建它。"""
     reached = {
-        route_next_action(_result(eligible=True, score=1.0)),
-        route_next_action(_result(eligible=True, score=None)),
-        route_next_action(_result(eligible=False, score=None)),
+        next_action_for(CandidateQualification(qualified=True)),
+        next_action_for(CandidateQualification(qualified=False)),
     }
 
     assert reached == {NextAction.WATCH, NextAction.IGNORE}
-
-
-def test_an_unknown_score_is_treated_as_missing() -> None:
-    assert route_next_action(_result(eligible=True, score=None)) is NextAction.IGNORE
 
 
 def test_the_routed_action_reaches_a_candidate() -> None:
@@ -75,33 +65,24 @@ def test_the_routed_action_reaches_a_candidate() -> None:
         as_of=AS_OF,
         strategy_results=(result,),
         lineage=SnapshotLineage(strategy_version="v1"),
-        next_action=route_next_action(result),
+        next_action=next_action_for(CandidateQualification(qualified=True)),
     )
 
     assert candidate.next_action is NextAction.WATCH
     assert candidate.strategy_results == (result,)
 
 
-def test_routing_is_pure() -> None:
-    """The same result always routes the same way; nothing is accumulated."""
-    result = _result(eligible=True, score=50.0)
+def test_the_translation_is_pure() -> None:
+    """同样的判定永远得到同样的动作，不累积任何状态。"""
+    qualification = CandidateQualification(qualified=True)
 
-    assert route_next_action(result) == route_next_action(result)
+    assert next_action_for(qualification) == next_action_for(qualification)
 
 
 @pytest.mark.parametrize("score", [0.0, 0.001, 50.0, 99.999, 100.0])
-def test_every_in_range_score_is_watched(score: float) -> None:
-    assert route_next_action(_result(eligible=True, score=score)) is NextAction.WATCH
+def test_no_score_range_can_produce_a_candidate_action(score: float) -> None:
+    """分数不再是任何一个动作的输入，任何一个区间都不例外。"""
+    del score
 
-
-def test_current_candidate_router_treats_any_score_as_a_watch_decision() -> None:
-    """刻画现状，不是给它背书：这条规则正是本阶段要移除的东西。
-
-    现在只要某个 Scanner 给出 eligible 且带分数的结果，整只股票就被判成
-    `WATCH`——哪怕分数是 0.0，也就是全市场横截面的最底部。"有分数"只说明这个
-    策略拿到了输入，它不是任何一个被批准过的入选规则。留着这条测试，是为了让
-    移除它的理由有据可查；在显式 Candidate Policy 出现之前，它必须一直成立。
-    """
-    result = _result(eligible=True, score=0.0)
-
-    assert route_candidate_actions((result,)) is NextAction.WATCH
+    assert not hasattr(routing, "route_next_action")
+    assert not hasattr(routing, "route_candidate_actions")

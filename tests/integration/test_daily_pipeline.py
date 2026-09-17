@@ -148,6 +148,20 @@ def test_the_candidate_stage_is_blocked_while_its_layers_are_missing(
     assert result.candidates == ()
 
 
+def test_the_blocked_candidate_stage_names_the_deferred_policy(
+    local_tmp: Path,
+) -> None:
+    """入选规则未批准时，阶段必须点名 Deferred，而不是退回某个默认规则。"""
+    result = _run(local_tmp)
+
+    run = next(
+        item for item in result.runs if item.job_type is JobStage.BUILD_CANDIDATES
+    )
+    assert run.status is JobStatus.BLOCKED
+    assert run.error is not None
+    assert "candidate qualification policy is Deferred" in run.error
+
+
 def test_the_blocked_stages_name_the_decision_they_wait_for(local_tmp: Path) -> None:
     result = _run(local_tmp)
 

@@ -18,7 +18,12 @@ from pathlib import Path
 
 from astock_lens.candidates.builder import CandidateBuilder
 from astock_lens.candidates.models import Candidate
-from astock_lens.candidates.routing import route_candidate_actions
+from astock_lens.candidates.policy import (
+    CANDIDATE_POLICY_DEFERRED,
+    CandidatePolicy,
+    CandidatePolicyNotConfigured,
+)
+from astock_lens.candidates.routing import next_action_for
 from astock_lens.data.contracts import (
     FetchRequest,
     NormalizedDataset,
@@ -48,7 +53,7 @@ from astock_lens.data.quality.gate import (
     valid_bars,
 )
 from astock_lens.data.sync import latest_neodata_file, read_raw_rows
-from astock_lens.domain.enums import DataStatus
+from astock_lens.domain.enums import DataStatus, MarketValidation, Signal
 from astock_lens.domain.models import (
     DomainRecord,
     FinancialObservation,
@@ -352,28 +357,46 @@ def candidate_stage(
     strategy_results: Sequence[StrategyResult],
     lineage: SnapshotLineage,
     as_of: datetime,
+    policy: CandidatePolicy | None,
+    market_validation: MarketValidation | None = None,
+    signal: Signal | None = None,
 ) -> tuple[Candidate, ...]:
-    """Build one candidate per symbol that at least one scanner found eligible.
+    """Build one candidate per symbol the approved policy qualifies.
 
-    Evidence from every scanner that fired for the symbol travels together, so
-    a candidate can say which strategies explain it.
+    Two responsibilities stay apart: the policy decides *who* qualifies and
+    why, the builder only assembles the evidence. Without an approved policy
+    this raises instead of returning an empty tuple, because "no rule decided
+    yet" and "nothing qualified today" must not look the same.
     """
+    if policy is None:
+        raise CandidatePolicyNotConfigured(CANDIDATE_POLICY_DEFERRED)
+
     builder = CandidateBuilder()
     by_symbol: dict[str, list[StrategyResult]] = {}
     for result in strategy_results:
         if result.eligible:
             by_symbol.setdefault(result.symbol, []).append(result)
 
-    return tuple(
-        builder.build(
-            symbol,
-            as_of=as_of,
+    candidates: list[Candidate] = []
+    for symbol, found in by_symbol.items():
+        qualification = policy.qualify(
             strategy_results=tuple(found),
-            lineage=lineage,
-            next_action=route_candidate_actions(found),
+            market_validation=market_validation,
+            signal=signal,
         )
-        for symbol, found in by_symbol.items()
-    )
+        if not qualification.qualified:
+            continue
+        candidates.append(
+            builder.build(
+                symbol,
+                as_of=as_of,
+                strategy_results=tuple(found),
+                lineage=lineage,
+                next_action=next_action_for(qualification),
+                qualification_reasons=qualification.reasons,
+            )
+        )
+    return tuple(candidates)
 
 
 def factor_versions(factor_configs: Sequence[FactorConfig]) -> tuple[str, ...]:

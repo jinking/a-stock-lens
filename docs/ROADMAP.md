@@ -21,6 +21,12 @@
 这些不是"没时间做"，是**不能自行发明**。按设计的原则，阈值与词表未确认前保持 `BLOCKED`。
 
 - [ ] **Market Regime 阈值**：五个状态（BULL/RANGE_UP/RANGE/RANGE_DOWN/BEAR）的判定输入与阈值。定了才能实现 `DETECT_REGIME`。
+- [ ] **Candidate Qualification 规则**：`BUILD_CANDIDATES` 现在因"没有已批准的入选规则"而 `BLOCKED`（见 `.workbuddy/memory/` 与管线 note）。可选方案与影响，**只记录不选择**：
+  - **方案 A：每策略独立绝对规则**——每条策略各自定资格条件。好处是可解释、与策略语义绑定；代价是规则数量随策略增长，跨策略之间没有共同尺度。
+  - **方案 B：每策略 Top percentile**——按排名分位取头部。好处是不同策略可比、天然控制数量；代价是百分位本身就是阈值（取多少、按哪个横截面算），且极端值会污染边界。
+  - **方案 C：绝对规则 + percentile 混合**——先过滤再排名。好处是兼顾质量与数量；代价是两套参数都要评审，调参空间最大。
+  - **方案 D：策略只产出 ResearchResult，另设独立 Candidate Policy 汇总**——策略完全不做入选判断。好处是职责最干净、未来可换汇总口径；代价是要新增一层模型与存储。
+  - 批准前需要看的证据：全市场 Candidate 数量、策略分布、行业集中度、头部样本与边界样本、方案间重合度（计划里的 Gate A 已写明口径）。
 - [ ] **Market Validation 阈值**：个股趋势、行业趋势、相对强弱、量价、流动性五项输入如何判 `CONFIRMED/NEUTRAL/CONTRADICTED`。
 - [ ] **Signal 检测阈值**：`BREAKOUT / PULLBACK / TREND_CONTINUE / TREND_WEAKEN / BREAKDOWN` 的判定规则。
 - [ ] **分红支付率的形状**：实测榜首出现 1950%/274% 的支付率（动用留存收益或特别分红），当前线性加权把 1950% 与 90% 同等对待。选项：设上限 / 区间偏好 / 接受现状。

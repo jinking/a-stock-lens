@@ -2,9 +2,13 @@
 
 The builder assembles evidence; it does not decide what to do with it. The
 `next_action` is a parameter, and its default is `IGNORE` — the one action that
-asserts nothing. Until a reviewed routing rule exists, marking a candidate
-"no action" cannot mislead anyone, whereas defaulting to `WATCH` or
-`DEEP_RESEARCH` would assert a judgement nobody made.
+asserts nothing. Qualification belongs to `astock_lens.candidates.policy`, so a
+builder that derived the action from a score would be making a product decision
+nobody approved.
+
+`qualification_reasons` carries the policy's own explanation next to the
+strategy evidence, so a stored candidate can say not only what was measured but
+why it was selected.
 """
 
 from datetime import datetime
@@ -26,6 +30,7 @@ class CandidateBuilder:
         strategy_results: tuple[StrategyResult, ...],
         lineage: SnapshotLineage,
         next_action: NextAction = NextAction.IGNORE,
+        qualification_reasons: tuple[str, ...] = (),
     ) -> Candidate:
         """Assemble a candidate, refusing evidence that contradicts its lineage."""
         declared = lineage.strategy_versions()
@@ -43,8 +48,9 @@ class CandidateBuilder:
             next_action=next_action,
             lineage=lineage,
             strategy_results=strategy_results,
-            reasons=tuple(
-                reason for result in strategy_results for reason in result.reasons
+            reasons=(
+                *qualification_reasons,
+                *(reason for result in strategy_results for reason in result.reasons),
             ),
             risks=tuple(risk for result in strategy_results for risk in result.risks),
         )

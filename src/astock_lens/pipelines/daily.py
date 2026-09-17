@@ -28,6 +28,10 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from astock_lens.candidates.models import Candidate
+from astock_lens.candidates.policy import (
+    CANDIDATE_POLICY_DEFERRED,
+    CandidatePolicy,
+)
 from astock_lens.data.snapshots.store import SnapshotStore
 from astock_lens.domain.enums import JobStage, SnapshotKind
 from astock_lens.domain.models import DomainRecord
@@ -161,11 +165,15 @@ def run_daily(
     dataset: str = stages.DEFAULT_DATASET,
     securities_dataset: str = stages.DEFAULT_SECURITIES_DATASET,
     sync: Callable[[], StageOutcome] | None = None,
+    candidate_policy: CandidatePolicy | None = None,
 ) -> DailyRunResult:
     """Run every stage of the daily pipeline once for one point in time.
 
     Configuration is passed in rather than discovered here, so a caller can see
     exactly which thresholds, factor windows and scanner versions a run used.
+    The candidate policy is configuration too, and its absence is a decision:
+    without one the `BUILD_CANDIDATES` stage is `BLOCKED`, never replaced by a
+    default rule.
     """
     context = _Context(
         csv_root=csv_root,
@@ -178,6 +186,7 @@ def run_daily(
         strategy_directory=strategy_directory,
         store=store,
         sync=sync,
+        candidate_policy=candidate_policy,
     )
     state = _State()
 
@@ -220,6 +229,23 @@ class _Context:
     strategy_directory: Path
     store: SnapshotStore
     sync: Callable[[], StageOutcome] | None
+    candidate_policy: CandidatePolicy | None
+
+
+def _blocked_reasons(stage: JobStage, context: _Context) -> tuple[str, ...]:
+    """这个阶段今天不能跑的**全部**原因，一条都不许省。"""
+    reasons: list[str] = []
+    missing = _missing_upstream(stage)
+    if missing:
+        reasons.append(
+            "its inputs do not exist yet: "
+            f"{', '.join(upstream.value for upstream in missing)} have no "
+            "implementation, and a result published without them would read as "
+            "a complete one"
+        )
+    if stage is JobStage.BUILD_CANDIDATES and context.candidate_policy is None:
+        reasons.append(CANDIDATE_POLICY_DEFERRED)
+    return tuple(reasons)
 
 
 @dataclass
@@ -258,19 +284,14 @@ def _execute(stage: JobStage, *, context: _Context, state: _State) -> JobRun:
             error=reason,
         )
 
-    missing = _missing_upstream(stage)
-    if missing:
+    blocked = _blocked_reasons(stage, context)
+    if blocked:
         return _run(
             stage,
             context,
             status=JobStatus.BLOCKED,
             started_at=started_at,
-            error=(
-                "its inputs do not exist yet: "
-                f"{', '.join(upstream.value for upstream in missing)} have no "
-                "implementation, and a result published without them would read "
-                "as a complete one"
-            ),
+            error="; ".join(blocked),
         )
 
     handler = _HANDLERS[stage]
@@ -405,6 +426,7 @@ def _build_candidates(context: _Context, state: _State) -> StageOutcome:
             scanners=context.scanners,
         ),
         as_of=context.as_of,
+        policy=context.candidate_policy,
     )
     _record(state, SnapshotKind.CANDIDATE, context.store, context.as_of)
     return StageOutcome(
