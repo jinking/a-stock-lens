@@ -1,0 +1,21 @@
+# dividend_paid_ratio — 源站发布的年报分红支付率（%）。
+#
+# 为什么用它而不是 `dividend_payout_ttm`：后者是"分红 TTM / 归母净利 TTM"，
+# 分母（TTM 归母净利）接近 0 时比值会爆炸。2026-09-16 全市场评审实测榜首出现
+# 6407% 的支付率，而百分位排名恰好专挑这类分母塌缩的公司——与"可持续分红"相反。
+# 源站自己算的这份年报口径正常（茅台 79.00%、平安银行 27.13%）。
+#
+# 极性由策略权重决定：当前 Dividend 取正号（越高表示当年把利润回报给股东的比例越高）。
+# 换成负号就会偏向留存再投资的公司，是一行配置的事。
+name: dividend_paid_ratio
+domain: FUNDAMENTAL
+description: Annual dividend payout ratio as the source publishes it, in percent.
+inputs:
+  - dividend_paid_ratio
+frequency: QUARTERLY
+direction: DESCRIBES_PAYOUT_NOT_A_PREFERENCE
+null_policy: NULL_UNLESS_THE_METRIC_HAS_A_PUBLISHED_VALUE
+version: v1
+params:
+  # Deferred：没有已评审的新鲜度要求，因此不触发 STALE。
+  stale_after_days: null

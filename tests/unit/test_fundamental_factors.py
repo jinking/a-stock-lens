@@ -206,6 +206,44 @@ def test_a_line_that_exists_without_a_value_is_null() -> None:
     }
 
 
+def test_a_newer_period_without_a_value_keeps_the_last_known_one() -> None:
+    """报表不是每期都发布每个字段，最新一期为空不该丢掉已知的测量。
+
+    实测：源站只在年报发布 `DividendPaidRatio`，半年报该格为空。若"最新一期为空 → NULL"，
+    分红策略可评分标的会从 3,689 掉到 734。这里改为取最近的非空观测，并在 `inputs` 里
+    如实写明它属于哪一期；是否太旧由 `STALE` 与新鲜度上限决定。
+    """
+    factor = build_factor(_config("dividend_payout_ttm"))
+    observations = (
+        # 年报口径：有值
+        _observation(
+            "dividend_ttm",
+            100.0,
+            report_period=date(2025, 12, 31),
+            announce_date=date(2026, 4, 17),
+        ),
+        _observation(
+            "net_profit_parent_ttm",
+            200.0,
+            report_period=date(2025, 12, 31),
+            announce_date=date(2026, 4, 17),
+        ),
+        # 半年报：该字段为空
+        _observation("dividend_ttm", None),
+        _observation("net_profit_parent_ttm", 250.0),
+    )
+
+    result = factor.compute(_context(observations))
+
+    assert result.status is DataStatus.VALUE
+    # 分子分母各自回退到各自最近一次带值的观测：分子 100（年报），分母 250（半年报），
+    # 因此是 0.4。混用期次本身是事实，`inputs` 会把两个期次都写出来供人核对。
+    assert result.raw_value == pytest.approx(0.4)
+    periods = {item.report_period for item in result.inputs}
+    assert date(2026, 6, 30) in periods  # 分母用了最新一期
+    assert date(2025, 12, 31) in periods  # 分子回退到最近一次带值的那期
+
+
 def test_a_reported_line_that_is_not_yet_available_is_null_not_not_applicable() -> None:
     """The instrument reports the line; this point in time simply cannot see it."""
     factor = build_factor(_config("goodwill_to_equity"))

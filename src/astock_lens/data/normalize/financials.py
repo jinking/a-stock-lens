@@ -101,6 +101,9 @@ FINANCIAL_METRICS: tuple[FinancialMetric, ...] = (
     FinancialMetric("eps_ttm", "EPSTTM", "CNY/share"),
     FinancialMetric("dividend_per_share", "DividendPS", "CNY/share"),
     FinancialMetric("dividend_ttm", "DividendTTM", "CNY"),
+    # 源站自己算的年报分红支付率。实测（2026-09-16）它比"分红 TTM / 归母净利 TTM"稳健：
+    # 后者在 TTM 净利接近 0 时比值爆炸（榜首曾出现 6407%），用作排名输入会专挑分母塌缩的公司。
+    FinancialMetric("dividend_paid_ratio", "DividendPaidRatio", "%"),
     # Balance sheet — leverage, liquidity and capital.
     FinancialMetric("total_equity", "TotalShareholderEquity", "CNY"),
     FinancialMetric("total_liabilities", "TotalLiability", "CNY"),

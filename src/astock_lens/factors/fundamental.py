@@ -105,6 +105,9 @@ METRIC_DEFINITIONS: Mapping[str, MetricSpec] = {
     "roe_ttm": MetricSpec("roe_ttm", "%"),
     "gross_margin": MetricSpec("gross_margin", "%"),
     "debt_to_asset": MetricSpec("debt_to_asset", "%"),
+    # Dividend: the source's own payout ratio, which is annual and does not
+    # collapse when trailing profit is near zero.
+    "dividend_paid_ratio": MetricSpec("dividend_paid_ratio", "%"),
 }
 
 # A ratio of two comparable quantities is dimensionless; the unit is recorded
@@ -227,7 +230,16 @@ class _Input:
 
 
 def _latest(context: FactorContext, metric: str) -> _Input:
-    """The newest observation of `metric` that was published by `as_of`."""
+    """按 as_of 取"最近一次真正带值"的观测。
+
+    财报并不是每一期都发布每个字段：例如源站的 `DividendPaidRatio` 只在年报出现，
+    半年报该格为空。若把"最新一期为空"直接判成 `NULL`，就会丢掉市场已经知道的那个
+    测量——实测这让分红策略可评分标的从 3,689 掉到 734。因此这里取最近的非空观测，
+    并在 `inputs` 里如实记录它属于哪一期；"这个值是否太旧"交给 `STALE` 与新鲜度上限，
+    而不是在这里静默吞掉。
+
+    只有当所有可用观测都为空时，才返回空值（并保留期次，便于解释是哪一期缺的）。
+    """
     mine = [
         item
         for item in context.dataset.observations
@@ -239,7 +251,10 @@ def _latest(context: FactorContext, metric: str) -> _Input:
         # from "it reports it, just not yet at this point of view".
         return _Input(metric=metric, observation=None, reported_at_all=bool(mine))
 
-    newest = max(available, key=lambda item: (item.report_period, item.available_at))
+    valued = [item for item in available if item.value is not None]
+    newest = max(
+        valued or available, key=lambda item: (item.report_period, item.available_at)
+    )
     return _Input(metric=metric, observation=newest, reported_at_all=True)
 
 
