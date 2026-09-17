@@ -41,9 +41,7 @@ class CandidateBuilder:
 
             # Retain only StrategyResults corresponding to qualified=True qualifications
             qualified_strategy_ids = {
-                q.strategy_id
-                for q in evidence.strategy_qualifications
-                if q.qualified
+                q.strategy_id for q in evidence.strategy_qualifications if q.qualified
             }
             qualified_results = tuple(
                 r

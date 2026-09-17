@@ -77,7 +77,9 @@ def generate_calibration_report(
     all_symbols = sorted(
         {r.symbol for r in strategy_results} | {f.symbol for f in factor_results}
     )
-    known_symbols = [s for s in all_symbols if s in industry_map and industry_map[s].strip()]
+    known_symbols = [
+        s for s in all_symbols if s in industry_map and industry_map[s].strip()
+    ]
     unknown_industry_count = len(all_symbols) - len(known_symbols)
     industry_coverage_ratio = (
         len(known_symbols) / len(all_symbols) if all_symbols else 0.0
@@ -94,7 +96,9 @@ def generate_calibration_report(
         top10_by_strat[sid] = {
             r.symbol
             for r in res_list
-            if r.eligible and r.rank_percentile is not None and r.rank_percentile >= 0.90
+            if r.eligible
+            and r.rank_percentile is not None
+            and r.rank_percentile >= 0.90
         }
 
     strategy_calibrations: list[StrategyCalibration] = []
@@ -106,15 +110,23 @@ def generate_calibration_report(
             for r in evaluable
             if r.rank_percentile is not None and r.score is not None
         ]
+
+        def _rank_key(r: StrategyResult) -> tuple[float, float, str]:
+            pct = r.rank_percentile if r.rank_percentile is not None else 0.0
+            sc = r.score if r.score is not None else 0.0
+            return (-pct, -sc, r.symbol)
+
         # Sort ranked by rank_percentile DESC, score DESC, symbol ASC
-        ranked.sort(
-            key=lambda r: (-r.rank_percentile, -r.score if r.score is not None else 0.0, r.symbol)  # type: ignore[operator]
-        )
+        ranked.sort(key=_rank_key)
 
         scores = [r.score for r in ranked if r.score is not None]
         quantiles = _compute_quantiles(scores)
 
-        top10_items = [r for r in ranked if r.rank_percentile >= 0.90]  # type: ignore[operator]
+        top10_items = [
+            r
+            for r in ranked
+            if r.rank_percentile is not None and r.rank_percentile >= 0.90
+        ]
         top_symbols = tuple(r.symbol for r in top10_items[:5])
 
         # Boundary items
@@ -145,7 +157,13 @@ def generate_calibration_report(
         # Sensitivity counts
         sensitivities: list[tuple[float, int]] = []
         for cutoff in CALIBRATION_PERCENTILES:
-            count = len([r for r in ranked if r.rank_percentile is not None and r.rank_percentile >= cutoff])
+            count = len(
+                [
+                    r
+                    for r in ranked
+                    if r.rank_percentile is not None and r.rank_percentile >= cutoff
+                ]
+            )
             sensitivities.append((cutoff, count))
 
         strategy_calibrations.append(

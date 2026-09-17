@@ -27,7 +27,10 @@
 这些不是"没时间做"，是**不能自行发明**。按设计的原则，阈值与词表未确认前保持 `BLOCKED`。
 
 - [ ] **Market Regime 阈值**：五个状态（BULL/RANGE_UP/RANGE/RANGE_DOWN/BEAR）的判定输入与阈值。定了才能实现 `DETECT_REGIME`。
-- [ ] **Candidate Qualification 绝对门槛**：架构已获批准（双门槛：Top 10% 分位数 `rank_percentile >= 0.90` + 独立绝对质量门槛；横截面代表性选择：每策略软保底 3 只、上限 50 只、不凑下限 20 只、Market Validation 一票否决、无跨策略总分；详见 `docs/superpowers/specs/2026-09-17-candidate-qualification-design.md`）；各策略绝对质量门槛（Value/Growth/GARP/Quality/Dividend/Momentum）仍处于阻塞状态，等待全市场校准报告（Calibration Report）产出真实分布证据后由项目所有者批准。
+- [ ] **Candidate Qualification 绝对门槛与候选发布**：
+  - **批准架构（Approved Architecture）**：双门槛机制（相对分位数底线 `rank_percentile >= 0.90` + 独立绝对质量门槛）；横截面代表性选择政策（每策略软保底 3 只、上限 50 只、不硬凑 20 只下限、Market Validation 一票否决、严禁跨策略综合加权打分；详见 `docs/superpowers/specs/2026-09-17-candidate-qualification-design.md`）；
+  - **已实现基础设施（Implemented Infrastructure）**：策略资格模型与契约（`src/astock_lens/qualifications/`）、6 个策略判定器框架、横截面代表性选择策略（`RepresentativeCandidatePolicy`）、候选证据装配与持久化（`strategy_qualifications`, `candidate_policy_version`）、管线阶段解耦（`qualification_stage` 与 `candidate_stage`）、全市场只读校准报告引擎与 CLI（`astock calibrate candidates`）、独立产物审计器（`tests/artifacts/validator.py`）；
+  - **依然阻塞（Still Blocked）**：六个策略的绝对质量门槛（Value/Growth/GARP/Quality/Dividend/Momentum）保持未配置状态，等待全市场校准报告产出真实分布证据后由项目所有者审定；上游 Market Regime、Market Validation、Signal 模块未实现；日常管线中 `BUILD_CANDIDATES` 依法保持 `BLOCKED`。
 - [ ] **Market Validation 阈值**：个股趋势、行业趋势、相对强弱、量价、流动性五项输入如何判 `CONFIRMED/NEUTRAL/CONTRADICTED`。
 - [ ] **Signal 检测阈值**：`BREAKOUT / PULLBACK / TREND_CONTINUE / TREND_WEAKEN / BREAKDOWN` 的判定规则。
 - [ ] **分红支付率的形状**：实测榜首出现 1950%/274% 的支付率（动用留存收益或特别分红），当前线性加权把 1950% 与 90% 同等对待。选项：设上限 / 区间偏好 / 接受现状。

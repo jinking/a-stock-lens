@@ -75,8 +75,23 @@ def _candidate_record(**overrides: object) -> dict[str, object]:
         "next_action": "WATCH",
         "reasons": (),
         "risks": (),
+        "candidate_policy_version": "v1",
+        "strategy_qualifications": [
+            {
+                "symbol": "600000.SH",
+                "strategy_id": "momentum",
+                "qualified": True,
+                "percentile_floor": 0.90,
+                "as_of": AS_OF.isoformat(),
+                "lineage": {"qualification_version": "v1"},
+            }
+        ],
+        "market_validation": None,
+        "signal": None,
         "lineage": {
             "strategy_version": "v1",
+            "qualification_version": "v1",
+            "candidate_policy_version": "v1",
             "universe_snapshot": "2026-09-04:abc",
         },
         "strategy_results": [_strategy_record()],

@@ -19,7 +19,9 @@ AS_OF = datetime(2026, 9, 4, 15, 0, tzinfo=UTC)
 LINEAGE = SnapshotLineage(factor_version="v1", strategy_version="v1")
 
 
-def _strat(symbol: str, strategy_id: str, percentile: float, score: float) -> StrategyResult:
+def _strat(
+    symbol: str, strategy_id: str, percentile: float, score: float
+) -> StrategyResult:
     return StrategyResult(
         symbol=symbol,
         strategy_id=strategy_id,
@@ -32,7 +34,9 @@ def _strat(symbol: str, strategy_id: str, percentile: float, score: float) -> St
     )
 
 
-def _factor(symbol: str, factor: str, value: float | None, status: DataStatus = DataStatus.VALUE) -> FactorResult:
+def _factor(
+    symbol: str, factor: str, value: float | None, status: DataStatus = DataStatus.VALUE
+) -> FactorResult:
     return FactorResult(
         symbol=symbol,
         factor=factor,

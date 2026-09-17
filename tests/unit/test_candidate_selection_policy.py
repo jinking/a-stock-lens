@@ -91,8 +91,14 @@ def test_selection_does_not_fill_to_twenty() -> None:
 
 def test_contradicted_market_validation_is_vetoed() -> None:
     policy: CandidatePolicy = RepresentativeCandidatePolicy()
-    ev1 = _make_evidence("600001.SH", rank_percentile=0.99, market_validation=MarketValidation.CONTRADICTED)
-    ev2 = _make_evidence("600002.SH", rank_percentile=0.91, market_validation=MarketValidation.CONFIRMED)
+    ev1 = _make_evidence(
+        "600001.SH",
+        rank_percentile=0.99,
+        market_validation=MarketValidation.CONTRADICTED,
+    )
+    ev2 = _make_evidence(
+        "600002.SH", rank_percentile=0.91, market_validation=MarketValidation.CONFIRMED
+    )
     selected = policy.select([ev1, ev2])
     symbols = [s.symbol for s in selected]
     assert "600001.SH" not in symbols
@@ -167,7 +173,9 @@ def test_missing_market_validation_or_signal_raises_incomplete() -> None:
 
 def test_strategy_with_fewer_than_three_qualified_contributes_available_only() -> None:
     policy = RepresentativeCandidatePolicy(soft_reserve_per_strategy=3)
-    ev_single = _make_evidence("600001.SH", strategy_id="momentum", rank_percentile=0.91)
+    ev_single = _make_evidence(
+        "600001.SH", strategy_id="momentum", rank_percentile=0.91
+    )
     selected = policy.select([ev_single])
     assert len(selected) == 1
     assert selected[0].symbol == "600001.SH"
@@ -286,8 +294,12 @@ def test_equal_percentile_uses_qualified_strategy_count_as_second_key() -> None:
 
 def test_equal_percentile_and_strategy_count_uses_confirmed_before_neutral() -> None:
     policy = RepresentativeCandidatePolicy()
-    ev_neutral = _make_evidence("600001.SH", rank_percentile=0.95, market_validation=MarketValidation.NEUTRAL)
-    ev_confirmed = _make_evidence("600002.SH", rank_percentile=0.95, market_validation=MarketValidation.CONFIRMED)
+    ev_neutral = _make_evidence(
+        "600001.SH", rank_percentile=0.95, market_validation=MarketValidation.NEUTRAL
+    )
+    ev_confirmed = _make_evidence(
+        "600002.SH", rank_percentile=0.95, market_validation=MarketValidation.CONFIRMED
+    )
     selected = policy.select([ev_neutral, ev_confirmed])
     assert [s.symbol for s in selected] == ["600002.SH", "600001.SH"]
 

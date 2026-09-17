@@ -99,7 +99,12 @@ def test_missing_upstream_layers_blocks_build_candidates() -> None:
         store=None,  # type: ignore[arg-type]
         sync=None,
         candidate_policy=RepresentativeCandidatePolicy(),
-        qualifiers=build_qualifiers({s: _DummyPassRule() for s in ("value", "growth", "garp", "quality", "dividend", "momentum")}),
+        qualifiers=build_qualifiers(
+            {
+                s: _DummyPassRule()
+                for s in ("value", "growth", "garp", "quality", "dividend", "momentum")
+            }
+        ),
     )
     reasons = _blocked_reasons(JobStage.BUILD_CANDIDATES, context)
     assert any("its inputs do not exist yet" in r for r in reasons)
@@ -107,7 +112,9 @@ def test_missing_upstream_layers_blocks_build_candidates() -> None:
     assert any(JobStage.RUN_SIGNALS.value in r for r in reasons)
 
 
-def test_candidate_stage_direct_call_with_complete_evidence_produces_candidates() -> None:
+def test_candidate_stage_direct_call_with_complete_evidence_produces_candidates() -> (
+    None
+):
     policy = RepresentativeCandidatePolicy()
     sym = "600000.SH"
     strat_res = _make_strategy_result(sym, strategy_id="value", percentile=0.95)

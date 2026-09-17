@@ -130,8 +130,16 @@ def test_candidate_builder_assembles_from_selection_and_evidence() -> None:
     sym = "600000.SH"
     res_val = _result(sym, strategy_id="value", percentile=0.98)
     res_gro = _result(sym, strategy_id="growth", percentile=0.85)  # not qualified
-    q_val = _qualification(sym, strategy_id="value", qualified=True, percentile=0.98, version="qual-val-1")
-    q_gro = _qualification(sym, strategy_id="growth", qualified=False, percentile=0.85, version="qual-gro-1")
+    q_val = _qualification(
+        sym, strategy_id="value", qualified=True, percentile=0.98, version="qual-val-1"
+    )
+    q_gro = _qualification(
+        sym,
+        strategy_id="growth",
+        qualified=False,
+        percentile=0.85,
+        version="qual-gro-1",
+    )
 
     ev = CandidateEvidence(
         symbol=sym,

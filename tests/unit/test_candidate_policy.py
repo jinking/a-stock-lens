@@ -160,6 +160,9 @@ def test_a_policy_that_qualifies_nothing_produces_no_candidate() -> None:
 def test_the_policy_is_what_makes_a_candidate() -> None:
     candidates = candidate_stage(
         strategy_results=(_result(score=12.0),),
+        qualifications=(_qualification(qualified=True),),
+        market_validation_by_symbol={"600000.SH": MarketValidation.CONFIRMED},
+        signal_by_symbol={"600000.SH": Signal.NO_SIGNAL},
         lineage=LINEAGE,
         as_of=AS_OF,
         policy=_ApprovesEverything(),

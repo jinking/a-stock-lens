@@ -454,3 +454,29 @@ uv run astock sync --as-of 2026-09-17 --valuation --symbol 600519.SH --symbol 00
 4. **PEG 处理规则**：源站值域 83–1503（常见口径 0–5）且出现负值。
 5. **Industry Trend 行业打分口径**：行业侧指标与"行业→个股"映射的权重。
 6. **Market Regime / Market Validation / Signal 阈值**：三个模块继续 `Deferred / BLOCKED`。
+
+## 十三、候选资格架构与校准阶段实现（2026-09-17，本轮）
+
+### 13.1 批准的架构边界（Approved Architecture）
+1. **双门槛机制（Dual-Gate Qualification）**：
+   - 相对分位数底线：`rank_percentile >= 0.90`（严格 Top 10%）；
+   - 独立绝对质量门槛：六个策略（Value/Growth/GARP/Quality/Dividend/Momentum）各自拥有独立规则，不跨策略借用指标。
+2. **横截面代表性选择（Representative Selection）**：
+   - 软保底：每策略最多 3 只（若合格数少于 3 则全部保留）；
+   - 硬上限：每日最多 50 只（按策略最高分与字典序全局选拔）；
+   - 绝不硬凑 20 只下限：合格几只就是几只，零只亦合法；
+   - 严禁跨策略综合加权打分（global_score）；
+   - `MarketValidation.CONTRADICTED` 一票否决；
+   - 缺失数据（未提供或非完整输入）严禁静默兜底为 0 或伪装为 `NEUTRAL/NO_SIGNAL`。
+
+### 13.2 为什么 Candidate 在生产管线中依然保持 BLOCKED
+这是**刻意的产品安全设计**（Intentional Product Safety），绝非管线接线未完：
+1. **绝对质量门槛未获所有者批准**：六个策略的绝对规则必须在看到全市场真实分布校准证据后，由项目所有者批准具体阈值。当前代码中 `build_qualifiers()` 对未配置规则抛出 `QualificationRuleNotConfigured`，日常管线 `daily` 识别到未配置 qualifier 依法将 `BUILD_CANDIDATES` 记录为 `BLOCKED`；
+2. **上游 Market Regime / Market Validation / Signal 模块仍未实现**：Candidate 契约要求这三层必须提供明确研判，上游未完成前日常管线依法保持 `BLOCKED`；
+3. **隔离集成测试可验证 Candidate 生成**：在提供合成完整证据的隔离测试中，`candidate_stage` 能稳定装配候选、执行代表性选择并验证所有字段血缘。
+
+### 13.3 新增的只读校准工具（Zero Production Mutation）
+新增 `astock calibrate candidates --as-of <YYYY-MM-DD> --industry-map <PATH> --output-dir <PATH>`：
+- 只跑只读分析执行链（`_preview_state` / `run_analysis`），严禁调用 `run_daily`，不写 Snapshot、Watchlist、Job 目录；
+- 输出 `<YYYY-MM-DD>-candidate-calibration.json` 与 `.md` 两个产物，均显式标记 `CALIBRATION ONLY — NOT APPROVED PRODUCT RULE` 警告；
+- 为项目所有者审定绝对质量门槛提供全市场分布、分位数敏感性、行业集中度与重合度证据。

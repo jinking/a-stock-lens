@@ -16,4 +16,8 @@ def next_action_for(
         return NextAction.IGNORE
     if isinstance(qualification, CandidateSelection):
         return NextAction.WATCH
-    return NextAction.WATCH if getattr(qualification, "qualified", False) else NextAction.IGNORE
+    return (
+        NextAction.WATCH
+        if getattr(qualification, "qualified", False)
+        else NextAction.IGNORE
+    )

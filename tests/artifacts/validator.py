@@ -63,7 +63,17 @@ REQUIRED_KEYS: dict[str, frozenset[str]] = {
         }
     ),
     "CANDIDATE": frozenset(
-        {"symbol", "as_of", "next_action", "lineage", "strategy_results"}
+        {
+            "symbol",
+            "as_of",
+            "next_action",
+            "lineage",
+            "strategy_results",
+            "strategy_qualifications",
+            "candidate_policy_version",
+            "market_validation",
+            "signal",
+        }
     ),
 }
 
@@ -72,7 +82,11 @@ VERSION_KEYS: dict[str, tuple[str, ...]] = {
     "UNIVERSE": (),
     "FACTOR": ("factor_version",),
     "STRATEGY": ("strategy_version",),
-    "CANDIDATE": ("strategy_version",),
+    "CANDIDATE": (
+        "strategy_version",
+        "qualification_version",
+        "candidate_policy_version",
+    ),
 }
 
 # The eleven stages `spec §15` names, in the order the canonical pipeline runs
@@ -135,8 +149,29 @@ def validate_snapshot(
             ),
         )
 
+    if kind == "CANDIDATE" and len(records) > 50:
+        findings.append(
+            ArtifactFinding(
+                check="candidate_count",
+                symbol="",
+                observed=f"candidate snapshot contains {len(records)} records, exceeding maximum of 50",
+            )
+        )
+
+    seen_symbols: set[str] = set()
     for index, record in enumerate(records):
         symbol = _text(record.get("symbol"))
+        if kind == "CANDIDATE" and symbol:
+            if symbol in seen_symbols:
+                findings.append(
+                    ArtifactFinding(
+                        check="unique_symbols",
+                        symbol=symbol,
+                        observed=f"symbol {symbol!r} appears more than once in candidate snapshot",
+                    )
+                )
+            seen_symbols.add(symbol)
+
         findings.extend(_required_keys(required, record, symbol, index))
         findings.extend(_ranges(kind, record, symbol))
         findings.extend(
@@ -149,6 +184,7 @@ def validate_snapshot(
         findings.extend(_availability_times(kind, record, symbol, as_of))
         findings.extend(_cited_versions(kind, record, symbol))
         findings.extend(_cited_scores(kind, record, symbol))
+        findings.extend(_candidate_checks(kind, record, symbol))
 
     return tuple(findings)
 
@@ -191,6 +227,24 @@ def validate_snapshot_set(
 
     for candidate in candidate_records:
         symbol = _text(candidate.get("symbol"))
+        for qual in _mappings(candidate.get("strategy_qualifications")):
+            if qual.get("qualified") is True:
+                strat_id = _text(qual.get("strategy_id"))
+                matching = [
+                    s for s in stored_strategies if s[0] == symbol and s[1] == strat_id
+                ]
+                if not matching:
+                    findings.append(
+                        ArtifactFinding(
+                            check="cross_snapshot",
+                            symbol=symbol,
+                            observed=(
+                                f"candidate cites qualified strategy {strat_id!r}, "
+                                "which the day's STRATEGY snapshot does not contain"
+                            ),
+                        )
+                    )
+
         for cited in _cited_results(candidate):
             strategy_key = (
                 symbol,
@@ -578,6 +632,10 @@ def _timestamps(
             (f"strategy_results[{index}].as_of", cited.get("as_of"))
             for index, cited in enumerate(_cited_results(record))
         )
+        stamps.extend(
+            (f"strategy_qualifications[{index}].as_of", q.get("as_of"))
+            for index, q in enumerate(_mappings(record.get("strategy_qualifications")))
+        )
 
     for label, value in stamps:
         moment = _parse_datetime(value)
@@ -616,6 +674,91 @@ def _cited_versions(
                     ),
                 )
             )
+
+    declared_quals = _versions_declared(
+        _text(_mapping(record.get("lineage")).get("qualification_version"))
+    )
+    for index, q in enumerate(_mappings(record.get("strategy_qualifications"))):
+        q_version = _text(_mapping(q.get("lineage")).get("qualification_version"))
+        if q_version and declared_quals and q_version not in declared_quals:
+            findings.append(
+                ArtifactFinding(
+                    check="cited_qualification_version",
+                    symbol=_text(q.get("symbol")) or symbol,
+                    observed=(
+                        f"strategy_qualifications[{index}] carries "
+                        f"{q_version!r}, which the candidate's lineage "
+                        f"({sorted(declared_quals)}) does not declare"
+                    ),
+                )
+            )
+    return findings
+
+
+def _candidate_checks(
+    kind: str, record: Mapping[str, object], symbol: str
+) -> list[ArtifactFinding]:
+    if kind != "CANDIDATE":
+        return []
+
+    findings: list[ArtifactFinding] = []
+
+    # Policy version at candidate level
+    policy_ver = record.get("candidate_policy_version")
+    if not isinstance(policy_ver, str) or not policy_ver.strip():
+        findings.append(
+            ArtifactFinding(
+                check="empty_version",
+                symbol=symbol,
+                observed="candidate_policy_version is empty",
+            )
+        )
+
+    # Market validation veto
+    mv = record.get("market_validation")
+    if mv == "CONTRADICTED":
+        findings.append(
+            ArtifactFinding(
+                check="market_validation_veto",
+                symbol=symbol,
+                observed="candidate has market_validation 'CONTRADICTED'",
+            )
+        )
+
+    # Strategy qualifications
+    quals = _mappings(record.get("strategy_qualifications"))
+    qualified_strats: list[str] = []
+    for q in quals:
+        if q.get("qualified") is True:
+            strat_id = _text(q.get("strategy_id"))
+            if strat_id:
+                qualified_strats.append(strat_id)
+
+    if not qualified_strats:
+        findings.append(
+            ArtifactFinding(
+                check="candidate_qualifications",
+                symbol=symbol,
+                observed="candidate has no qualified strategy_qualifications",
+            )
+        )
+    else:
+        cited_strat_ids = {
+            _text(cited.get("strategy_id")) for cited in _cited_results(record)
+        }
+        for strat_id in qualified_strats:
+            if strat_id not in cited_strat_ids:
+                findings.append(
+                    ArtifactFinding(
+                        check="candidate_qualifications",
+                        symbol=symbol,
+                        observed=(
+                            f"qualified strategy {strat_id!r} has no matching "
+                            "cited strategy_result"
+                        ),
+                    )
+                )
+
     return findings
 
 
