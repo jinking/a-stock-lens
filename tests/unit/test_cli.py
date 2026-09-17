@@ -70,18 +70,15 @@ def test_factors_compute_prints_one_document_per_symbol_and_factor(
     assert len(lines) == len(SHORT_SYMBOLS) * len(FACTOR_NAMES)
 
 
-def test_scan_reports_ranked_candidates_and_writes_every_snapshot(
-    local_tmp: Path,
-) -> None:
-    """The daily scan: 7 symbols survive the Universe, all carry scores."""
+def test_scan_reports_a_ranking_and_writes_no_snapshot(local_tmp: Path) -> None:
+    """`scan` 是预览：7 只通过 Universe 的标的全部被打分，但不落盘。"""
     result = _invoke(local_tmp, "scan", "--as-of", DAY, dataset=LONG_DATASET)
 
     assert result.exit_code == 0
-    assert "candidates: 7" in result.stdout
-    # Ranking top: fastest riser, scored, watched.
-    assert "300750.SZ -> WATCH (score 95.24)" in result.stdout
-    for kind in ("UNIVERSE", "FACTOR", "STRATEGY", "CANDIDATE"):
-        assert (local_tmp / kind / "2026-09-04.json").is_file(), kind
+    assert "universe: 7 symbols considered" in result.stdout
+    # 排名第一：涨得最快的标的，有分数、资格成立。
+    assert "300750.SZ score 95.24 (eligible)" in result.stdout
+    assert list(local_tmp.rglob("*.json")) == []
 
 
 def test_scan_reports_every_candidate_with_a_score(local_tmp: Path) -> None:
@@ -98,7 +95,7 @@ def test_scan_reports_every_candidate_with_a_score(local_tmp: Path) -> None:
     assert all("score" in line for line in candidate_lines)
 
 
-def test_universe_build_reports_the_verdicts_and_writes_the_snapshot(
+def test_universe_build_reports_the_verdicts_without_writing(
     local_tmp: Path,
 ) -> None:
     result = _invoke(
@@ -109,7 +106,7 @@ def test_universe_build_reports_the_verdicts_and_writes_the_snapshot(
     assert "included: 7" in result.stdout
     assert "ST: 1" in result.stdout
     assert "LONG_SUSPENSION" in result.stdout
-    assert (local_tmp / "UNIVERSE" / "2026-09-04.json").is_file()
+    assert list(local_tmp.rglob("*.json")) == []
 
 
 def test_scan_rejects_a_malformed_date(local_tmp: Path) -> None:

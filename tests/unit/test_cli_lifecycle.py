@@ -157,6 +157,15 @@ def _invoke(
     )
 
 
+def _formal_run(local_tmp: Path) -> None:
+    """产生正式快照的唯一入口：`daily`。
+
+    `scan` 是预览，它不再写正式快照，所以需要快照的测试必须以 `daily` 铺底。
+    """
+    result = _invoke(local_tmp, "daily", "--as-of", DAY, "--allow-incomplete")
+    assert result.exit_code == 0, result.output
+
+
 # --- watch -----------------------------------------------------------------
 
 
@@ -275,7 +284,7 @@ def test_watch_rejects_a_state_that_is_not_a_state(local_tmp: Path) -> None:
 
 
 def test_stock_profile_reads_the_stored_evidence(local_tmp: Path) -> None:
-    _invoke(local_tmp, "scan", "--as-of", DAY)
+    _formal_run(local_tmp)
 
     result = _invoke(local_tmp, "stock", "300750.SZ", "--as-of", DAY)
 
@@ -291,7 +300,7 @@ def test_stock_profile_reads_the_stored_evidence(local_tmp: Path) -> None:
 def test_stock_profile_names_the_rule_that_excluded_a_symbol(
     local_tmp: Path,
 ) -> None:
-    _invoke(local_tmp, "scan", "--as-of", DAY)
+    _formal_run(local_tmp)
 
     result = _invoke(local_tmp, "stock", "000002.SZ", "--as-of", DAY)
 
@@ -301,7 +310,7 @@ def test_stock_profile_names_the_rule_that_excluded_a_symbol(
 
 
 def test_stock_profile_reports_a_watchlist_entry(local_tmp: Path) -> None:
-    _invoke(local_tmp, "scan", "--as-of", DAY)
+    _formal_run(local_tmp)
     _invoke(local_tmp, "watch", "300750.SZ", "--thesis", "structural growth")
 
     result = _invoke(local_tmp, "stock", "300750.SZ", "--as-of", DAY)

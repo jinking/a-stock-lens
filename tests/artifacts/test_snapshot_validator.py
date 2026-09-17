@@ -4,7 +4,11 @@ This module is the check on the checks: it shares no code with the production
 implementation, so a systemic mistake inside `astock_lens` cannot hide from it
 (`tests/artifacts/README.md`). The validator is fed deliberately corrupted
 records first — a validator that has never been seen failing cannot be trusted
-passing — and only then run against the real snapshots the daily scan writes.
+passing — and only then run against the real records the canonical analysis
+flow computes.
+
+CANDIDATE 的跨快照一致性（引用的策略与因子是否真的存在）由 Task 8 的
+`validate_snapshot_set` 负责，所以这里只校验分析链直接产出的三类快照。
 """
 
 from datetime import UTC, datetime, timedelta
@@ -14,8 +18,9 @@ from artifacts.validator import ArtifactFinding, validate_snapshot
 from astock_lens.data.snapshots.store import JsonSnapshotStore, SnapshotStore
 from astock_lens.domain.enums import SnapshotKind
 from astock_lens.factors.config import load_factor_config
-from astock_lens.pipelines.daily_scan import run_daily_scan
+from astock_lens.pipelines.analysis import run_analysis
 from astock_lens.strategies.config import load_strategy_config
+from astock_lens.strategies.registry import RegisteredStrategy, build_scanner
 
 ROOT = Path(__file__).resolve().parents[2]
 CSV_ROOT = ROOT / "tests" / "fixtures" / "csv"
@@ -219,10 +224,13 @@ def test_findings_name_the_symbol_and_the_observation() -> None:
     assert all(finding.observed for finding in findings)
 
 
-def test_real_snapshots_from_a_daily_scan_validate_cleanly(local_tmp: Path) -> None:
-    """The validator's purpose: judge what Task 6 actually wrote, without
-    sharing a single line of its implementation."""
-    run_daily_scan(
+def test_real_snapshots_from_the_analysis_flow_validate_cleanly(
+    local_tmp: Path,
+) -> None:
+    """The validator's purpose: judge what the analysis chain actually
+    produced, without sharing a single line of its implementation."""
+    config = load_strategy_config(ROOT / "configs" / "strategies" / "momentum.yaml")
+    analysis = run_analysis(
         csv_root=CSV_ROOT,
         as_of=AS_OF,
         universe_config=load_universe_config(ROOT / "configs" / "universe.yaml"),
@@ -230,20 +238,20 @@ def test_real_snapshots_from_a_daily_scan_validate_cleanly(local_tmp: Path) -> N
             load_factor_config(path)
             for path in sorted((ROOT / "configs" / "factors").glob("*.yaml"))
         ),
-        strategy_config=load_strategy_config(
-            ROOT / "configs" / "strategies" / "momentum.yaml"
-        ),
-        store=JsonSnapshotStore(local_tmp),
+        scanners=(RegisteredStrategy(config=config, plugin=build_scanner(config)),),
         dataset=LONG_DATASET,
     )
 
     store: SnapshotStore = JsonSnapshotStore(local_tmp)
+    store.write(SnapshotKind.UNIVERSE, AS_OF, (analysis.universe,))
+    store.write(SnapshotKind.FACTOR, AS_OF, analysis.factor_results)
+    store.write(SnapshotKind.STRATEGY, AS_OF, analysis.strategy_results)
+
     findings: tuple[ArtifactFinding, ...] = ()
     for kind in (
         SnapshotKind.UNIVERSE,
         SnapshotKind.FACTOR,
         SnapshotKind.STRATEGY,
-        SnapshotKind.CANDIDATE,
     ):
         findings += validate_snapshot(
             kind.value,

@@ -10,7 +10,7 @@ import os
 import platform
 import sys
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
@@ -41,14 +41,13 @@ from astock_lens.factors.contracts import FactorResult
 from astock_lens.jobs.models import StageOutcome
 from astock_lens.jobs.store import JsonJobStore
 from astock_lens.pipelines import stages
-from astock_lens.pipelines.daily import DailyRunResult, run_daily
-from astock_lens.pipelines.daily_scan import (
-    DailyScanResult,
-    UniverseBuildResult,
-    build_universe,
-    run_daily_scan,
+from astock_lens.pipelines.analysis import (
+    AnalysisState,
+    FactorState,
+    compute_factor_state,
+    run_analysis,
 )
-from astock_lens.pipelines.first_slice import FirstSliceResult, run_first_slice
+from astock_lens.pipelines.daily import DailyRunResult, run_daily
 from astock_lens.research.adapters.cli import (
     CliDeepResearchAdapter,
     DeepResearchInvocationError,
@@ -163,15 +162,29 @@ def _factor_configs() -> tuple[FactorConfig, ...]:
     return tuple(load_factor_config(path) for path in paths)
 
 
-def _run_slice(as_of_value: str) -> FirstSliceResult:
-    """Run the first slice using the configured paths."""
-    return run_first_slice(
+def _factor_state(as_of_value: str) -> FactorState:
+    """把因子算完就停下，配置文件里的路径全部照旧生效。"""
+    return compute_factor_state(
         csv_root=_csv_root(),
         as_of=_as_of(as_of_value),
         factor_configs=_factor_configs(),
-        strategy_config=load_strategy_config(STRATEGY_CONFIG_PATH),
-        store=_store(),
         dataset=_dataset(),
+        securities_dataset=_securities_dataset(),
+    )
+
+
+def _analysis(
+    as_of_value: str, *, scanners: Sequence[RegisteredStrategy]
+) -> AnalysisState:
+    """跑唯一分析执行链；它只计算，不落任何正式快照。"""
+    return run_analysis(
+        csv_root=_csv_root(),
+        as_of=_as_of(as_of_value),
+        universe_config=load_universe_config(_universe_config_path()),
+        factor_configs=_factor_configs(),
+        scanners=scanners,
+        dataset=_dataset(),
+        securities_dataset=_securities_dataset(),
     )
 
 
@@ -193,31 +206,14 @@ def _store() -> SnapshotStore:
     )
 
 
-def _run_universe(as_of_value: str) -> UniverseBuildResult:
-    """Run the Universe stage using the configured paths."""
-    return build_universe(
-        csv_root=_csv_root(),
-        as_of=_as_of(as_of_value),
-        universe_config=load_universe_config(_universe_config_path()),
-        factor_configs=_factor_configs(),
-        store=_store(),
-        dataset=_dataset(),
-        securities_dataset=_securities_dataset(),
-    )
+def _universe_state(as_of_value: str) -> AnalysisState:
+    """跑到 Universe 为止：不配置 Scanner，就不做任何策略计算。"""
+    return _analysis(as_of_value, scanners=())
 
 
-def _run_daily_scan(as_of_value: str) -> DailyScanResult:
-    """Run the daily scan using the configured paths."""
-    return run_daily_scan(
-        csv_root=_csv_root(),
-        as_of=_as_of(as_of_value),
-        universe_config=load_universe_config(_universe_config_path()),
-        factor_configs=_factor_configs(),
-        strategy_config=load_strategy_config(STRATEGY_CONFIG_PATH),
-        store=_store(),
-        dataset=_dataset(),
-        securities_dataset=_securities_dataset(),
-    )
+def _preview_state(as_of_value: str) -> AnalysisState:
+    """预览用完整分析链：跑遍所有已实现的 Scanner，但不落盘。"""
+    return _analysis(as_of_value, scanners=load_scanners(_strategy_dir()))
 
 
 def _universe_config_path() -> Path:
@@ -394,29 +390,34 @@ def factors_compute(as_of: Annotated[str, AS_OF_OPTION]) -> None:
 
     Machine-readable output goes to stdout; run notes go to stderr, so the
     stream can be piped into another tool unchanged.
-    """
-    result = _run_slice(as_of)
 
-    for factor_result in result.factor_results:
+    This is a computation, not a run. Nothing is persisted: asking what a
+    factor currently measures must never rewrite the day's formal snapshots.
+    """
+    measured = _factor_state(as_of)
+
+    for factor_result in measured.factor_results:
         typer.echo(
             json.dumps(factor_result.model_dump(mode="json"), ensure_ascii=False)
         )
 
-    report = result.quality_report
+    report = measured.outcome.quality_report
     typer.echo(f"quality: {report.accepted}/{report.checked} bars accepted", err=True)
-    typer.echo(f"snapshot: {result.factor_snapshot_path}", err=True)
+    typer.echo("snapshot: none (a computation does not write)", err=True)
 
 
 @universe_app.command("build")
 def universe_build(as_of: Annotated[str, AS_OF_OPTION]) -> None:
-    """Apply the Universe rules and write the UNIVERSE snapshot.
+    """Apply the Universe rules and report every verdict. It writes nothing.
 
     Every verdict is printed: a symbol missing from the universe must always
     be answerable with the rule that removed it, and a deferred rule is
     reported as deferred rather than silently skipped.
+
+    Formal daily snapshots are written only by `astock daily`.
     """
-    result = _run_universe(as_of)
-    universe = result.universe
+    analysis = _universe_state(as_of)
+    universe = analysis.universe
 
     typer.echo(f"included: {len(universe.included)}")
     typer.echo(f"excluded: {len(universe.exclusions)}")
@@ -425,32 +426,38 @@ def universe_build(as_of: Annotated[str, AS_OF_OPTION]) -> None:
         typer.echo(f"  {rule}: {count}")
     for deferred in universe.deferred_rules:
         typer.echo(f"deferred: {deferred.rule.value} ({deferred.reason})")
-    report = result.quality_report
+    report = analysis.outcome.quality_report
     typer.echo(f"quality: {report.accepted}/{report.checked} bars accepted", err=True)
-    typer.echo(f"snapshot: {result.universe_snapshot_path}")
+    typer.echo("snapshot: none (a computation does not write)", err=True)
 
 
 @app.command()
 def scan(as_of: Annotated[str, AS_OF_OPTION]) -> None:
-    """Run the daily scan and report the ranked candidates it produced.
+    """Run a non-persistent scan preview.
 
-    A candidate is a research object, not a recommendation. `next_action`
-    follows from the score by ordering alone: an eligible symbol carrying a
-    measured score is worth watching, and nothing else is.
+    Every enabled scanner scores the Universe this run admits, and the rankings
+    are printed for inspection. Formal daily snapshots are written only by
+    `astock daily`; a preview never writes, so it can never replace the day's
+    formal result with a subset of it.
     """
-    result = _run_daily_scan(as_of)
-    by_symbol = {item.symbol: item for item in result.strategy_results}
+    analysis = _preview_state(as_of)
 
-    typer.echo(f"candidates: {len(result.candidates)}")
-    for candidate in result.candidates:
-        strategy_result = by_symbol[candidate.symbol]
-        score = (
-            "score -"
-            if strategy_result.score is None
-            else f"score {strategy_result.score:.2f}"
-        )
-        typer.echo(f"  {candidate.symbol} -> {candidate.next_action} ({score})")
-    typer.echo(f"snapshot: {result.candidate_snapshot_path}")
+    typer.echo(f"universe: {len(analysis.universe.included)} symbols considered")
+    for strategy_id in sorted(
+        {result.strategy_id for result in analysis.strategy_results}
+    ):
+        typer.echo(f"{strategy_id}:")
+        for result in _ranked(
+            tuple(
+                item
+                for item in analysis.strategy_results
+                if item.strategy_id == strategy_id
+            )
+        ):
+            score = "no score" if result.score is None else f"score {result.score:.2f}"
+            verdict = "eligible" if result.eligible else "not eligible"
+            typer.echo(f"  {result.symbol} {score} ({verdict})")
+    typer.echo("snapshot: none written (preview)", err=True)
 
 
 strategy_app = typer.Typer(
@@ -553,8 +560,8 @@ def stock(symbol: str, as_of: Annotated[str, AS_OF_OPTION]) -> None:
     universes = _snapshot_records(SnapshotKind.UNIVERSE, day, UniverseSnapshot)
     if not universes:
         typer.echo(
-            f"no UNIVERSE snapshot for {as_of}; run "
-            f"`astock scan --as-of {as_of}` first",
+            f"no UNIVERSE snapshot for {as_of}; run the formal pipeline "
+            f"`astock daily --as-of {as_of} --allow-incomplete` first",
             err=True,
         )
         raise typer.Exit(code=1)
