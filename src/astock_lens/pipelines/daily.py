@@ -20,7 +20,7 @@ A failing stage stops the pipeline, because every later stage consumes what it
 produced. A scan continued on missing data would be a scan of nothing.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,13 +33,18 @@ from astock_lens.candidates.policy import (
     CandidatePolicy,
 )
 from astock_lens.data.snapshots.store import SnapshotStore
-from astock_lens.domain.enums import JobStage, SnapshotKind
+from astock_lens.domain.enums import JobStage, MarketValidation, Signal, SnapshotKind
 from astock_lens.domain.models import DomainRecord
 from astock_lens.factors.config import FactorConfig
 from astock_lens.factors.contracts import FactorResult
 from astock_lens.jobs.models import JobRun, JobStatus, StageOutcome
 from astock_lens.jobs.store import JobStore
 from astock_lens.pipelines import stages
+from astock_lens.qualifications.contracts import (
+    QualificationRuleNotConfigured,
+    StrategyQualifier,
+)
+from astock_lens.qualifications.models import StrategyQualification
 from astock_lens.strategies.contracts import StrategyResult
 from astock_lens.strategies.registry import RegisteredStrategy, unimplemented_scanners
 from astock_lens.universe.config import UniverseConfig
@@ -168,6 +173,7 @@ def run_daily(
     securities_dataset: str = stages.DEFAULT_SECURITIES_DATASET,
     sync: Callable[[], StageOutcome] | None = None,
     candidate_policy: CandidatePolicy | None = None,
+    qualifiers: Mapping[str, StrategyQualifier] | None = None,
 ) -> DailyRunResult:
     """Run every stage of the daily pipeline once for one point in time.
 
@@ -189,6 +195,7 @@ def run_daily(
         store=store,
         sync=sync,
         candidate_policy=candidate_policy,
+        qualifiers=qualifiers,
     )
     state = _State()
 
@@ -232,6 +239,7 @@ class _Context:
     store: SnapshotStore
     sync: Callable[[], StageOutcome] | None
     candidate_policy: CandidatePolicy | None
+    qualifiers: Mapping[str, StrategyQualifier] | None = None
 
 
 def _blocked_reasons(stage: JobStage, context: _Context) -> tuple[str, ...]:
@@ -245,8 +253,13 @@ def _blocked_reasons(stage: JobStage, context: _Context) -> tuple[str, ...]:
             "implementation, and a result published without them would read as "
             "a complete one"
         )
-    if stage is JobStage.BUILD_CANDIDATES and context.candidate_policy is None:
-        reasons.append(CANDIDATE_POLICY_DEFERRED)
+    if stage is JobStage.BUILD_CANDIDATES:
+        if not context.qualifiers:
+            reasons.append(
+                "strategy qualification rules are not configured: absolute quality thresholds have not been approved"
+            )
+        if context.candidate_policy is None:
+            reasons.append(CANDIDATE_POLICY_DEFERRED)
     return tuple(reasons)
 
 
@@ -258,6 +271,7 @@ class _State:
     universe: UniverseSnapshot | None = None
     factor_results: tuple[FactorResult, ...] = ()
     strategy_results: tuple[StrategyResult, ...] = ()
+    qualifications: tuple[StrategyQualification, ...] = ()
     candidates: tuple[Candidate, ...] = ()
     snapshot_paths: list[tuple[SnapshotKind, Path]] = field(default_factory=list)
     blocked: list[JobStage] = field(default_factory=list)
@@ -420,8 +434,21 @@ def _build_candidates(context: _Context, state: _State) -> StageOutcome:
     universe = _required(
         state.universe, stage=JobStage.BUILD_CANDIDATES, name="BUILD_UNIVERSE"
     )
+    if not context.qualifiers:
+        raise QualificationRuleNotConfigured(
+            "strategy qualification rules are not configured"
+        )
+    state.qualifications = stages.qualification_stage(
+        strategy_results=state.strategy_results,
+        qualifiers=context.qualifiers,
+    )
+    market_validation_by_symbol: dict[str, MarketValidation] = {}
+    signal_by_symbol: dict[str, Signal] = {}
     state.candidates = stages.candidate_stage(
         strategy_results=state.strategy_results,
+        qualifications=state.qualifications,
+        market_validation_by_symbol=market_validation_by_symbol,
+        signal_by_symbol=signal_by_symbol,
         lineage=stages.lineage_for(
             universe=universe,
             factor_configs=context.factor_configs,

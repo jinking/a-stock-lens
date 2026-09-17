@@ -12,7 +12,7 @@ definition of the same quantity, so the design's listed order is deviated from
 deliberately and the deviation is recorded in `docs/REVIEW_NOTES.md`.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -20,10 +20,11 @@ from astock_lens.candidates.builder import CandidateBuilder
 from astock_lens.candidates.models import Candidate
 from astock_lens.candidates.policy import (
     CANDIDATE_POLICY_DEFERRED,
+    CandidateEvidence,
+    CandidateEvidenceIncomplete,
     CandidatePolicy,
     CandidatePolicyNotConfigured,
 )
-from astock_lens.candidates.routing import next_action_for
 from astock_lens.data.contracts import (
     FetchRequest,
     NormalizedDataset,
@@ -64,6 +65,11 @@ from astock_lens.domain.models import (
 from astock_lens.factors.config import FactorConfig
 from astock_lens.factors.contracts import FactorContext, FactorResult
 from astock_lens.factors.registry import build_registry
+from astock_lens.qualifications.contracts import (
+    QualificationRuleNotConfigured,
+    StrategyQualifier,
+)
+from astock_lens.qualifications.models import StrategyQualification
 from astock_lens.strategies.contracts import StrategyContext, StrategyResult
 from astock_lens.strategies.registry import RegisteredStrategy
 from astock_lens.universe.builder import LIQUIDITY_FACTOR, UniverseBuilder
@@ -352,48 +358,103 @@ def strategy_stage(
     return tuple(results)
 
 
+def qualification_stage(
+    *,
+    strategy_results: Sequence[StrategyResult],
+    qualifiers: Mapping[str, StrategyQualifier],
+) -> tuple[StrategyQualification, ...]:
+    """Evaluate eligible strategy results against their strategy's qualifier.
+
+    - Only results with eligible=True are evaluated.
+    - Every eligible result's strategy_id must be in qualifiers.
+    - Missing qualifier raises QualificationRuleNotConfigured.
+    - No candidate objects are created here.
+    """
+    qualifications: list[StrategyQualification] = []
+    for result in strategy_results:
+        if not result.eligible:
+            continue
+        qualifier = qualifiers.get(result.strategy_id)
+        if qualifier is None:
+            raise QualificationRuleNotConfigured(
+                f"No qualifier configured for strategy '{result.strategy_id}'"
+            )
+        qualifications.append(qualifier.qualify(result))
+    return tuple(qualifications)
+
+
 def candidate_stage(
     *,
     strategy_results: Sequence[StrategyResult],
+    qualifications: Sequence[StrategyQualification] = (),
+    market_validation_by_symbol: Mapping[str, MarketValidation] | None = None,
+    signal_by_symbol: Mapping[str, Signal] | None = None,
     lineage: SnapshotLineage,
     as_of: datetime,
     policy: CandidatePolicy | None,
-    market_validation: MarketValidation | None = None,
-    signal: Signal | None = None,
 ) -> tuple[Candidate, ...]:
-    """Build one candidate per symbol the approved policy qualifies.
+    """Select and assemble research candidates from cross-sectional evidence.
 
-    Two responsibilities stay apart: the policy decides *who* qualifies and
-    why, the builder only assembles the evidence. Without an approved policy
-    this raises instead of returning an empty tuple, because "no rule decided
-    yet" and "nothing qualified today" must not look the same.
+    - Fails clearly when policy is missing (CandidatePolicyNotConfigured).
+    - Builds one CandidateEvidence per symbol that has at least one qualified StrategyQualification.
+    - Fails incomplete evidence instead of synthesizing NEUTRAL/NO_SIGNAL:
+      If symbol not in market_validation_by_symbol or market_validation is None,
+      or symbol not in signal_by_symbol or signal is None -> CandidateEvidenceIncomplete.
+    - Calls policy.select(evidence_list) once for the whole cross-section.
+    - Builds Candidates only for returned selections.
     """
     if policy is None:
         raise CandidatePolicyNotConfigured(CANDIDATE_POLICY_DEFERRED)
 
-    builder = CandidateBuilder()
-    by_symbol: dict[str, list[StrategyResult]] = {}
-    for result in strategy_results:
-        if result.eligible:
-            by_symbol.setdefault(result.symbol, []).append(result)
+    mv_by_symbol = (
+        market_validation_by_symbol if market_validation_by_symbol is not None else {}
+    )
+    sig_by_symbol = signal_by_symbol if signal_by_symbol is not None else {}
 
-    candidates: list[Candidate] = []
-    for symbol, found in by_symbol.items():
-        qualification = policy.qualify(
-            strategy_results=tuple(found),
-            market_validation=market_validation,
-            signal=signal,
+    quals_by_symbol: dict[str, list[StrategyQualification]] = {}
+    for q in qualifications:
+        quals_by_symbol.setdefault(q.symbol, []).append(q)
+
+    results_by_symbol: dict[str, list[StrategyResult]] = {}
+    for r in strategy_results:
+        results_by_symbol.setdefault(r.symbol, []).append(r)
+
+    # Find symbols that have at least one qualified StrategyQualification
+    candidate_symbols = sorted(
+        sym for sym, quals in quals_by_symbol.items() if any(q.qualified for q in quals)
+    )
+
+    evidence_list: list[CandidateEvidence] = []
+    for sym in candidate_symbols:
+        mv = mv_by_symbol.get(sym)
+        sig = sig_by_symbol.get(sym)
+        if mv is None or sig is None:
+            raise CandidateEvidenceIncomplete(
+                f"CandidateEvidence for symbol '{sym}' is incomplete: "
+                f"market_validation={mv}, signal={sig}"
+            )
+        evidence = CandidateEvidence(
+            symbol=sym,
+            strategy_results=tuple(results_by_symbol.get(sym, ())),
+            strategy_qualifications=tuple(quals_by_symbol.get(sym, ())),
+            market_validation=mv,
+            signal=sig,
         )
-        if not qualification.qualified:
-            continue
+        evidence_list.append(evidence)
+
+    selections = policy.select(evidence_list)
+
+    evidence_by_symbol = {e.symbol: e for e in evidence_list}
+    builder = CandidateBuilder()
+    candidates: list[Candidate] = []
+    for sel in selections:
+        ev = evidence_by_symbol[sel.symbol]
         candidates.append(
             builder.build(
-                symbol,
+                evidence=ev,
+                selection=sel,
                 as_of=as_of,
-                strategy_results=tuple(found),
                 lineage=lineage,
-                next_action=next_action_for(qualification),
-                qualification_reasons=qualification.reasons,
             )
         )
     return tuple(candidates)
