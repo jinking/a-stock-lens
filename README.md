@@ -338,6 +338,7 @@ uv run mypy
 - `docs/TESTING.md`：测试体系
 - `docs/superpowers/specs/2026-09-16-a-stock-lens-design.md`：完整设计规格
 - `docs/REVIEW_NOTES.md`：本次一致性实现中做出的判断与偏离记录
+- `docs/ROADMAP.md`：后续待办清单（含被决策阻塞的项与数据工程遗留）
 - `web/README.md`：前端页面规划
 
 权威顺序：设计 spec → `docs/PRODUCT.md` → `docs/ARCHITECTURE.md` → `README.md`。
