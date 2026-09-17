@@ -21,6 +21,12 @@ from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
 
+from astock_lens.data.snapshots.store import (
+    SnapshotConflictError,
+    canonical_json,
+    canonical_payload,
+    conflict_message,
+)
 from astock_lens.domain.enums import SnapshotKind
 
 if TYPE_CHECKING:
@@ -44,10 +50,10 @@ _MISSING_EXTRA = (
 class DuckDBSnapshotStore:
     """Persist snapshots as rows in a local DuckDB database.
 
-    One row per (kind, as_of). Writing the same key again replaces the row
-    rather than appending, so re-running a scan for a date leaves exactly one
-    snapshot behind — the JSON store gets the same behaviour by overwriting its
-    file, and a caller must not be able to tell the difference.
+    One row per (kind, as_of). Rewriting the same key with identical content is
+    idempotent; rewriting it with different content raises
+    `SnapshotConflictError`, exactly as the JSON store does. A caller must not
+    be able to tell the two implementations apart.
     """
 
     def __init__(self, database: Path) -> None:
@@ -59,12 +65,15 @@ class DuckDBSnapshotStore:
         as_of: datetime,
         records: Sequence[BaseModel],
     ) -> Path:
-        """Persist the records for one snapshot, replacing any earlier write."""
+        """Persist one snapshot, or accept an identical rewrite."""
         self._database.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(
-            [record.model_dump(mode="json") for record in records],
-            ensure_ascii=False,
-        )
+        payload = canonical_payload(records)
+
+        existing = self._stored_payload(kind, as_of)
+        if existing is not None:
+            if existing == payload:
+                return self._database
+            raise SnapshotConflictError(conflict_message(kind, as_of))
 
         with self._connect() as connection:
             connection.execute(SCHEMA)
@@ -75,6 +84,29 @@ class DuckDBSnapshotStore:
             )
 
         return self._database
+
+    def _stored_payload(self, kind: SnapshotKind, as_of: datetime) -> str | None:
+        """这个键上已经存了什么，用规范形式表示；没有就是 `None`。"""
+        if not self._database.is_file():
+            return None
+
+        with self._connect() as connection:
+            connection.execute(SCHEMA)
+            rows = connection.execute(
+                "SELECT payload FROM snapshots WHERE kind = ? AND as_of = ?",
+                [kind.value, as_of.date()],
+            ).fetchall()
+
+        if not rows:
+            return None
+        stored = rows[0][0]
+        if not isinstance(stored, str):
+            return None
+
+        loaded: object = json.loads(stored)
+        if not isinstance(loaded, list):
+            return None
+        return canonical_json(loaded)
 
     def read(
         self,

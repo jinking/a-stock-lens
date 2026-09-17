@@ -239,6 +239,44 @@ def test_a_stage_can_be_restarted_on_its_own(local_tmp: Path) -> None:
     assert first.candidates == second.candidates
 
 
+def test_a_snapshot_conflict_fails_the_stage_and_stops_the_pipeline(
+    local_tmp: Path,
+) -> None:
+    """同一天已经有不同内容的正式快照：不许覆盖，也不许继续往下跑。"""
+    JsonSnapshotStore(local_tmp / "snapshots").write(SnapshotKind.FACTOR, AS_OF, ())
+
+    result = _run(local_tmp)
+
+    failed = next(
+        run for run in result.runs if run.job_type is JobStage.COMPUTE_FACTORS
+    )
+    assert failed.status is JobStatus.FAILED
+    assert failed.error is not None
+    # 冲突必须点名 kind 与日期，否则 Job Manifest 里只剩一句无用的话。
+    assert SnapshotKind.FACTOR.value in failed.error
+    assert AS_OF.date().isoformat() in failed.error
+    # 下游任何阶段都没有跑：在冲突的当天继续算，只会产生更多垃圾。
+    assert [run.job_type for run in result.runs] == [
+        JobStage.SYNC_DATA,
+        JobStage.NORMALIZE,
+        JobStage.COMPUTE_FACTORS,
+    ]
+
+
+def test_a_snapshot_conflict_is_recorded_in_the_job_manifest(
+    local_tmp: Path,
+) -> None:
+    JsonSnapshotStore(local_tmp / "snapshots").write(SnapshotKind.FACTOR, AS_OF, ())
+
+    _run(local_tmp)
+    stored = JsonJobStore(local_tmp / "jobs").runs(AS_OF)
+
+    factors = next(run for run in stored if run.job_type is JobStage.COMPUTE_FACTORS)
+    assert factors.status is JobStatus.FAILED
+    assert factors.error is not None
+    assert SnapshotKind.FACTOR.value in factors.error
+
+
 def test_the_pipeline_reports_the_scan_it_produced(local_tmp: Path) -> None:
     result = _run(local_tmp)
 

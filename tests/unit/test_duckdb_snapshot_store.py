@@ -21,7 +21,11 @@ pytest.importorskip("duckdb")
 
 from astock_lens.data.snapshots.duckdb_store import DuckDBSnapshotStore
 from astock_lens.data.snapshots.resolve import resolve_snapshot_store
-from astock_lens.data.snapshots.store import JsonSnapshotStore, SnapshotStore
+from astock_lens.data.snapshots.store import (
+    JsonSnapshotStore,
+    SnapshotConflictError,
+    SnapshotStore,
+)
 from astock_lens.domain.enums import SnapshotKind
 from astock_lens.domain.models import DailyBar
 
@@ -61,17 +65,32 @@ def test_an_absent_snapshot_reads_as_empty(store: SnapshotStore) -> None:
     assert store.read(SnapshotKind.CANDIDATE, AS_OF) == ()
 
 
-def test_rewriting_the_same_key_replaces_rather_than_accumulates(
+def test_rewriting_the_same_key_with_the_same_content_is_idempotent(
     store: SnapshotStore,
 ) -> None:
-    """Re-running one scan for one date must not leave two snapshots behind."""
+    """Re-running one scan over the same data writes the same content twice."""
     store.write(SnapshotKind.FACTOR, AS_OF, (_bar("600000.SH"),))
-    store.write(SnapshotKind.FACTOR, AS_OF, (_bar("600519.SH"),))
+
+    store.write(SnapshotKind.FACTOR, AS_OF, (_bar("600000.SH"),))
 
     records = store.read(SnapshotKind.FACTOR, AS_OF)
 
     assert len(records) == 1
-    assert records[0]["symbol"] == "600519.SH"
+    assert records[0]["symbol"] == "600000.SH"
+
+
+def test_rewriting_the_same_key_with_different_content_is_refused(
+    store: SnapshotStore,
+) -> None:
+    """Both stores must refuse the same way, or a caller could tell them apart."""
+    store.write(SnapshotKind.FACTOR, AS_OF, (_bar("600000.SH"),))
+
+    with pytest.raises(SnapshotConflictError):
+        store.write(SnapshotKind.FACTOR, AS_OF, (_bar("600519.SH"),))
+
+    assert [record["symbol"] for record in store.read(SnapshotKind.FACTOR, AS_OF)] == [
+        "600000.SH"
+    ]
 
 
 def test_dates_are_kept_apart(store: SnapshotStore) -> None:
