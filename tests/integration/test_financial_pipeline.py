@@ -140,6 +140,37 @@ def test_the_two_statement_sets_land_and_normalize_together(local_tmp: Path) -> 
     assert outcome.financials.absent_datasets == ("financial_cashflow",)
 
 
+def test_each_factor_context_carries_only_its_own_symbol(local_tmp: Path) -> None:
+    """A factor must not scan the whole market to measure one symbol.
+
+    At whole-market size the difference is quadratic: 5,565 symbols against
+    2.1M observations. The contract is also clearer when a context holds what
+    the factor is asked about.
+    """
+    root = _root_with_financials(local_tmp)
+    (root / "financial_balance.csv").write_text(
+        "code,EndDate,InfoPublDate,TotalShareholderEquity,DebtAssetsRatio\n"
+        "sh600519,2026-06-30,2026-08-15,262096352174.36,15.1931\n"
+        "sz000001,2026-06-30,2026-08-15,548214000000.0,90.9067\n",
+        encoding="utf-8",
+    )
+    outcome = stages.normalize_stage(csv_root=root, as_of=AS_OF, dataset=LONG_DATASET)
+    index = stages.DatasetIndex(outcome.bars)
+
+    view = index.for_symbol("600519.SH")
+
+    assert view.observations
+    assert {item.symbol for item in view.observations} == {"600519.SH"}
+    assert all(bar.symbol == "600519.SH" for bar in view.daily_bars)
+    assert len(view.observations) < len(outcome.bars.observations)
+    # Another symbol's view is different, and a symbol with no rows gets an
+    # empty view rather than somebody else's data.
+    assert index.for_symbol("000001.SZ").observations != view.observations
+    empty = index.for_symbol("999999.SH")
+    assert empty.observations == ()
+    assert empty.daily_bars == ()
+
+
 def _date(year: int, month: int, day: int) -> object:
     from datetime import date
 

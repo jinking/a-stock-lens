@@ -75,6 +75,30 @@ class FinancialInputs(DomainRecord):
     absent_datasets: tuple[str, ...] = ()
 
 
+class DatasetIndex:
+    """Per-symbol views of one normalized dataset, indexed once.
+
+    Handing every factor the whole market would make each call scan the full
+    dataset — at whole-market size (5,565 symbols, 2.1M observations) that is
+    quadratic and unusable. It is also the wrong statement of what a factor may
+    read: a factor is asked about one symbol, so its context holds that symbol.
+    """
+
+    def __init__(self, dataset: NormalizedDataset) -> None:
+        self._dataset = dataset
+        self._bars = _group_by_symbol(dataset.daily_bars)
+        self._observations = _group_by_symbol(dataset.observations)
+
+    def for_symbol(self, symbol: str) -> NormalizedDataset:
+        """Return the dataset restricted to one instrument."""
+        return self._dataset.model_copy(
+            update={
+                "daily_bars": self._bars.get(symbol, ()),
+                "observations": self._observations.get(symbol, ()),
+            }
+        )
+
+
 class NormalizeOutcome(DomainRecord):
     """What NORMALIZE produced, with the raw metadata it came from.
 
@@ -183,21 +207,38 @@ def factor_stage(
     factor_configs: Sequence[FactorConfig],
     as_of: datetime,
 ) -> tuple[FactorResult, ...]:
-    """Compute every configured factor for every symbol that has bars."""
+    """Compute every configured factor for every symbol that has bars.
+
+    Each symbol's context carries only that symbol's rows. Handing every factor
+    the whole market would make each call scan the full dataset — at
+    whole-market size (5,565 symbols, 2.1M observations) that is quadratic and
+    unusable, and it is also the wrong statement of what a factor may read.
+    """
     registry = build_registry(factor_configs)
     # The registry fixes the order once, so every symbol is measured by the
     # same factors in the same sequence.
     factors = [registry.get(name) for name in registry.names()]
+    index = DatasetIndex(outcome.bars)
 
     results: list[FactorResult] = []
     for symbol in symbols_of(outcome.bars):
         results.extend(
             factor.compute(
-                FactorContext(symbol=symbol, as_of=as_of, dataset=outcome.bars)
+                FactorContext(
+                    symbol=symbol, as_of=as_of, dataset=index.for_symbol(symbol)
+                )
             )
             for factor in factors
         )
     return tuple(results)
+
+
+def _group_by_symbol[T](items: Sequence[T]) -> dict[str, tuple[T, ...]]:
+    """Index records by their symbol, keeping the original order."""
+    grouped: dict[str, list[T]] = {}
+    for item in items:
+        grouped.setdefault(item.symbol, []).append(item)  # type: ignore[attr-defined]
+    return {symbol: tuple(found) for symbol, found in grouped.items()}
 
 
 def universe_stage(
