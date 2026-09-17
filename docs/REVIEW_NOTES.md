@@ -380,3 +380,77 @@ uv run astock sync --as-of 2026-09-17 --valuation --symbol 600519.SH --symbol 00
 
 同时确认了时点规则在真实环境下会正确"拒绝"数据：以日线只到 09-04 的目录在 09-17
 运行时，Universe 为 0（那天没有行情），而估值文件在 09-04 之前也不可见。
+
+## 十二、核心执行链硬化（2026-09-17，本轮）
+
+目标不是加功能，而是把"能跑"变成"只有一个真相"。以下是本轮的裁决与实测结果。
+
+### 12.1 删除了哪些重复的生产执行链
+
+| 被删除 | 原因 |
+| --- | --- |
+| `pipelines/first_slice.py` | 与 daily scan 各有一套组装逻辑，同一个项目里有两个真相 |
+| `pipelines/daily_scan.py` | 同上；`scan` 现在只走唯一分析执行链 |
+| `strategies/weighted.py` | 通用加权扫描器；策略边界改为各自的类 + 共享 scorer |
+| `tests/integration/test_first_slice.py`、`test_daily_scan.py` | 随入口一起退休，断言迁移进 `test_analysis_pipeline.py` |
+
+`strategies/eligibility.py` 保留但**没有任何生产引用**：它的用途是"某策略只有资格
+规则、还没有已评审权重"时的可登记实现。若所有者认为这条退路不需要，删掉它与其测试
+即可。
+
+### 12.2 谁拥有正式 Snapshot 写权限
+
+**只有 `astock daily`。** `factors compute`、`strategy run`、`universe build` 是纯计算，
+`scan` 是 non-persistent preview；四者都不创建、也不覆盖任何正式快照。这条规则由
+`tests/integration/test_command_snapshot_ownership.py` 钉住，其中用"哨兵快照"排除
+"内容恰好相同"的假通过。
+
+### 12.3 Snapshot 冲突行为
+
+同一 `(kind, as_of)`：不存在 → 写入；内容完全一致 → 幂等成功（不重写文件）；内容不同
+→ `SnapshotConflictError`，本阶段不提供隐式覆盖。JSON 与 DuckDB 两个 Store 对"内容是否
+相同"给同一个答案（比较规范化 payload，而不是文件缩进）。冲突在管线里表现为当前阶段
+`FAILED` + Job Manifest 记录具体 kind/date，并且**停止**后续阶段。
+
+### 12.4 哪些策略已有独立 Scanner 边界
+
+`momentum` / `growth` / `quality` / `dividend` / `value` / `garp` 各有一类，
+`registry.IMPLEMENTATIONS` 是显式映射；`industry_trend` 仍无实现并报错说明等待行业数据。
+共享的只有 `strategies/percentile_scorer.py` 的算术部分。行为不变的证据是
+`tests/fixtures/strategy_parity.json`：期望值由**重构前**的 commit `7d58d4c` 在固定合成
+横截面上生成，重构后用同一份输入逐位比对（改一个常数就会红，已实测）。
+
+### 12.5 Candidate 为什么保持 BLOCKED
+
+两个独立原因，都在 `astock daily` 的输出里逐条写明：
+
+1. `DETECT_REGIME` / `MARKET_VALIDATE` / `RUN_SIGNALS` 没有实现（阈值 `Deferred`），而
+   Candidate 的定义要求这三层已经表过态；
+2. 入选规则本身（Candidate Qualification）尚未批准——旧规则"eligible 且有分数 → WATCH"
+   已删除，因为它把"这个策略有输入"当成了产品结论。
+
+替代物是一个显式边界：`CandidatePolicy` Protocol + `CandidateQualification`；
+没有批准的 policy 时 `candidate_stage()` 抛 `CandidatePolicyNotConfigured`，管线记
+`BLOCKED`。四个待选方案写在 `docs/ROADMAP.md` 第一节，Agent 未作选择。
+
+### 12.6 实测结果（本轮，非引用历史记录）
+
+| 检查 | 命令 | 结果 |
+| --- | --- | --- |
+| 测试 | `uv run pytest` | **674 passed**，0 failed |
+| Lint | `uv run ruff check .` | exit 0（All checks passed） |
+| 格式 | `uv run ruff format --check .` | exit 0（162 files already formatted） |
+| 类型 | `uv run mypy` | exit 0（85 source files） |
+| CLI 冒烟 | `doctor` / `factors compute` / `strategy run` / `scan` / `daily --allow-incomplete` | 前四条不写快照（实测文件数 0），`daily` 写出 FACTOR/UNIVERSE/STRATEGY + Job Manifest |
+
+### 12.7 仍等待项目所有者决定
+
+1. **Candidate Qualification**：方案 A 绝对规则 / B 每策略 percentile / C 混合 / D 策略
+   只产出 ResearchResult 再由独立 policy 汇总（批准前需要全市场数量、策略分布、行业
+   集中度、头部与边界样本、方案间重合度）。
+2. **Growth 极值稳健化**：榜首 `net_profit_parent_yoy` 达 71528%，百分位把 3000% 与
+   70000% 压成相邻名次。
+3. **Dividend payout shape**：榜首支付率 1950% / 274%，线性加权把 1950% 与 90% 同等看待。
+4. **PEG 处理规则**：源站值域 83–1503（常见口径 0–5）且出现负值。
+5. **Industry Trend 行业打分口径**：行业侧指标与"行业→个股"映射的权重。
+6. **Market Regime / Market Validation / Signal 阈值**：三个模块继续 `Deferred / BLOCKED`。

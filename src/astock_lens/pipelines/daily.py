@@ -94,9 +94,11 @@ BLOCKED_REASONS: dict[JobStage, str] = {
     ),
 }
 
+# 缺失的快照不是"今天没数据"：它的生产阶段被上面的 BLOCKED 挡住，而写一份占位
+# 快照等于伪造一个没人做过的判定。
 MISSING_SNAPSHOT_REASON = (
-    "it has no producer: DETECT_REGIME is blocked, and a regime snapshot "
-    "without a detector would be a fabricated verdict"
+    "a missing snapshot has no producer: its stage is blocked above, and a "
+    "placeholder would be a fabricated verdict"
 )
 
 # A stage whose inputs are produced by a stage that has no implementation yet is

@@ -4,14 +4,20 @@
 每完成一项就勾掉并补上提交号；每次出现新的未决事项，先记到这里或
 `docs/REVIEW_NOTES.md`，不要留在对话里。
 
-**状态快照（2026-09-17，`main` = `8c79288`，604 tests 全绿）**
+**状态快照（2026-09-17 核心执行链硬化后，`main` = `d964422`，674 tests 全绿）**
+
+本轮只做执行链硬化、不加功能：唯一分析执行链收敛，`daily` 成为唯一正式 Snapshot writer，
+同日快照拒绝静默覆盖，Candidate 回到 Market/Signal 之后并按规则 `BLOCKED`，六个策略各自
+独立成类（详见 `docs/REVIEW_NOTES.md` 第十二节与第七节下方的逐项提交号）。
 
 | 层 | 现状 |
 | --- | --- |
 | 数据源 | AkShare（名单/日线）、WeStock（三大表，带公告日）、neodata（估值/行业/语义）三个 Provider 全部接入 |
 | 落地 | 财报（按 `code+EndDate` 合并）、名单/日线（按 `symbol[+trade_date]`）、neodata（按取数日一天一文件） |
 | 因子 | 24 个配置（技术/流动性 + 基本面 + 估值） |
-| 策略 | 7 个配置，**6 个在打分**（等权，均已评审），1 个待行业数据 |
+| 策略 | 7 个配置，**6 个在打分**（等权，均已评审，各自独立 Scanner 类），1 个待行业数据 |
+| 执行链 | 唯一分析执行链 `pipelines/analysis.py`；正式快照只有 `astock daily` 能写 |
+| 候选 | `BUILD_CANDIDATES` 保持 `BLOCKED`：入选规则未批准 + Market/Signal 未实现 |
 | 接口 | CLI 10 条命令；API 5 个路由；Web 只有 `web/README.md` |
 
 ---
