@@ -63,6 +63,7 @@ V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学�
 | Growth / Quality / Dividend 三个 Scanner **已按等权打分**（2026-09-17 评审通过）；极值稳健化与分红支付率形状仍待定 | Value / GARP（缺估值口径）、Industry Trend（缺行业数据） |
 | 全市场财报同步已验证（5,576 只 × 三大表，37 分钟，缺口 4–6 只且有名有姓） | AkShare 全市场日线（5564 只 × 全history，尚未跑过） |
 | 评分机器（`WeightedPercentileScanner`，支持极性）+ 权重评审工具（真实全市场数据） | **权重本身仍是 `PENDING REVIEW`**——等你定数字 |
+| neodata 一等 Provider（估值 / 行业 / 单季财报查询模板、批量、缺口补抓、凭证状态进 doctor） | 估值与行业数据的归一化层、Value/GARP/Industry Trend 三个 Scanner |
 | Job Run 记录与 Manifest（每阶段独立可重跑）、`astock daily`；CLI `sync` / `stock` / `watch` / `research` / `strategy run`；API `/health` `/universe` `/factors` `/candidates` `/watchlist` | |
 | 独立 Artifact Validator（快照 + Job Manifest，不导入生产代码） | |
 
@@ -155,6 +156,28 @@ uv run python scripts/record_westock_fixture.py   # 需要时重录契约 fixtur
 ```
 
 `neodata`（自然语言语义检索）留在研究侧，只经 `ResearchRequest` / `DeepResearchAdapter` 使用：它逐标的、输出渲染后的 Markdown、凭证 12 小时有效且只能由 WorkBuddy 平台刷新，不适合做批量因子源。
+
+> 2026-09-17 修订：上面这句已被实测推翻。neodata **是一等 Provider**，承担估值、行业与语义三类主数据，并作为财报的交叉验证源；它不做标的枚举，查询措辞固化成模板。详见设计补遗 §24.1 与 `docs/REVIEW_NOTES.md` 第九节。
+
+### 语义数据源（neodata，2026-09-17）
+
+```bash
+uv run astock doctor                    # provider neodata [ok] / [unavailable]
+export ASTOCK_NEODATA_TOKEN_FILE=/path/to/.neodata_token   # 可选
+```
+
+实测能拿到什么（2026-09-17）：
+
+| 数据 | 内容 |
+| --- | --- |
+| 估值 | 滚动 PE/PB、**历史分位**（茅台 PE 分位 3.39%）、**相对行业估值标签**、逐日 PE/PB/PS/市现率/**股息率**/EV/**PEG** |
+| 行业 | 板块估值 + **完整成分股明细**（总市值、流通市值、PE TTM、主力净流入、换手率） |
+| 单季财报 | 一次 8 个季度，单季口径，且**历史行带 `（最新调整）` 标记**——原始公告日与调整日都可见 |
+| 语义 | 主营构成（分业务/地域/产品 + 同比）、供应链、业绩会纪要 |
+
+三条必须知道的限制（已写进 Provider 与测试）：**意图匹配**决定能否取到数据（未命中返回 `1001`）；**批量回答是部分的**——请求 3 只时利润表只回 2 只、估值只回 1 只，而 `entity` 会谎报"命中 3 只"，因此覆盖按内容判定并补抓一次；**不做标的枚举**（名单仍由 AkShare 提供）。
+
+凭证 12 小时有效，v1.6.0 起缓存在插件目录内；`astock doctor` 会报告状态与刷新方式，过期时会直接提示。
 
 ### 全市场财报刷新（季度任务）
 
