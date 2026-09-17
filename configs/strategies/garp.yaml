@@ -2,6 +2,14 @@ id: garp
 enabled: true
 version: v1
 description: Growth quality versus valuation, reusing Growth output.
+# GARP 复用 Growth 的成长维度，再叠加"成长与价格是否匹配"：PEG 与历史估值分位，
+# 并用 ROE 守住质量下限。同样**不写 weights**：评分口径待评审，现在只判资格。
+required_factors:
+  - peg
+  - pe_percentile
+  - revenue_cagr_3y
+  - net_profit_parent_cagr_3y
+  - roe_ttm
 dimensions:
   - PE to growth
   - PEG

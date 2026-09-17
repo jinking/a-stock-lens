@@ -55,28 +55,29 @@ def test_four_scanners_run_and_three_report_what_they_wait_for() -> None:
     assert set(IMPLEMENTATIONS) == {"momentum"}
     assert {item.config.id for item in load_scanners(CONFIGS)} == {
         "dividend",
+        "garp",
         "growth",
         "momentum",
         "quality",
+        "value",
     }
-    assert set(unimplemented_scanners(CONFIGS)) == {"garp", "value", "industry_trend"}
+    # 估值数据接入后 Value 与 GARP 有了要求；只剩 Industry Trend 等行业数据。
+    assert set(unimplemented_scanners(CONFIGS)) == {"industry_trend"}
 
 
 def test_the_blocked_scanners_name_a_missing_input() -> None:
     reasons = dict(unimplemented_reasons(CONFIGS))
 
-    assert "valuation factors" in reasons["value"]
-    assert "valuation" in reasons["garp"]
     assert "industry data" in reasons["industry_trend"]
 
 
 def test_a_blocked_scanner_says_why_when_it_is_asked_to_run() -> None:
     with pytest.raises(StrategyNotImplementedError) as raised:
-        build_scanner(_config("value"))
+        build_scanner(_config("industry_trend"))
 
     message = str(raised.value)
     assert "no implementation" in message
-    assert "share-count" in message
+    assert "industry data" in message
 
 
 def test_the_built_scanners_bind_to_the_implementation_their_config_needs() -> None:
@@ -87,6 +88,9 @@ def test_the_built_scanners_bind_to_the_implementation_their_config_needs() -> N
         # 权重已于 2026-09-17 评审通过，因此这三个走打分实现。
         assert isinstance(loaded[strategy_id], WeightedPercentileScanner)
         assert loaded[strategy_id].required_factors()
+    for strategy_id in ("value", "garp"):
+        # 要求已具备、权重尚未评审，因此只判资格、不打分。
+        assert isinstance(loaded[strategy_id], EligibilityScanner)
 
 
 def test_a_configuration_without_reviewed_weights_judges_eligibility_only() -> None:
@@ -118,9 +122,11 @@ def test_loading_skips_a_blocked_scanner_instead_of_failing() -> None:
     """A blocked scanner must not stop the scanners that do run."""
     assert {item.config.id for item in load_scanners(CONFIGS)} == {
         "dividend",
+        "garp",
         "growth",
         "momentum",
         "quality",
+        "value",
     }
 
 

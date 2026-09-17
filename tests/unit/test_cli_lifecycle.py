@@ -336,11 +336,24 @@ def test_strategy_run_prints_one_ranking_for_the_named_scanner(
 def test_strategy_run_refuses_a_scanner_that_has_no_implementation(
     local_tmp: Path,
 ) -> None:
-    result = _invoke(local_tmp, "strategy", "run", "value", "--as-of", DAY)
+    result = _invoke(local_tmp, "strategy", "run", "industry_trend", "--as-of", DAY)
 
     assert result.exit_code == 1
-    assert "value" in result.output
+    assert "industry_trend" in result.output
     assert "no implementation" in result.output
+
+
+def test_strategy_run_reports_eligibility_for_a_scanner_without_reviewed_weights(
+    local_tmp: Path,
+) -> None:
+    """Value 的估值数据接进来了，但权重尚未评审，因此只给资格判定。"""
+    result = _invoke(local_tmp, "strategy", "run", "value", "--as-of", DAY)
+
+    assert result.exit_code == 0, result.output
+    assert "strategy value" in result.stdout
+    # 这个 fixture 里没有任何估值数据，因此全部标为不合格，且没有分数。
+    assert "no score" in result.stdout
+    assert "not eligible" in result.stdout
 
 
 def test_strategy_run_refuses_an_unknown_id(local_tmp: Path) -> None:

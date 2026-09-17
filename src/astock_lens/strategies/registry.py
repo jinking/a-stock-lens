@@ -26,15 +26,6 @@ IMPLEMENTATIONS: Mapping[str, Callable[[StrategyConfig], StrategyPlugin]] = {
 # input rather than a missing opinion, so nobody reads "unimplemented" as a
 # data outage.
 UNIMPLEMENTED_REASONS: Mapping[str, str] = {
-    "value": (
-        "it needs valuation factors (PE/PB/PS, FCF yield, historical valuation "
-        "percentile, industry-relative valuation); those need a reviewed "
-        "share-count and market-cap convention, and none exists yet"
-    ),
-    "garp": (
-        "it reuses the Growth output and adds a valuation comparison, so its "
-        "valuation half is blocked for the same reason as value"
-    ),
     "industry_trend": (
         "it scores an industry first and then maps that score onto stocks; no "
         "industry data (sector membership, industry aggregates) has been landed"
