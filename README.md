@@ -240,7 +240,7 @@ uv run astock strategy run quality --as-of 2026-09-04
 | --- | --- |
 | `momentum` | 有排名与分数（权重是等权草案，标注 `PENDING REVIEW`） |
 | `growth` / `quality` / `dividend` | **只给资格判定，不给分数**：设计把权重与评分阈值列为 `Deferred`（`docs/STRATEGY_SYSTEM.md` §5），打分会是没人评审过的判断 |
-| `value` / `garp` | 未实现：需要估值类因子（PE/PB/PS、FCF yield、历史估值分位、行业相对估值），而它们需要先评审股本/市值口径 |
+| `value` / `garp` | **资格判定**：估值因子已接入（PE/PB/PS、市现率、PEG、历史分位）；Value 评审已完成（三套权重 top-8 重合 75%），**权重待批准**；GARP 评审待跑 |
 | `industry_trend` | 未实现：需要行业数据（板块成分、行业汇总），目前没有落地 |
 
 资格判定的含义是"证据是否完整到足以让这个 Scanner 考虑它"，可证伪且有用。实测（3 只有财报 + 8 只没有）：
