@@ -17,7 +17,7 @@ from astock_lens.domain.enums import JobStage, SnapshotKind
 from astock_lens.factors.config import load_factor_config
 from astock_lens.jobs.models import JobStatus, StageOutcome
 from astock_lens.jobs.store import JsonJobStore
-from astock_lens.pipelines.daily import DailyRunResult, run_daily
+from astock_lens.pipelines.daily import EXECUTION_ORDER, DailyRunResult, run_daily
 from astock_lens.strategies.registry import load_scanners
 from astock_lens.universe.config import load_universe_config
 
@@ -44,6 +44,25 @@ BLOCKED = (
     JobStage.MARKET_VALIDATE,
     JobStage.RUN_SIGNALS,
     JobStage.UPDATE_WATCHLIST,
+)
+
+# The order the domain requires: a Candidate is the object the market and signal
+# layers have already spoken about, so building candidates before them would
+# publish a partial result under a name that promises a complete one.
+# `COMPUTE_FACTORS → BUILD_UNIVERSE` is the one reviewed deviation: the
+# Universe's liquidity rule consumes the `avg_amount_20d` factor.
+CANONICAL_ORDER = (
+    JobStage.SYNC_DATA,
+    JobStage.NORMALIZE,
+    JobStage.COMPUTE_FACTORS,
+    JobStage.BUILD_UNIVERSE,
+    JobStage.RUN_STRATEGIES,
+    JobStage.DETECT_REGIME,
+    JobStage.MARKET_VALIDATE,
+    JobStage.RUN_SIGNALS,
+    JobStage.BUILD_CANDIDATES,
+    JobStage.UPDATE_WATCHLIST,
+    JobStage.GENERATE_DAILY_SNAPSHOT,
 )
 
 
@@ -87,6 +106,11 @@ def test_every_named_stage_gets_a_job_run(local_tmp: Path) -> None:
         JobStage.BUILD_UNIVERSE,
         JobStage.RUN_STRATEGIES,
     ]
+
+
+def test_execution_order_puts_candidates_after_market_and_signals() -> None:
+    """Candidate 必须排在 Market Regime / Market Validation / Signal 之后。"""
+    assert EXECUTION_ORDER == CANONICAL_ORDER
 
 
 def test_the_implemented_stages_succeed_and_count_their_rows(local_tmp: Path) -> None:

@@ -1,0 +1,167 @@
+"""正式快照的写入权只属于 `daily`。
+
+本文件钉住两个 P0 问题：
+
+1. `astock factors compute` 走的是 first slice 那条旧链路，它会写 FACTOR 与
+   CANDIDATE 两份正式快照。于是"只算因子"的只读命令会覆盖当天已经落好的正式
+   候选结果——一个哨兵值就能证明这件事。
+2. `astock scan` 同样会写正式快照。它只跑一个 Scanner，却能让当天由 `daily`
+   写出的完整候选结果消失，读者无从知道哪一份才是当天的正式产物。
+
+目标行为写在计划 `a-stock-lens-core-hardening-plan.md` Task 1 / Task 3：
+`factors compute` 与 `strategy run` 是纯计算，`scan` 是预览，`daily` 是唯一
+正式 Snapshot writer。测试先失败，实现随后跟上。
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+
+from click.testing import Result
+from typer.testing import CliRunner
+
+from astock_lens.cli.app import app
+from astock_lens.domain.enums import SnapshotKind
+
+ROOT = Path(__file__).resolve().parents[2]
+CSV_ROOT = ROOT / "tests" / "fixtures" / "csv"
+DAY = "2026-09-04"
+LONG_DATASET = "daily_bars_long"
+
+CANDIDATE_JSON = Path(SnapshotKind.CANDIDATE.value) / f"{DAY}.json"
+
+SENTINEL_MARKER = "sentinel-candidate-written-by-another-run"
+
+
+def _snapshot_root(local_tmp: Path) -> Path:
+    return local_tmp / "snapshots"
+
+
+def _invoke(snapshot_root: Path, *args: str) -> Result:
+    """Run the CLI against the fixture data and a scratch snapshot root."""
+    return CliRunner().invoke(
+        app,
+        list(args),
+        env={
+            "ASTOCK_CSV_ROOT": str(CSV_ROOT),
+            "ASTOCK_SNAPSHOT_ROOT": str(snapshot_root),
+            "ASTOCK_JOB_ROOT": str(snapshot_root.parent / "jobs"),
+            "ASTOCK_WATCHLIST_ROOT": str(snapshot_root.parent / "watchlist"),
+            "ASTOCK_DATASET": LONG_DATASET,
+        },
+    )
+
+
+def _write_sentinel(snapshot_root: Path) -> str:
+    """落一份当天已经存在的正式 CANDIDATE，内容一眼可辨。"""
+    path = snapshot_root / CANDIDATE_JSON
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "kind": SnapshotKind.CANDIDATE.value,
+        "as_of": datetime(2026, 9, 4, 15, 0, tzinfo=UTC).isoformat(),
+        "records": [{"symbol": "600519.SH", "marker": SENTINEL_MARKER}],
+    }
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    return path.read_text(encoding="utf-8")
+
+
+def _candidate_text(snapshot_root: Path) -> str:
+    return (snapshot_root / CANDIDATE_JSON).read_text(encoding="utf-8")
+
+
+def _written_snapshots(snapshot_root: Path) -> tuple[str, ...]:
+    """每份正式快照文件，按相对路径排序。"""
+    if not snapshot_root.is_dir():
+        return ()
+    return tuple(
+        sorted(
+            str(path.relative_to(snapshot_root))
+            for path in snapshot_root.rglob("*.json")
+        )
+    )
+
+
+# --- factors compute ---------------------------------------------------------
+
+
+def test_factors_compute_does_not_touch_the_formal_candidate_snapshot(
+    local_tmp: Path,
+) -> None:
+    """计算因子不是一次正式运行，不能重写当天的正式候选结果。"""
+    root = _snapshot_root(local_tmp)
+    sentinel = _write_sentinel(root)
+
+    result = _invoke(root, "factors", "compute", "--as-of", DAY)
+
+    assert result.exit_code == 0, result.output
+    assert _candidate_text(root) == sentinel
+
+
+def test_factors_compute_writes_no_formal_snapshot_at_all(local_tmp: Path) -> None:
+    """目标状态：`factors compute` 只计算，不落任何正式 Snapshot。"""
+    root = _snapshot_root(local_tmp)
+
+    result = _invoke(root, "factors", "compute", "--as-of", DAY)
+
+    assert result.exit_code == 0, result.output
+    assert _written_snapshots(root) == ()
+
+
+# --- strategy run ------------------------------------------------------------
+
+
+def test_strategy_run_writes_no_formal_snapshot(local_tmp: Path) -> None:
+    """跑一个 Scanner 是纯计算：它没有资格写当天的 STRATEGY/CANDIDATE。"""
+    root = _snapshot_root(local_tmp)
+
+    result = _invoke(root, "strategy", "run", "momentum", "--as-of", DAY)
+
+    assert result.exit_code == 0, result.output
+    assert _written_snapshots(root) == ()
+
+
+# --- scan --------------------------------------------------------------------
+
+
+def test_scan_does_not_overwrite_the_daily_candidate_snapshot(local_tmp: Path) -> None:
+    """`daily` 写完的正式候选结果，不能被一次预览覆盖。"""
+    root = _snapshot_root(local_tmp)
+
+    daily = _invoke(root, "daily", "--as-of", DAY, "--allow-incomplete")
+    assert daily.exit_code == 0, daily.output
+    assert (root / CANDIDATE_JSON).is_file()
+    formal = _candidate_text(root)
+
+    after = _invoke(root, "scan", "--as-of", DAY)
+
+    assert after.exit_code == 0, after.output
+    assert _candidate_text(root) == formal
+
+
+def test_scan_does_not_replace_a_formal_candidate_snapshot(local_tmp: Path) -> None:
+    """哨兵法：只要 `scan` 真的写了正式快照，这份哨兵就不可能是原样。
+
+    本夹具上预览与 `daily` 恰好算出同样的候选内容，所以"内容没变"不能证明
+    任何事。哨兵是任何人都不会产出的内容，它还在原地就意味着没人动过这个文件。
+    """
+    root = _snapshot_root(local_tmp)
+    sentinel = _write_sentinel(root)
+
+    result = _invoke(root, "scan", "--as-of", DAY)
+
+    assert result.exit_code == 0, result.output
+    assert _candidate_text(root) == sentinel
+
+
+def test_scan_writes_no_formal_snapshot_at_all(local_tmp: Path) -> None:
+    """目标状态：`scan` 是 non-persistent preview。"""
+    root = _snapshot_root(local_tmp)
+
+    result = _invoke(root, "scan", "--as-of", DAY)
+
+    assert result.exit_code == 0, result.output
+    assert _written_snapshots(root) == ()

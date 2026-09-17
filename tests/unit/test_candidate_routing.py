@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 import pytest
 
 from astock_lens.candidates.builder import CandidateBuilder
-from astock_lens.candidates.routing import route_next_action
+from astock_lens.candidates.routing import route_candidate_actions, route_next_action
 from astock_lens.domain.enums import NextAction
 from astock_lens.domain.models import SnapshotLineage
 from astock_lens.strategies.contracts import StrategyResult
@@ -92,3 +92,16 @@ def test_routing_is_pure() -> None:
 @pytest.mark.parametrize("score", [0.0, 0.001, 50.0, 99.999, 100.0])
 def test_every_in_range_score_is_watched(score: float) -> None:
     assert route_next_action(_result(eligible=True, score=score)) is NextAction.WATCH
+
+
+def test_current_candidate_router_treats_any_score_as_a_watch_decision() -> None:
+    """刻画现状，不是给它背书：这条规则正是本阶段要移除的东西。
+
+    现在只要某个 Scanner 给出 eligible 且带分数的结果，整只股票就被判成
+    `WATCH`——哪怕分数是 0.0，也就是全市场横截面的最底部。"有分数"只说明这个
+    策略拿到了输入，它不是任何一个被批准过的入选规则。留着这条测试，是为了让
+    移除它的理由有据可查；在显式 Candidate Policy 出现之前，它必须一直成立。
+    """
+    result = _result(eligible=True, score=0.0)
+
+    assert route_candidate_actions((result,)) is NextAction.WATCH
