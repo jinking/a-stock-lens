@@ -23,7 +23,10 @@ from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from astock_lens.data.contracts import NormalizedDataset
+from astock_lens.data.contracts import FetchRequest, NormalizedDataset
+from astock_lens.data.normalize.valuations import NeodataValuationNormalizer
+from astock_lens.data.providers.neodata import NeodataProvider
+from astock_lens.domain.models import ValuationObservation
 from astock_lens.factors.builtin import build_factor
 from astock_lens.factors.config import FactorConfig, load_factor_config
 from astock_lens.factors.contracts import FactorContext, FactorResult
@@ -50,6 +53,79 @@ class Candidate:
 # answers "what would change if we believed this emphasis?", so the differences
 # are attributable rather than arbitrary.
 CANDIDATES: Mapping[str, tuple[Candidate, ...]] = {
+    "value": (
+        Candidate(
+            "equal",
+            {
+                "pe_ttm": -1.0,
+                "pb": -1.0,
+                "ps_ttm": -1.0,
+                "pe_percentile": -1.0,
+                "pcf_operating_ttm": -1.0,
+                "roe_ttm": 1.0,
+            },
+            "中性基线：便宜程度（PE/PB/PS/市现率/历史分位）与质量等权",
+        ),
+        Candidate(
+            "cheapness_first",
+            {
+                "pe_ttm": -1.5,
+                "pb": -1.0,
+                "ps_ttm": -0.5,
+                "pe_percentile": -1.5,
+                "pcf_operating_ttm": -1.0,
+                "roe_ttm": 0.5,
+            },
+            "便宜优先：PE 与自身历史分位为主，质量只作否决线",
+        ),
+        Candidate(
+            "quality_bargain",
+            {
+                "pe_ttm": -1.0,
+                "pb": -0.5,
+                "ps_ttm": -0.5,
+                "pe_percentile": -1.0,
+                "pcf_operating_ttm": -1.0,
+                "roe_ttm": 1.5,
+            },
+            "便宜但要能赚钱：ROE 加重，避免只捡便宜货",
+        ),
+    ),
+    "garp": (
+        Candidate(
+            "equal",
+            {
+                "peg": -1.0,
+                "pe_percentile": -1.0,
+                "revenue_cagr_3y": 1.0,
+                "net_profit_parent_cagr_3y": 1.0,
+                "roe_ttm": 1.0,
+            },
+            "中性基线：成长、估值匹配（PEG/分位）与质量等权",
+        ),
+        Candidate(
+            "growth_first",
+            {
+                "peg": -1.0,
+                "pe_percentile": -0.5,
+                "revenue_cagr_3y": 1.5,
+                "net_profit_parent_cagr_3y": 1.5,
+                "roe_ttm": 0.5,
+            },
+            "成长优先：3 年复合增速为主，估值分位只作约束",
+        ),
+        Candidate(
+            "valuation_match_first",
+            {
+                "peg": -1.5,
+                "pe_percentile": -1.5,
+                "revenue_cagr_3y": 0.5,
+                "net_profit_parent_cagr_3y": 0.5,
+                "roe_ttm": 1.0,
+            },
+            "匹配优先：PEG 与历史分位为主，成长只要不差即可",
+        ),
+    ),
     "quality": (
         Candidate(
             "equal",
@@ -145,6 +221,15 @@ def main() -> int:
     parser.add_argument("--strategy", default="all")
     parser.add_argument("--top", default=15, type=int)
     parser.add_argument("--quintile", default=0.2, type=float)
+    parser.add_argument(
+        "--valuation-sample",
+        default=0,
+        type=int,
+        help=(
+            "取这么多只标的的真实估值（等距抽样、每批 10 只）。"
+            "全市场估值落地尚未接入，评审因此先用抽样数据。"
+        ),
+    )
     args = parser.parse_args()
 
     as_of = _as_of(args.as_of)
@@ -160,8 +245,24 @@ def main() -> int:
         print("no observations landed under this root; run `astock sync --financials`")
         return 1
 
+    valuations = ()
+    if args.valuation_sample:
+        symbols = _sample(
+            sorted({item.symbol for item in inputs.observations}),
+            args.valuation_sample,
+        )
+        valuations = _fetch_valuations(symbols, as_of)
+        print(
+            f"估值抽样：请求 {len(symbols)} 只，取到 "
+            f"{len({item.symbol for item in valuations})} 只、"
+            f"{len(valuations):,} 条观测"
+        )
+
     dataset = NormalizedDataset(
-        dataset="financials", as_of=as_of, observations=inputs.observations
+        dataset="financials",
+        as_of=as_of,
+        observations=inputs.observations,
+        valuations=valuations,
     )
     factors = _factor_cache(dataset, as_of)
 
@@ -185,6 +286,7 @@ def _review(
     quintile: float,
 ) -> None:
     """Print what each candidate would select, and how they differ."""
+    _evidence_availability(config, contexts)
     selections: dict[str, tuple[StrategyResult, ...]] = {}
     for candidate in CANDIDATES[config.id]:
         weighted = config.model_copy(update={"weights": candidate.weights})
@@ -214,6 +316,27 @@ def _review(
             f"\n   top-{top} overlap between {names[0]!r} and {name!r}: "
             f"{len(overlap)}/{top} ({len(overlap) / top:.0%})"
         )
+
+
+def _evidence_availability(
+    config: StrategyConfig, contexts: Sequence[StrategyContext]
+) -> None:
+    """逐因子报告可用性：资格为 0 时，第一个要看的就是"哪一项永远缺"。
+
+    这条诊断来自一次真实的空结果——某因子在源站整列为 `--`，导致资格恒为假，
+    而当时的输出只有"scored: 0"，看不出是数据缺还是权重差。
+    """
+    print("   证据可用性（VALUE/其他）：")
+    for name in config.required_factors:
+        counts: dict[str, int] = {}
+        for context in contexts:
+            status = next(
+                (item.status.value for item in context.factors if item.factor == name),
+                "缺失",
+            )
+            counts[status] = counts.get(status, 0) + 1
+        detail = ", ".join(f"{key} {value}" for key, value in sorted(counts.items()))
+        print(f"     {name:24s} {detail}")
 
 
 def _phenotype(
@@ -317,6 +440,50 @@ def _as_of(value: str | None) -> datetime:
     shanghai = ZoneInfo("Asia/Shanghai")
     day: date = date.fromisoformat(value) if value else datetime.now(shanghai).date()
     return datetime(day.year, day.month, day.day, 15, 0, tzinfo=shanghai)
+
+
+def _sample(symbols: Sequence[str], size: int) -> tuple[str, ...]:
+    """等距抽样：覆盖整个名单，而不是只取前 N 只（后者会集中在一个交易所/板块）。"""
+    if size >= len(symbols):
+        return tuple(symbols)
+    stride = len(symbols) / size
+    return tuple(symbols[int(index * stride)] for index in range(size))
+
+
+def _fetch_valuations(
+    symbols: Sequence[str], as_of: datetime
+) -> tuple[ValuationObservation, ...]:
+    """按批取真实估值并归一化。
+
+    全市场估值落地（按板块迭代）尚未接入，评审先用抽样证明权重选择的效果；
+    抽样会打印命中数，避免把"样本小"误读成"数据没有"。
+
+    **逐标的取。** 实测（2026-09-17）：10 只一批的估值查询只回 1–2 只
+    （120 只抽样只回 23 只），而单标的查询稳定返回。财报查询的批量覆盖是 2/3，
+    估值不是——两者的批量能力不同，因此这里按 1 只一批调用。
+    """
+    provider = NeodataProvider()
+    health = provider.health()
+    if not health.healthy:
+        print(f"neodata 不可用：{health.message}")
+        return ()
+
+    normalizer = NeodataValuationNormalizer()
+    collected: list[ValuationObservation] = []
+    missing: list[str] = []
+    for index, symbol in enumerate(symbols, start=1):
+        raw = provider.fetch(
+            FetchRequest(dataset="valuation", as_of=as_of, symbols=(symbol,))
+        )
+        if raw.payload is None or raw.missing_symbols:
+            missing.append(symbol)
+            continue
+        collected.extend(normalizer.normalize(raw, as_of=as_of).observations)
+        if index % 10 == 0:
+            print(f"  …已取 {index}/{len(symbols)} 只")
+    if missing:
+        print(f"  源站未返回的标的 {len(missing)} 只（计入缺失，不补零）")
+    return tuple(collected)
 
 
 if __name__ == "__main__":

@@ -12,9 +12,13 @@ required_factors:
   - pb
   - ps_ttm
   - pe_percentile
-  - dividend_yield_ttm
   - pcf_operating_ttm
   - roe_ttm
+# 为什么没有股息率：neodata 的「滚动股息率」列在实测抽样（40 只）里**全部为空**，
+# 把它列为必需项会让 Value 永久不合格——那读起来像"市场没有便宜货"，
+# 实际是"这个数据源这一列没数据"。等源站开始给出该列，再加回这里即可。
+# 亏损公司没有 PE/PB：因此要求 PE/PB 会把亏损股挡在 Value 之外，
+# 这与"便宜"通常的语义一致，但也确实是一条判断，记录在此。
 dimensions:
   - PE/PB/PS
   - FCF yield
