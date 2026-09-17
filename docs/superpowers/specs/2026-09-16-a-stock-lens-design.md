@@ -515,35 +515,25 @@ Only when this chain is demonstrably functional should V1 be called complete.
 6. Keep Stock Lens focused on discovery and lifecycle; keep Deep Research focused on evidence-heavy company research.
 7. Keep V1 narrow enough to finish.
 
-## 24. Amendment 2026-09-16 — Data Source Boundary
+## 24. 补遗 2026-09-16 — 数据源边界
 
-**Status:** approved by the project owner in conversation, then recorded here.
+**状态：** 项目所有者在对话中批准，并记录于此。
 
-The archived design package assigned the three deep-research source groups
-(`westock-npm`, `westock-cli`, `neodata`) exclusively to the research side.
-Measurement on 2026-09-16 changed one part of that:
+归档设计包把深研项目的三组数据源（`westock-npm`、`westock-cli`、`neodata`）全部划给研究侧。
+2026-09-16 的实测改变了其中一部分：
 
-- The Tencent WeStock CLI (`westock finance`) is the only tested source that
-  pairs a **report period with a reliable publication date** (`EndDate` +
-  `InfoPublDate`, both required by §5.1) and that supports **batching**
-  (`westock finance sh600000,sz000001`). 100 symbols cost ~11s with full
-  coverage per statement, so a whole-market pass over all three statements is
-  roughly half an hour — a quarterly refresh job rather than part of the daily
-  scan, which is what the §15 incrementality rule asks for anyway.
-  The AkShare/Sina statement endpoints return a `公告日期` that is *not* the
-  original filing date (measured: the FY2025 balance sheet carries
-  `20260815`, while the same period's income statement carries `20260417`),
-  so they cannot carry the point-in-time rule on their own.
-- Therefore **bulk financial statements come from WeStock** and are landed
-  through the ordinary Provider → Raw → Normalized → Quality Gate path.
-  WeStock is invoked as an external command; A-Stock Lens does not import
-  deep-research Python modules and does not read its internal state.
-- **`neodata` keeps its candidate-level role.** It answers natural-language
-  questions with rendered markdown, is queried per entity, and carries a
-  12-hour credential that only the WorkBuddy platform can refresh, so it is
-  not a bulk factor source. It is reached through `ResearchRequest` →
-  `DeepResearchAdapter` like the rest of the research side.
-- AkShare keeps the roles it already holds: the exchange listings (symbol
-  enumeration) and daily bars.
+- 腾讯 WeStock CLI（`westock finance`）是唯一同时满足两个条件的数据源：把**报告期与可靠的
+  公告日期**配成一对（`EndDate` + `InfoPublDate`，§5.1 要求两者），并支持**批量**
+  （`westock finance sh600000,sz000001`）。100 只约 11 秒且返回完整，因此全市场三张表约需
+  半小时——那是季度刷新任务，而不是每日扫描的一部分，这也正是 §15 增量规则想要的结果。
+  AkShare/Sina 三大表返回的 `公告日期` **不是原始公告日**（实测：2025 年报在资产负债表里标
+  `20260815`，而同一报告期在利润表里标 `20260417`），因此它们无法单独承载时点规则。
+- 因此**财务三大表的 bulk 源是 WeStock**，并且仍然走
+  Provider → Raw → Normalized → Quality Gate 这条常规路径。WeStock 以外部命令调用；
+  A-Stock Lens 不导入深研项目的 Python 模块，也不读取它的内部状态。
+- **`neodata` 保持 candidate 级角色。** 它以自然语言提问、以渲染后的 Markdown 作答，
+  逐标的查询，凭证 12 小时有效且只能由 WorkBuddy 平台刷新，因此不适合作为批量因子源。
+  它和其余研究侧能力一样，只经 `ResearchRequest` → `DeepResearchAdapter` 使用。
+- AkShare 保留它已有的两个角色：交易所名单（标的枚举）与日线行情。
 
-Everything else in §3, §4 and §5.2 stands unchanged.
+§3、§4 与 §5.2 的其余内容保持不变。

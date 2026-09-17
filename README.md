@@ -58,9 +58,9 @@ V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学�
 | `DuckDBSnapshotStore` / `DuckDBWatchlistStore` 与 JSON store 同协议互换（`ASTOCK_SNAPSHOT_BACKEND` / `ASTOCK_WATCHLIST_BACKEND`） | |
 | AkShare Provider（腾讯域日线 + 三交易所名单）+ 真实录制契约 fixture | |
 | WeStock CLI Provider（三大表，含 `EndDate` + `InfoPublDate`，批量 100 只 / 11 秒）+ 录制 fixture | 财报的 Normalized / Quality Gate / 基本面因子（下一片） |
-| 财务 Normalized（48 个指标）+ Financial Quality Gate + 观测进入因子上下文 | 基本面因子本身（下一片）、全市场财报同步的限流验证 |
-| 12 个基本面因子（5 个比值 + 7 个指标透传），带时点选择、证据引用与单位 | 估值类因子（需要市值/股本口径评审）、行业适用的豁免规则 |
-| Growth / Quality / Dividend 三个 Scanner 的**资格判定**（打分待权重评审） | Value / GARP（缺估值口径）、Industry Trend（缺行业数据） |
+| 财务 Normalized（49 个指标）+ Financial Quality Gate + 观测进入因子上下文 | 全市场日线落地、估值类指标 |
+| 13 个基本面因子（5 个比值 + 8 个指标透传），带时点选择、证据引用与单位 | 估值类因子（需要市值/股本口径评审）、行业适用的豁免规则 |
+| Growth / Quality / Dividend 三个 Scanner **已按等权打分**（2026-09-17 评审通过）；极值稳健化与分红支付率形状仍待定 | Value / GARP（缺估值口径）、Industry Trend（缺行业数据） |
 | 全市场财报同步已验证（5,576 只 × 三大表，37 分钟，缺口 4–6 只且有名有姓） | AkShare 全市场日线（5564 只 × 全history，尚未跑过） |
 | 评分机器（`WeightedPercentileScanner`，支持极性）+ 权重评审工具（真实全市场数据） | **权重本身仍是 `PENDING REVIEW`**——等你定数字 |
 | Job Run 记录与 Manifest（每阶段独立可重跑）、`astock daily`；CLI `sync` / `stock` / `watch` / `research` / `strategy run`；API `/health` `/universe` `/factors` `/candidates` `/watchlist` | |
@@ -173,7 +173,7 @@ uv run astock sync --as-of 2026-09-16 --statements-only   # 只拉三大表，�
 
 耗时 **37 分钟**（含一次针对缺口的补抓），缺口标的是 `000003.SZ`、`000005.SZ`、`830799.BJ`、`900948.SH` 这类退市/B 股/新三板标的——它们不是"抓失败"，而是源站确实没有当期报表，并且被逐一点名而不是从统计里消失。
 
-随后归一化：**2,133,636 条观测 / 5,565 只标的 / 48 个指标，92 秒，峰值内存约 2.9 GB，0 个阻断问题**（NULL 类问题 97,876 个，多为银行没有毛利率这类真实缺失）。
+随后归一化：**2,133,636 条观测 / 5,565 只标的 / 48 个指标，92 秒，峰值内存约 2.9 GB，0 个阻断问题**（NULL 类问题 97,876 个，多为银行没有毛利率这类真实缺失）。当日晚间新增源站分红支付率指标后为 49 个。
 
 规模上的两点事实：内存 ~2.9 GB 来自一次性物化 213 万个观测对象，是当前最大开销；全市场抓取 + 归一化合计约 40 分钟，因此它是季度任务，不是每日任务的一部分。
 
@@ -231,9 +231,9 @@ dividend: 000001.SZ 合格、300750.SZ 合格、600519.SH 合格
 
 银行在 Growth/Dividend 上合格、在 Quality 上不合格——这正是 6 态缺失词表要表达的区别：不是"数据坏了"，而是"这张报表没有这一行"。
 
-### 权重评审（待你拍板）
+### 权重评审（2026-09-17 已完成）
 
-评分机器已经就绪：一旦 `configs/strategies/<id>.yaml` 里写上 `weights:`，`WeightedPercentileScanner` 立刻开始打分，无需改代码；没写权重就仍只做资格判定。评审工具用真实全市场数据把候选方案的后果摊开：
+评分由配置驱动：`configs/strategies/<id>.yaml` 里写上 `weights:` → `WeightedPercentileScanner` 打分；没写权重 → 仍只做资格判定。评审工具用真实全市场数据把候选方案的后果摊开：
 
 ```bash
 uv run python scripts/review_strategy_weights.py --root /path/to/raw --as-of 2026-09-16
@@ -256,7 +256,16 @@ uv run python scripts/review_strategy_weights.py --root /path/to/raw --as-of 202
 1. **比值在分母塌缩时不可用**。`dividend_payout_ttm` 与 `ocf_to_net_profit` 的分母是 TTM 归母净利润，当它接近 0 时比值爆炸——实测榜首是 `603439.SH` 的支付率 **6407%**、现金流覆盖 **691 倍**，而百分位排名恰好专挑这类公司，与"可持续分红"相反。源站自己发布的年报支付率是正常的（茅台 79.00%、平安银行 27.13%、603439 51.84%），因此可选口径包括：改用源站 `DividendPaidRatio`、或给分母设一个下限（阈值需你确认）、或保留现状并接受噪声。
 2. **Growth 被极端值主导**。榜首的 `revenue_yoy` 高达 1819%、`net_profit_parent_yoy` 达 71528%，而百分位排名让 3000% 与 70000% 的差距被压缩成一个名次——所以换权重也改变不了榜单（88% 重合）。这属于"是否需要稳健化处理"的评审决定。
 
-在你确认之前，三个 Scanner 仍然只给资格判定，不产生任何分数。
+**所有者裁决与执行结果（2026-09-17）**：
+
+1. 三个 Scanner 采用**等权开启打分**（Quality 的 `debt_to_asset` 取负号表示越低越好）。
+2. **Dividend 改用源站 `DividendPaidRatio`**：实测它的年报口径正常（茅台 79.00%、平安银行 27.13%），而 TTM 比值会在分母塌缩时爆炸。原因子保留为证据但不参与排名。
+3. **Growth 暂不做稳健化处理**，该决定保持开放并记录在案。
+
+执行后复跑又发现两点（已记录，其中一条仍待你决定）：
+
+- 极性用实测确认：把支付率取负（"留存优先"）后，dividend 榜首变成支付率 **0.000%** 的公司——即不分红的公司。分红策略必须取正号。
+- 源站的支付率本身也会出现极端值：修复"最近一次带值的观测"语义后，可评分标的从 **734 恢复到 4,171**，但榜首仍有 1950%、274%、271% 的支付率。超过 100% 是真实信号（动用留存收益或特别分红），也正是设计点名的"一次性特别分红""周期顶部假高股息"风险。**当前线性加权把 1950% 与 90% 同等对待**，是否设上限或改成区间偏好（例如偏好某个支付率带）属于形状决策，等你定。
 
 ## 测试与质量检查
 
@@ -273,7 +282,7 @@ uv run mypy
 
 1. **AkShare 全市场落地**：`securities` 名单（5564 只）与全市场日线的批量抓取、限流与断点续跑（`astock sync` 的机制已就绪，缺的是全量运行的验证）。
 2. **全市场财报同步**：100 只/批 ≈ 11 秒/表，三大表全市场约 30 分钟，属季度任务；限流与断点续跑尚未验证。
-3. **策略权重正式评审**：把等权草案换成评审后的权重，并给 Growth / Quality / Dividend 定评分口径（现在是资格判定）。
+3. **极值稳健化与分红支付率形状**：Growth 是否缩尾、分红支付率是否设上限或改成区间偏好（现为线性加权，1950% 与 90% 同等对待）。
 4. **估值口径评审**：定了股本/市值口径，Value 与 GARP 才能落地。
 5. **Market Regime / Market Validation / Signal 检测器**：需要先确认各输入的阈值，否则只能继续保持 `BLOCKED`。
 6. **其余 6 个 Scanner**：依赖基本面因子落地。

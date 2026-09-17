@@ -1,302 +1,214 @@
-# Review Notes
+# 评审记录（Review Notes）
 
-The archived spec metadata says that final review is pending, while the current user instruction confirms this package as the formal approved baseline.
+本文件记录实现过程中做出的判断、偏离与未决事项。设计三件套是权威来源；这里写的是
+权威来源没有规定、而实现不得不选择的部分，以及选择的依据。
 
-The current instruction resolves the status mismatch. No product rule was changed.
+> 语言约定：按项目所有者要求（2026-09-17），本文件与后续文档、提交信息统一使用中文。
+> 原始设计规格 `docs/superpowers/specs/2026-09-16-a-stock-lens-design.md` 正文保持英文，
+> 其补遗章节已改为中文。
 
-## Implementation notes (conformance pass, 2026-09-16)
+## 一、设计状态与基线
 
-The design package was re-applied to the repository. `docs/PRODUCT.md`,
-`docs/ARCHITECTURE.md` and the spec are byte-identical to what the package
-contains, so no document was overwritten; the work was closing gaps between the
-design and the code. Every gap that could be closed without inventing a number
-was closed. The decisions taken, and why, are recorded here.
+归档规格的元信息写着"最终评审待定"，而项目所有者已确认该设计包为正式基线。
+当前指令消除了这处状态不一致，未改动任何产品规则。
 
-### Watchlist transitions
+## 二、设计一致性实现（2026-09-16）
 
-`spec §13` confirms one active path — `DISCOVERED → WATCH → DEEP_RESEARCH →
-TRACK_SIGNAL` — and lists `READY`, `HOLDING`, `EXITED`, `ARCHIVED` as reserved
-for later phases. The implementation accepts exactly the confirmed forward
-step, and refuses backward moves, skipped moves, repeated moves, and every
-reserved state. Those refusals are an interpretation: the design does not
-define a backward or a skipping rule, and accepting one would put a product
-decision in the code. The refusal message names every state involved, so a
-future user who wants a different rule knows exactly what to change.
+设计包重新落回仓库时，`docs/PRODUCT.md`、`docs/ARCHITECTURE.md` 与规格正文与包内
+**逐字节相同**，因此没有覆盖任何文档；实际工作是补齐设计与代码之间的缺口。
 
-### Stage order inside the daily pipeline
+### 2.1 Watchlist 状态转移
 
-`spec §15` lists `BUILD_UNIVERSE` (3) before `COMPUTE_FACTORS` (4). The pipeline
-runs `COMPUTE_FACTORS` first, because the Universe's liquidity rule consumes
-the `avg_amount_20d` factor and measuring it twice would give one quantity two
-definitions. This was already the behaviour of the earlier scan slice; it is
-now stated in `pipelines/daily.py` next to `EXECUTION_ORDER` rather than left
-implicit. The manifest records the order that actually ran.
+`spec §13` 确认唯一活跃路径：`DISCOVERED → WATCH → DEEP_RESEARCH → TRACK_SIGNAL`，
+`READY`、`HOLDING`、`EXITED`、`ARCHIVED` 是预留状态。实现只接受确认过的前进一步，
+后退、跳步、重复与预留状态一律拒绝并写明涉及的状态。这些拒绝是解释而非发明：
+设计没有定义后退或跳步规则，接受它们等于替产品做决定。
 
-### Blocked stages
+### 2.2 每日管线的阶段顺序
 
-`DETECT_REGIME`, `MARKET_VALIDATE`, `RUN_SIGNALS` and `UPDATE_WATCHLIST` are
-recorded as `BLOCKED` with the decision they wait for. The design fixes their
-vocabularies but not any threshold, and `AGENTS.md` forbids inventing one; no
-rule changes a watchlist state on its own either. Consequently `astock daily`
-exits non-zero while those stages are blocked, and `--allow-incomplete` must be
-asked for explicitly. `MARKET_REGIME` therefore has no producer yet, and
-`GENERATE_DAILY_SNAPSHOT` names it as missing rather than writing a placeholder.
+`spec §15` 把 `BUILD_UNIVERSE`（3）列在 `COMPUTE_FACTORS`（4）之前。实现先把因子算出来，
+因为 Universe 的流动性规则消费 `avg_amount_20d`，重复测量同一数量会给出两套定义。
+该偏离写在 `pipelines/daily.py` 的 `EXECUTION_ORDER` 旁，Job Manifest 记录实际执行顺序。
 
-### Vocabulary that is not in `domain/enums.py`
+### 2.3 被阻塞的阶段
 
-`JobStatus` lives next to the job store, not in `domain/enums.py`, for the same
-reason `UniverseRule` does: `domain` holds the vocabularies the design
-enumerates, and the design names the `status` field of `JobRun` without
-enumerating its values.
+`DETECT_REGIME`、`MARKET_VALIDATE`、`RUN_SIGNALS`、`UPDATE_WATCHLIST` 记为 `BLOCKED`
+并写明等待的决策：设计确认了它们的词表，却没有确认任何阈值；watchlist 也没有
+"自动变更状态"的规则。因此 `astock daily` 在这些阶段补齐前退出码为 1，
+`--allow-incomplete` 必须显式给出；`MARKET_REGIME` 快照没有生产者，缺失被显式列出。
 
-### Snapshot lineage with more than one scanner
+### 2.4 不属于 `domain/enums.py` 的词表
 
-`docs/DATA_MODEL.md` §2 reserves a `strategy_version` lineage field, and
-`spec §8` has seven scanners, so a run can score one symbol with several
-strategies carrying different versions. A lineage field therefore lists every
-version that took part, comma-separated, and "is this result covered by this
-lineage?" is a membership question rather than an equality one.
-`SnapshotLineage` exposes the split, and both the CandidateBuilder and the
-independent Artifact Validator use it.
+`JobStatus` 放在 jobs 模块旁，理由与 `UniverseRule` 相同：`domain` 只放设计枚举过的词表，
+而设计只提到 `JobRun.status` 字段，没有枚举取值。
 
-### Deep research adapter
+### 2.5 多 Scanner 下的血缘版本
 
-`spec §14` fixes the adapter interface and names a CLI implementation, but not
-the shape of the external call. The command comes from
-`ASTOCK_DEEP_RESEARCH_CMD` and speaks one JSON document in, one JSON document
-out. That call shape is an integration detail recorded here, not a product
-rule; job states remain the other system's vocabulary and are passed through
-unchanged. With no command configured, `astock research` refuses by name
-rather than pretending to submit.
+`docs/DATA_MODEL.md` §2 预留 `strategy_version` 字段，而 `spec §8` 有七个 Scanner，
+因此同一标的一次运行可能命中多个版本。血缘字段改为记录全部参与者（逗号分隔），
+"这条结果是否被该血缘覆盖"是成员判断而非等值判断；`SnapshotLineage` 提供拆分，
+CandidateBuilder 与独立产物校验器都用它。
 
-## Data-source boundary amendment (2026-09-16)
+### 2.6 深研适配器
 
-The project owner approved moving the bulk financial-statement source to the
-same Tencent WeStock CLI the deep-research stack uses, and leaving `neodata` on
-the research side. The amendment itself is written into the spec as §24, and
-`docs/PRODUCT.md` §4.2, `docs/ARCHITECTURE.md` §4.1 and `docs/DATA_SOURCES.md`
-§1–2 point at it. What the decision rests on, measured that day:
+`spec §14` 固定了适配器接口与"V1 用 CLI 实现"，但没有规定外部调用的形状。
+命令来自 `ASTOCK_DEEP_RESEARCH_CMD`，协议是"一段 JSON 进、一段 JSON 出"。
+这是集成细节而非产品规则；任务状态词表属于对方系统，原样透传。未配置命令时
+`astock research` 直接按名拒绝，不会伪造一次提交。
 
-| Evidence | Result |
+## 三、数据源边界补遗（2026-09-16）
+
+项目所有者批准把财务三大表的 bulk 源换到深研项目同款的腾讯 WeStock CLI，
+`neodata` 留在研究侧。补遗写进规格 §24，并在 `docs/PRODUCT.md` §4.2、
+`docs/ARCHITECTURE.md` §4.1、`docs/DATA_SOURCES.md` §1–2 指向它。依据（当日实测）：
+
+| 证据 | 结果 |
 | --- | --- |
-| `westock finance sh600519 --type income --fields all` | `EndDate` (report period) **and** `InfoPublDate` (publication date) |
-| Same call with the default `--fields core` | no publication date at all |
-| AkShare/Sina statements | publication date is not the original filing date (FY2025 balance sheet says `20260815`, the same period's income statement says `20260417`) |
-| 100 symbols in one batch, one statement | 11.4s, 100 rows returned — so a whole-market pass over the three statements is ~30 min: a quarterly job, not part of the 10-minute daily target |
-| CLI batch summary (`成功: 1`) | says success even for an invalid code, so coverage is computed from returned codes instead |
-| `neodata` query for the latest report | answered with structured markdown including `发布日期` / `统计截止日期` / `报告期` (2026-H1 works when the period is named), but it is per-entity, prose-shaped, and its 12-hour credential can only be refreshed by the WorkBuddy platform |
+| `westock finance sh600519 --type income --fields all` | 同时给出 `EndDate`（报告期）与 `InfoPublDate`（公告日期） |
+| 同一接口默认 `--fields core` | 完全没有公告日期 |
+| AkShare/Sina 三大表 | `公告日期` 不是原始公告日（同一报告期，资产负债表标 `20260815`、利润表标 `20260417`） |
+| 100 只一批 | 11.4 秒、100 行全回；全市场三表约需半小时，属季度任务 |
+| CLI 自带的批次汇总行（`成功: 1`） | 即使有无效代码也报成功，因此覆盖率改由"请求代码 vs 返回代码"计算 |
+| `neodata` 取最新财报 | 能返回带 `发布日期`/`统计截止日期`/`报告期`的结构化 Markdown（点名报告期即可取到 2026-H1），但逐标的、散文形态、凭证 12 小时且只能由 WorkBuddy 刷新，不适合批量因子源 |
 
-Consequences recorded in code:
+落到代码里的后果：新增 `RawDataset.missing_symbols`（源站可能部分回答却不说）、
+永远请求 `--fields all`（有测试钉住）、WeStock 以外部命令调用（不导入对方 Python 模块、
+不读其内部状态）。
 
-- `RawDataset.missing_symbols` exists because a source can answer a batch
-  partially without saying so;
-- the provider always requests `--fields all`, and that is asserted by a test
-  rather than left to convention;
-- WeStock is invoked as an external command. No deep-research Python module is
-  imported and no internal state is read (`ARCHITECTURE.md` §4.1).
+## 四、财务数据链路（2026-09-16）
 
-## Fundamentals slice (2026-09-16, after the amendment)
+设计未规定、实现必须选择的几处：
 
-The provider landed statements; this slice turned them into canonical,
-point-in-time observations the factor engine may read.
+- **`available_at` 取公告日当天的 A 股收盘（15:00 +08:00）。** `InfoPublDate` 只有日期，
+  公告可能在开盘前或收盘后发布；取收盘是保守选择，宁可推迟可用性，绝不提前。
+- **指标映射写在代码里**（`data/normalize/financials.py`），与产出这些列的 Provider 相邻，
+  和 `akshare_provider.BAR_COLUMN_MAP` 同一做法。源站列名映射是集成细节，不是阈值。
+- **49 个规范指标**覆盖设计里的 Quality / Growth / Valuation / Dividend / 现金流维度，
+  单位随指标携带（`%`、`x`、`CNY`、`CNY/share`），读者不必猜 `17.7179` 是比率还是百分比。
+- **三种"缺失"保持可区分**：源站空值 → `NULL` 观测；文本读不出 → 失败记录 + `INVALID`；
+  整张表没落地 → `absent_datasets` 点名。三者都不会变成 0，也不会消失。
+- **`NULL` 观测可以通过质量门**（`INVALID` 不行）：因子必须能报告"源站这里没有值"，
+  把它删掉会让"缺失"和"没人算这个指标"变得无法区分。
+- **财报不做按龄跳过**：按新鲜度跳过需要一条节奏决策（`Deferred`）；重复落地是安全的，
+  因为行按 `(code, EndDate)` 合并。
 
-Decisions taken here, none of which the design settles:
+### 4.1 全市场运行查出的三个缺陷
 
-- **`available_at` is the publication date at the A-share close** (`15:00
-  +08:00`). `InfoPublDate` is a date, not a moment, and a filing can appear
-  before the open or after the close. Taking the close is the conservative
-  reading: it can delay availability, never advance it.
-- **The metric mapping lives in code** (`data/normalize/financials.py`), next
-  to the provider that produced the columns, exactly as
-  `akshare_provider.BAR_COLUMN_MAP` does. A source-column mapping is
-  integration detail, not a threshold.
-- **48 canonical metrics** cover the design's Quality / Growth / Valuation /
-  Dividend / cash-flow dimensions, with units carried per metric (`%`, `x`,
-  `CNY`, `CNY/share`) so a reader never has to guess whether `17.7179` is a
-  ratio or a percent.
-- **Three ways to be absent stay distinct**: a source marker (`-`) becomes a
-  `NULL` observation, unreadable text becomes an `INVALID` key with a failure
-  record naming the raw cell, and a statement that was never landed is named in
-  `absent_datasets`. None of them becomes zero and none of them disappears.
-- **`NULL` observations stay usable** through the gate, unlike `INVALID` ones:
-  a factor has to be able to report "the source has no value here", and
-  dropping the observation would make that indistinguishable from a metric
-  nobody computes.
-- **Statements are re-fetched, not skipped by age.** A freshness-based skip
-  would need a cadence decision (`Deferred`); re-landing is safe because rows
-  merge on `(code, EndDate)`.
+第一次全市场运行（5,576 只 × 三大表）暴露了 fixture 无法暴露的问题，均已修复：
 
-### A real defect the end-to-end run found
+1. **源站列集随批次内容变化。** 含银行的那批多 6 列（实测 88 vs 82），含保险的又多一组
+   （`EmbeddedValuePS`、`NewBusinessValuePSLife` 等）。原实现把形状差异判为损坏并返回
+   `SOURCE_ERROR`，于是**一批银行毁掉了整张资产负债表和利润表**。改为按列的**并集**合并，
+   某个形状没有的单元格留空（缺失，不是 0）；同一处理随后补到文件合并层。
+2. **批次成功也可能静默漏代码。** 5,576 只里 58 只在其批次里没返回，单独重问全都有数据。
+   现在批次跑完会对 `missing_symbols` 做一次补抓，资产负债表缺口从 58 降到 4。
+3. **失败原因被丢弃。** 原先只留状态，第一次失败时无法定位原因。`RawDataset.message`
+   现在承载原因，并出现在落地报告里。
 
-Syncing into a directory that already held the fixture listing produced **two
-profiles for one symbol**, and the scan then died mid-pipeline with
-`score_cross_section expects at most one context per symbol`. Two causes, both
-fixed:
+运行数字：37 分钟、168 次调用、缺口 4–6 只（`000003.SZ`、`000005.SZ`、`830799.BJ`、
+`900948.SH` 等退市/B 股，项目所有者确认不再处理）；归一化 92 秒、峰值内存约 2.9 GB、
+0 个阻断问题。内存来自一次性物化 213 万个观测对象，是当前最大开销。
 
-1. the listing was merged on *every* column, so a reformatted name or listing
-   date appended a second row for the same instrument — the listing is now
-   keyed by `symbol` alone;
-2. `UniverseBuilder` admitted both profiles, so one symbol entered the
-   cross-section twice. A repeated instrument is now excluded with the
-   `DUPLICATE_SECURITY` rule, which keeps the scan running *and* keeps the
-   reason visible instead of silently deduplicating the listing.
+## 五、基本面因子（2026-09-16）
 
-The throughput figure in §24 was also corrected: ~11s per 100 symbols is one
-statement, so all three statements over the whole market is a ~30-minute
-quarterly job, not part of the 10-minute daily target.
+- **TTM 对 TTM。** 中国报表是年初至今累计口径，用半年流量除以期末存量会把半年和整张
+  资产负债表混在一起。源站同时发布 TTM 与单期字段，因此需要"滚动一年"的比值两侧都用 TTM，
+  而不是由代码拼季度。
+- **缺失优先级显式化**：`NOT_APPLICABLE`（该标的报表没有这一行）> `NULL`（有行无值）>
+  `STALE`（超过已评审的新鲜度上限）。不写清顺序，两个实现会对同一条记录给出不同结论。
+- **`STALE` 是等数字的机制。** 每个基本面因子配置必须声明 `params.stale_after_days`；
+  写 `null` 表示"尚无已评审的新鲜度要求"，因子永不报 `STALE`。与 `configs/universe.yaml`
+  的 `long_suspension_days: null` 同一约定。
+- **新增 `FactorResult.inputs`**，让一个值能说明它依据的指标、报告期、公告日期与原始值。
+  设计要求解释链可达；没有这个字段，读者只看到一个比率，不知道是哪一期产生的。
+- **`factors compute` 与每日管线共用同一套 normalize**，否则同一个基本面因子会在一条命令下
+  报 `NOT_APPLICABLE`、另一条报 `VALUE`。
+- **"最近一次带值的观测"语义**（2026-09-17 补）：财报并非每期都发布每个字段，例如源站的
+  `DividendPaidRatio` 只在年报出现。若把"最新一期为空"判成 `NULL`，会丢掉市场已知的测量
+  ——实测分红策略可评分标的会从 3,689 掉到 734。现在取最近的非空观测，并在 `inputs` 里
+  写明它属于哪一期；是否太旧由 `STALE` 与新鲜度上限决定。
 
-## Fundamental factor slice (2026-09-16, same day)
+已知解读边界（只记录、不改写）：银行的经营现金流包含存款变动，`ocf_to_net_profit`
+对金融企业不表示"利润含金量"（实测 `000001.SZ` 为 8.20）。是否按行业豁免属策略层决定，
+设计未确认，因此没有加行业判断。
 
-Five ratio factors now read the canonical observations. Decisions taken here,
-none of which the design settles:
+## 六、Scanner 资格判定（2026-09-16）
 
-- **TTM against TTM.** Chinese statements are cumulative year-to-date, so
-  dividing an H1 flow by a period-end stock mixes half a year with a whole
-  balance sheet. The source publishes both TTM and period fields, so the ratios
-  that need a trailing year use TTM on both sides rather than a sum this code
-  assembled from quarters.
-- **Missing-evidence precedence is stated, not implied**: `NOT_APPLICABLE`
-  (the instrument's statements do not carry the line) outranks `NULL` (the
-  line exists without a value), which outranks `STALE`. Without a stated order
-  two implementations would disagree about the same record.
-- **`STALE` is a mechanism waiting for a number.** Each fundamental factor
-  config must declare `params.stale_after_days`; writing `null` records that no
-  freshness requirement has been reviewed, and the factor then never reports
-  `STALE`. This mirrors `configs/universe.yaml`'s `long_suspension_days: null`.
-- **`FactorResult.inputs` was added** so a value can name the metric, the report
-  period, the announcement date and the raw value it rests on. The design
-  requires the explanation chain to be walkable; without this field a reader
-  could see a ratio but not which quarter produced it.
-- **`factors compute` now normalizes through the same stage as the daily run.**
-  It previously built its own bars-only dataset, which would have made a
-  fundamental factor report `NOT_APPLICABLE` under one command and `VALUE`
-  under another.
+- **只判资格、不给分数。** `docs/STRATEGY_SYSTEM.md` §5 把所有 Scanner 的权重、阈值、
+  `rank_percentile`、`confidence` 列为 `Deferred`。动量带着 `PENDING REVIEW` 的等权草案，
+  另外三个当时没有任何权重，打分会是发明的数字。资格判定——"证据是否完整到足以让这个
+  Scanner 考虑它"——是真实、可证伪的结论，也是设计漏斗的前半段。
+- **当时一个类服务三个 Scanner**：评分被推迟时，区分它们的只有"要求哪些因子"，而那写在
+  `configs/strategies/*.yaml` 里。写三个同样的类等于把重复代码伪装成三套算法。
+- **新增七个指标透传因子**（`revenue_yoy`、`net_profit_parent_yoy`、`revenue_cagr_3y`、
+  `net_profit_parent_cagr_3y`、`roe_ttm`、`gross_margin`、`debt_to_asset`）：
+  引擎的契约是 `FactorResult`，策略需要的指标必须先成为因子才能被读到。不重算、不套阈值。
+- **新增 `FactorResult.unit`**：一个不带单位的值不可解释。
+- **三个未实现的 Scanner 写明等待的输入**（而非"观点未定"）：`value` 与 `garp` 缺已评审的
+  股本/市值口径，`industry_trend` 缺尚未落地的行业数据。
 
-Known interpretation boundary, recorded rather than fixed: a bank's operating
-cash flow includes deposit movements, so `ocf_to_net_profit` does not mean
-"profit quality" for financial companies (measured: 000001.SZ = 8.20). Whether
-a factor should be exempt for some industries is a strategy-layer decision the
-design has not made, so no industry guard was added.
+资格判定确实在干活而非盖章：同一次运行里，银行 `000001.SZ` 在 `growth`、`dividend` 上合格，
+在 `quality` 上不合格——因为它的利润表没有毛利率这一行（该格为空 → `NULL`）。
 
-## Eligibility slice (2026-09-16, same day)
+## 七、权重评审（2026-09-17）
 
-Three scanners now run. Decisions taken here:
+本次先建机器与工具，**权重数字由项目所有者确认后才写入配置**。
 
-- **Eligibility only, no score.** `docs/STRATEGY_SYSTEM.md` §5 defers every
-  scanner's weights, thresholds, `rank_percentile` and `confidence`. Momentum
-  shipped with a draft weight set marked `PENDING REVIEW`; these three have no
-  weights at all, so a score would be invented. Eligibility — "this symbol's
-  evidence is complete enough for this scanner to consider it" — is a real,
-  falsifiable verdict and the first half of the designed funnel.
-- **One class serves the three scanners.** With scoring deferred, the only
-  thing that distinguishes them is which factors they demand, and that lives
-  in `configs/strategies/*.yaml`. Three identical classes would be duplicated
-  code pretending to be three algorithms; when a scanner's weights are
-  reviewed it gets its own scoring implementation, and the registry binding is
-  where that swap happens.
-- **Seven passthrough factors were added** (`revenue_yoy`,
-  `net_profit_parent_yoy`, `revenue_cagr_3y`, `net_profit_parent_cagr_3y`,
-  `roe_ttm`, `gross_margin`, `debt_to_asset`). The engine's contract is
-  `FactorResult`, so a metric a strategy needs has to exist as a factor to
-  reach it. Nothing is recomputed and no threshold is applied.
-- **`FactorResult.unit` was added.** A snapshot carrying `17.7179` without
-  saying whether that is a ratio or a percent is not explainable; the unit now
-  travels with the value.
-- **The three unbuilt scanners name the input they wait for**, not an opinion:
-  `value` and `garp` need a reviewed share-count/market-cap convention before
-  any valuation factor can exist, and `industry_trend` needs industry data
-  that has not been landed.
+### 7.1 本次定下的机制
 
-Evidence that eligibility does real work rather than rubber-stamping: on the
-same run, `000001.SZ` (a bank) is eligible for `growth` and `dividend` but not
-for `quality`, because its income statement carries no gross margin. That is
-the `NULL` state doing its job, not a data outage.
+- **权重的符号表达极性**：正数表示越大越好，负数先定向再排名，因此
+  `debt_to_asset: -1.0` 表示杠杆越低越好。一个因子一个数字，含糊之处藏不住。
+- **`weights` 必须恰好覆盖 `required_factors`；0 权重被拒绝。** 一个 0 权重意味着这个因子
+  本不该出现在要求里，静默忽略会留下没人负责的"要求"。
+- **注册表是切换点**：声明了要求且有权重 → `WeightedPercentileScanner` 打分；
+  有要求但没权重 → `EligibilityScanner` 只判资格；两者都没有 → 报错并说明等待的输入。
+- **配置守卫**：`tests/unit/test_strategy_registry.py` 断言出货配置的权重表与要求表完全一致。
+  这条守卫有具体来由——写入等权当天，注册表里还硬绑着资格判定实现，导致 19 个测试同时失败。
 
-## Whole-market financial refresh (2026-09-16, evening)
+### 7.2 实测（5,565 只，2026-09-16 数据）
 
-First real whole-market run: 5,576 symbols × three statements, 100 per batch,
-168 CLI calls. It found three defects that no fixture could have shown, and all
-three were fixed in the same session:
-
-1. **The source's shape depends on what is in the batch.** A batch holding a
-   bank returns six columns a batch of manufacturers does not (measured: 88 vs
-   82), and one holding an insurer returns a third set (`EmbeddedValuePS`,
-   `NewBusinessValuePSLife`, …). The provider first treated a shape difference
-   as corruption and returned `SOURCE_ERROR`, which threw away **both** the
-   balance sheet and the income statement — 10 minutes of fetching each —
-   because one batch happened to contain a bank. Batches now merge on the union
-   of their columns, and a cell a shape did not carry stays empty (a missing
-   value, never a zero). The same fix was then needed one layer down: the raw
-   *file* also widened instead of refusing a new shape.
-2. **A code can be silently omitted from a batch that succeeds.** 58 of 5,576
-   symbols came back empty from their batch; each answered normally when asked
-   again. The provider now ends a run with one top-up pass over whatever
-   `missing_symbols` names, which took the balance-sheet gap from 58 symbols to
-   4.
-3. **A failure reason was being discarded.** `RawDataset` carried only a status,
-   so the first failed run reported `SOURCE_ERROR` with no way to tell why
-   without re-running it. `RawDataset.message` now carries the reason, and the
-   landing report prints it.
-
-Operational numbers, for the §21 discussion: the refresh takes ~37 minutes and
-the normalization that follows takes ~92 seconds with a ~2.9 GB peak, because
-it materializes 2.13M observation objects at once. That peak is the largest
-single cost in the pipeline and the obvious candidate for a per-symbol read
-path if a daily fundamental refresh is ever wanted.
-
-What the run also validated: re-landing is idempotent (rows merge on
-`(code, EndDate)`, so a gap-filling pass replaced rather than duplicated), and
-a misconfigured run fails loudly — a missing `ASTOCK_WESTOCK_BIN` produced a
-`SOURCE_ERROR` naming the problem instead of a silently empty dataset.
-
-## Weight review (2026-09-17)
-
-The scoring machine and the review instrument were built; the weights
-themselves are still `PENDING REVIEW` and nothing was decided here.
-
-Conventions this slice fixed, because a reviewer has to agree to *something*:
-
-- **A weight's sign carries polarity.** Positive means the higher the value the
-  better the standing; negative orients the factor first, so `debt_to_asset:
-  -1.0` means lower leverage ranks better. One number per factor, and an
-  ambiguous case stays visible instead of hiding behind a second vocabulary.
-- **`weights` must cover `required_factors` exactly, and a zero weight is
-  refused.** A factor with no weight does not belong in the strategy's
-  requirements, and silently ignoring it would leave a requirement nobody
-  measures.
-- **The swap point is the registry**: a configuration with reviewed weights
-  binds `WeightedPercentileScanner` and starts scoring with no code change;
-  without weights it binds `EligibilityScanner` and produces no score.
-
-Measured on the whole market (5,565 symbols, 2026-09-16 data), which is what a
-review is for:
-
-| Strategy | Candidates compared | top-12 overlap |
+| 策略 | 候选方案对比 | top-12 重合 |
 | --- | --- | --- |
-| quality | equal vs return-and-cash-first | 3/12 |
-| quality | equal vs balance-sheet-first | 6/12 |
-| growth | equal vs persistence-first | 7/8 |
-| growth | equal vs latest-print-first | 7/8 |
-| dividend | equal vs coverage-first | 7/8 |
+| Quality | 等权 vs 收益+现金流优先 | 3/12（25%） |
+| Quality | 等权 vs 资产负债表优先 | 6/12（50%） |
+| Growth | 等权 vs 3 年持续性优先 | 7/8（88%） |
+| Growth | 等权 vs 最新一期优先 | 7/8（88%） |
+| Dividend | 等权 vs 现金流覆盖优先 | 7/8（88%） |
 
-Two factor-design problems surfaced, and neither is fixable by choosing weights:
+Quality 的权重真的决定看到谁；Growth/Dividend 换权重几乎无效，指向下面两个因子问题。
 
-1. **A ratio whose denominator can collapse is not a usable ranking input.**
-   `dividend_payout_ttm` and `ocf_to_net_profit` both divide by trailing parent
-   net profit; when that is near zero the ratio explodes and percentile ranking
-   selects exactly those instruments. Measured: `603439.SH` shows a payout of
-   6,407% and cash coverage of 691x. The source publishes its own annual
-   `DividendPaidRatio` (茅台 79.00%, 平安银行 27.13%, `603439.SH` 51.84%), so
-   the options are: adopt the source's ratio, floor the denominator (a
-   threshold the owner must set), or keep the noise knowingly.
-2. **Growth is dominated by extreme values.** The top names carry
-   `revenue_yoy` up to 1,819% and `net_profit_parent_yoy` up to 71,528%, and
-   percentile ranking compresses 3,000% and 70,000% into adjacent ranks — which
-   is why changing the weights moved only one name in eight. Robustifying
-   (winsorising, or requiring both horizons) is a review decision.
+### 7.3 查出的两个因子缺陷（权重救不了）
 
-A third finding is about performance rather than policy: `factor_stage` used to
-hand every factor the whole market, so each fundamental factor call scanned
-2.1M observations. Contexts now carry only the symbol's own rows
-(`stages.DatasetIndex`), which is both faster and a truer statement of what a
-factor may read.
+1. **分母会塌缩的比值不能用作排名输入。** `dividend_payout_ttm` 与 `ocf_to_net_profit`
+   的分母都是 TTM 归母净利润，接近 0 时比值爆炸，而百分位排名恰好专挑这类公司：
+   实测榜首 `603439.SH` 支付率 6407%、现金流覆盖 691 倍——与"可持续分红"完全相反。
+   源站自己发布的年报支付率是正常的（茅台 79.00%、平安银行 27.13%、`603439.SH` 51.84%）。
+2. **Growth 被极端值主导。** 榜首 `revenue_yoy` 达 1819%、`net_profit_parent_yoy` 达 71528%，
+   百分位把 3000% 与 70000% 压成相邻名次，因此换权重只移动了一个名字。
+
+### 7.4 项目所有者的裁决与执行（2026-09-17）
+
+1. **三个 Scanner 采用等权开启打分**：Quality 为
+   `roe_ttm 1.0 / gross_margin 1.0 / debt_to_asset -1.0 / ocf_to_net_profit 1.0`，
+   Growth 四个维度各 1.0，Dividend 两个维度各 1.0。等权是刻意的中性选择：评审已证明
+   不同权重会显著改变名单，在没有依据说哪个维度更重要之前不对它们排序。
+2. **Dividend 改用源站 `DividendPaidRatio`**，不再用 TTM 比值参与排名；
+   原 `dividend_payout_ttm` 因子保留为证据，但移出 `required_factors`。
+3. **Growth 暂不做稳健化处理**，该决定保持开放。
+
+### 7.5 执行后复跑发现的第三点
+
+- **极性用实测确认**：把支付率取负（"留存优先"）后，dividend 榜首变成支付率 **0.000%**
+  的公司，即不分红的公司。这直接证明分红策略必须取正号。
+- **源站的支付率也会出现极端值**：修复"最近一次带值"语义后，可评分标的从 734 恢复到
+  4,171，但榜首仍有 1950%、274%、271% 的支付率。超过 100% 的支付率本身是真实信号
+  （动用留存收益或特别分红），也正是设计里点名的"一次性特别分红""周期顶部假高股息"风险。
+  当前线性加权把 1950% 与 90% 同等对待。**待所有者决定**：设上限、改成区间偏好
+  （例如偏好某个支付率带），还是接受现状。这是形状问题而非符号问题，现有加权百分位模型
+  无法表达。
+
+## 八、性能修正（2026-09-17）
+
+`factor_stage` 原先把全市场数据交给每个因子的每次调用，基本面因子因此要扫 213 万个观测。
+现在每个 context 只带自己标的的行（`stages.DatasetIndex`）：既更快，也更准确地表达
+"一个因子能读到什么"。这条与策略无关，是纯实现问题。
