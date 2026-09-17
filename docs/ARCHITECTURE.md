@@ -487,6 +487,11 @@ astock research 000938
 astock daily
 ```
 
+其中只有 `astock daily` 写正式快照：`universe build`、`factors compute`、`strategy run`
+是纯计算，`scan` 是 non-persistent preview。工具链只有一条唯一分析执行链
+（`astock_lens.pipelines.analysis`），`daily` 在同一组 stage 之上补充 Job 计时、
+阶段裁定与正式快照写入。
+
 ## 20. 测试体系
 
 ### 20.1 代码测试

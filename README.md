@@ -110,11 +110,11 @@ export ASTOCK_CSV_ROOT=tests/fixtures/csv
 export ASTOCK_SNAPSHOT_ROOT=tests/.tmp/demo
 export ASTOCK_DATASET=daily_bars_long            # 长 fixture：300 个交易日
 
-uv run astock universe build --as-of 2026-09-04  # 每条规则的判定结果 + UNIVERSE 快照
-uv run astock scan --as-of 2026-09-04            # 排名、评分、next_action、四类快照
-uv run astock factors compute --as-of 2026-09-04 # 每个因子一行 JSON，走 stdout
-uv run astock strategy run momentum --as-of 2026-09-04   # 单个 scanner 的排名
-uv run astock daily --as-of 2026-09-04 --allow-incomplete # 11 个阶段逐个 Job Run
+uv run astock universe build --as-of 2026-09-04  # 每条规则的判定结果（只计算，不落盘）
+uv run astock scan --as-of 2026-09-04            # 预览：排名与评分，不写正式快照
+uv run astock factors compute --as-of 2026-09-04 # 每个因子一行 JSON，走 stdout（只计算）
+uv run astock strategy run momentum --as-of 2026-09-04   # 单个 scanner 的排名（只计算）
+uv run astock daily --as-of 2026-09-04 --allow-incomplete # 唯一正式快照写入者：11 个阶段逐个 Job Run
 
 uv run uvicorn --factory astock_lens.api.app:create_app
 curl "http://127.0.0.1:8000/universe?as_of=2026-09-04"
@@ -136,6 +136,11 @@ uv run astock watch 300750.SZ --state WATCH         # 只接受设计确认的�
 uv run astock watch                                 # 列出已跟踪标的
 uv run astock research 300750.SZ                    # 需要 ASTOCK_DEEP_RESEARCH_CMD，未配置则报错
 ```
+
+`astock daily` 是 V1 里**唯一**会写正式快照的命令。`universe build`、`factors compute`、
+`strategy run` 与 `scan` 都只计算或预览：它们不创建、也不覆盖当天已经落好的正式快照。
+"只算一下因子"这种命令不该有权改掉当天正式的候选结果，这也是 `scan` 被明确定义为
+non-persistent preview 的原因。
 
 `astock daily` 会为设计的 11 个阶段各写一条 Job Run 到 `ASTOCK_JOB_ROOT/<date>.json`。目前 6 个阶段可跑，`DETECT_REGIME`、`MARKET_VALIDATE`、`RUN_SIGNALS`、`UPDATE_WATCHLIST` 记录为 `BLOCKED` 并写明等待的决策，因此该命令在补齐前退出码为 1；需要允许不完整时显式加 `--allow-incomplete`。
 
