@@ -15,6 +15,7 @@ from astock_lens.strategies.config import StrategyConfig, load_strategy_config
 from astock_lens.strategies.contracts import StrategyPlugin
 from astock_lens.strategies.eligibility import EligibilityScanner
 from astock_lens.strategies.momentum import MomentumScanner
+from astock_lens.strategies.weighted import WeightedPercentileScanner
 
 IMPLEMENTATIONS: Mapping[str, Callable[[StrategyConfig], StrategyPlugin]] = {
     "momentum": MomentumScanner,
@@ -60,6 +61,10 @@ class RegisteredStrategy:
 def build_scanner(config: StrategyConfig) -> StrategyPlugin:
     """Return the scanner implementation for one configuration."""
     factory = IMPLEMENTATIONS.get(config.id)
+    if factory is None and config.weights:
+        # The seam where a review becomes behaviour: a scanner whose weights
+        # have been approved starts scoring without a code change.
+        return WeightedPercentileScanner(config)
     if factory is None:
         reason = UNIMPLEMENTED_REASONS.get(config.id, "no implementation is registered")
         raise StrategyNotImplementedError(
@@ -92,17 +97,25 @@ def load_scanners(directory: Path) -> tuple[RegisteredStrategy, ...]:
     return tuple(
         RegisteredStrategy(config=config, plugin=build_scanner(config))
         for config in _enabled_configs(directory)
-        if config.id in IMPLEMENTATIONS
+        if _runnable(config)
     )
 
 
 def unimplemented_scanners(directory: Path) -> tuple[str, ...]:
     """Return the enabled scanner ids that no code implements yet."""
     return tuple(
-        config.id
-        for config in _enabled_configs(directory)
-        if config.id not in IMPLEMENTATIONS
+        config.id for config in _enabled_configs(directory) if not _runnable(config)
     )
+
+
+def _runnable(config: StrategyConfig) -> bool:
+    """Whether a configuration has something to run.
+
+    Either a scanner is registered for its id, or it carries reviewed weights
+    that `WeightedPercentileScanner` can score with. A configuration with
+    neither is the case `unimplemented_scanners` reports.
+    """
+    return config.id in IMPLEMENTATIONS or bool(config.weights)
 
 
 def unimplemented_reasons(directory: Path) -> tuple[tuple[str, str], ...]:
