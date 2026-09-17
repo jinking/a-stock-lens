@@ -21,7 +21,7 @@ trustworthy:
 
 import csv
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from astock_lens.data.contracts import DataProvider, FetchRequest, RawPayload
@@ -33,6 +33,9 @@ TRADE_DATE_COLUMN = "trade_date"
 
 DEFAULT_BAR_DATASET = "daily_bars"
 DEFAULT_SECURITIES_DATASET = "securities"
+
+# neodata 的落地根目录：`<raw_root>/neodata/<dataset>/<取数日>.csv`。
+NEODATA_ROOT = "neodata"
 
 # Financial statements are keyed the way their source keys them: the CLI's
 # instrument code and the report period. `EndDate` is the period the numbers
@@ -190,6 +193,87 @@ def land_financial_statements(
         )
 
     return SyncResult(as_of=as_of, landings=tuple(landings))
+
+
+def land_neodata_blocks(
+    *,
+    provider: DataProvider,
+    root: Path,
+    dataset: str,
+    values: Sequence[str],
+    as_of: datetime,
+) -> DatasetLanding:
+    """把 neodata 的内容块按"数据集 + 取数日"落成一个文件。
+
+    为什么按日而不是合并成一张大表：
+
+    - 内容块是**逐字文本**（含多行 Markdown），合并进一张表会破坏溯源，
+      也说不清"这一行是哪天问来的"；
+    - 同一取数日重跑即覆盖，天然幂等；
+    - 时点选择退化成"取不晚于 `as_of` 的最新一天"，与快照复现的原则一致。
+
+    文件名即取数日，所以一次运行不会覆盖另一天的答案。
+    """
+    if not values:
+        raise ValueError("落地 neodata 数据需要至少一个查询值")
+
+    path = root / NEODATA_ROOT / dataset / f"{as_of.date().isoformat()}.csv"
+    raw = provider.fetch(
+        FetchRequest(dataset=dataset, as_of=as_of, symbols=tuple(values))
+    )
+    payload = raw.payload
+    if raw.status is not DataStatus.VALUE or payload is None or not payload.rows:
+        return DatasetLanding(
+            dataset=dataset,
+            path=path,
+            status=raw.status,
+            rows_written=0,
+            rows_total=len(read_raw_rows(path)[1]),
+            symbols_missing=raw.missing_symbols or tuple(values),
+            note=raw.message or raw.status.value,
+        )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.writer(stream, lineterminator="\n")
+        writer.writerow(payload.columns)
+        writer.writerows(payload.rows)
+
+    return DatasetLanding(
+        dataset=dataset,
+        path=path,
+        status=DataStatus.VALUE,
+        rows_written=len(payload.rows),
+        rows_total=len(payload.rows),
+        symbols_missing=raw.missing_symbols,
+        note=raw.message,
+    )
+
+
+def latest_neodata_file(root: Path, dataset: str, *, as_of: datetime) -> Path | None:
+    """不晚于 `as_of` 的最新一天的文件，没有则返回 `None`。
+
+    文件名是 ISO 日期，字典序即时间序；未来日期的文件被排除，
+    因此"今天不能看见明天的答案"这条规则由文件选择本身保证。
+    """
+    directory = root / NEODATA_ROOT / dataset
+    if not directory.is_dir():
+        return None
+    limit = as_of.date().isoformat()
+    candidates = sorted(
+        path
+        for path in directory.glob("*.csv")
+        if _iso_day(path.stem) is not None and path.stem <= limit
+    )
+    return candidates[-1] if candidates else None
+
+
+def _iso_day(value: str) -> str | None:
+    """把文件名当作 ISO 日期校验，避免把杂物当成数据。"""
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError:
+        return None
 
 
 def land_raw(

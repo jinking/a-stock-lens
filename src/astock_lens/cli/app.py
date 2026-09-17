@@ -31,6 +31,7 @@ from astock_lens.data.sync import (
     DatasetLanding,
     SyncResult,
     land_financial_statements,
+    land_neodata_blocks,
     land_raw,
     read_symbols,
 )
@@ -239,6 +240,11 @@ def _job_store() -> JsonJobStore:
 def _financial_provider() -> WestockCliProvider:
     """The provider financial statements are landed from (design spec §24)."""
     return WestockCliProvider()
+
+
+def _neodata_provider() -> NeodataProvider:
+    """语义与估值数据源（规格 §24 补遗）。"""
+    return NeodataProvider()
 
 
 def _bulk_provider() -> DataProvider:
@@ -863,6 +869,17 @@ def sync(
             ),
         ),
     ] = False,
+    valuation: Annotated[
+        bool,
+        typer.Option(
+            "--valuation",
+            help=(
+                "同时取 neodata 估值（PE/PB/PS/历史分位/PEG…）。"
+                "需要 --symbol：估值批量覆盖极低（实测 10 只只回 1–2 只），"
+                "且 neodata 不做标的枚举。"
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Land raw data for one date, skipping what is already there.
 
@@ -871,6 +888,16 @@ def sync(
     decides which symbols to fetch, so the scan covers the market it claims to.
     """
     day = _as_of(as_of) if as_of is not None else _today_close()
+    # 调用方错误先报，再去做昂贵的事：脚本化的入口更该 fail fast，
+    # 而不是先抓几十秒行情、再告诉使用者参数不对。
+    if valuation and not symbol:
+        typer.echo(
+            "取估值需要 --symbol：neodata 不做标的枚举，且估值批量覆盖极低"
+            "（实测 10 只只回 1–2 只）",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
     provider = _bulk_provider()
     health = provider.health()
     if not health.healthy:
@@ -895,6 +922,9 @@ def sync(
         financial_result = _land_financials(day, symbols=symbol)
         landings.extend(financial_result.landings)
         failed.extend(financial_result.failed_datasets)
+
+    if valuation:
+        landings.append(_land_valuation(day, symbols=symbol))
 
     for landing in landings:
         typer.echo(
@@ -944,6 +974,38 @@ def _land_financials(day: datetime, *, symbols: list[str] | None) -> SyncResult:
         as_of=day,
         symbols=wanted,
         datasets=tuple(sorted(FINANCIAL_DATASETS)),
+    )
+
+
+def _land_valuation(day: datetime, *, symbols: list[str] | None) -> DatasetLanding:
+    """取并落一天的估值数据。
+
+    必须显式给名单：neodata 不做标的枚举，而它的估值批量覆盖极低
+    （实测 10 只一批只回 1–2 只），拿整份名单逐只跑是几小时级的事情。
+    与其猜一个名单，不如要求调用方明确说要哪几只。
+    """
+    if not symbols:
+        typer.echo(
+            "取估值需要 --symbol：neodata 不做标的枚举，且估值批量覆盖极低"
+            "（实测 10 只只回 1–2 只）",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    provider = _neodata_provider()
+    health = provider.health()
+    if not health.healthy:
+        typer.echo(
+            f"provider {health.provider} is not usable: {health.message}", err=True
+        )
+        raise typer.Exit(code=1)
+
+    return land_neodata_blocks(
+        provider=provider,
+        root=_csv_root(),
+        dataset="valuation",
+        values=tuple(symbols),
+        as_of=day,
     )
 
 

@@ -552,6 +552,72 @@ def test_statements_only_skips_the_daily_bar_fetch(
     assert not (raw_root / "daily_bars.csv").exists()
 
 
+def test_sync_lands_valuation_for_the_named_symbols(
+    local_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """估值落地一天一个文件；这一步让 Value / GARP 在真实运行里有证据可用。"""
+    import astock_lens.cli.app as cli_module
+    from astock_lens.data.contracts import (
+        FetchRequest,
+        ProviderHealth,
+        RawDataset,
+        RawPayload,
+    )
+
+    class StubNeodata:
+        def health(self) -> ProviderHealth:
+            return ProviderHealth(
+                provider="neodata",
+                healthy=True,
+                status=DataStatus.VALUE,
+                checked_at=datetime(2026, 9, 4, 15, 5, tzinfo=UTC),
+            )
+
+        def fetch(self, request: FetchRequest) -> RawDataset:
+            rows = (
+                (
+                    "统一估值查询",
+                    "统一估值查询",
+                    "**标的代码（统一输出字段名）**: 600519.SH",
+                ),
+            )
+            return RawDataset(
+                provider="neodata",
+                dataset=request.dataset,
+                fetched_at=datetime(2026, 9, 4, 15, 5, tzinfo=UTC),
+                provider_version="v1",
+                status=DataStatus.VALUE,
+                row_count=len(rows),
+                payload=RawPayload(columns=("type", "desc", "content"), rows=rows),
+            )
+
+    raw_root = local_tmp / "raw"
+    monkeypatch.setattr(cli_module, "_neodata_provider", StubNeodata)
+    # 名单与日线走桩：这个测试只关心估值落地，不该真的去抓全市场名单。
+    monkeypatch.setattr(cli_module, "_bulk_provider", StubProvider)
+
+    result = CliRunner().invoke(
+        app,
+        ["sync", "--as-of", DAY, "--valuation", "--symbol", "600519.SH"],
+        env=_env(local_tmp) | {"ASTOCK_CSV_ROOT": str(raw_root)},
+    )
+
+    assert result.exit_code == 0, result.output
+    landed = raw_root / "neodata" / "valuation" / "2026-09-04.csv"
+    assert landed.is_file()
+    assert "valuation" in result.stdout
+
+
+def test_sync_valuation_refuses_to_guess_a_symbol_list(
+    local_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """neodata 不做标的枚举，且估值批量覆盖极低，因此不拿整份名单硬跑。"""
+    result = _invoke(local_tmp, "sync", "--as-of", DAY, "--valuation")
+
+    assert result.exit_code == 1
+    assert "需要 --symbol" in result.output
+
+
 # --- research --------------------------------------------------------------
 
 

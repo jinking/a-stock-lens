@@ -23,12 +23,17 @@ from astock_lens.data.contracts import (
     FetchRequest,
     NormalizedDataset,
     RawDataset,
+    RawPayload,
 )
 from astock_lens.data.normalize.csv_bars import CsvDailyBarNormalizer
 from astock_lens.data.normalize.csv_securities import CsvSecurityNormalizer
 from astock_lens.data.normalize.financials import (
     FinancialNormalizeOutcome,
     FinancialStatementNormalizer,
+)
+from astock_lens.data.normalize.valuations import (
+    NeodataValuationNormalizer,
+    ValuationFailure,
 )
 from astock_lens.data.providers.local import LocalCsvProvider
 from astock_lens.data.providers.westock import FINANCIAL_DATASETS
@@ -42,11 +47,14 @@ from astock_lens.data.quality.gate import (
     QualityReport,
     valid_bars,
 )
+from astock_lens.data.sync import latest_neodata_file, read_raw_rows
+from astock_lens.domain.enums import DataStatus
 from astock_lens.domain.models import (
     DomainRecord,
     FinancialObservation,
     SecurityProfile,
     SnapshotLineage,
+    ValuationObservation,
 )
 from astock_lens.factors.config import FactorConfig
 from astock_lens.factors.contracts import FactorContext, FactorResult
@@ -73,6 +81,20 @@ class FinancialInputs(DomainRecord):
     reports: tuple[FinancialQualityReport, ...] = ()
     observations: tuple[FinancialObservation, ...] = ()
     absent_datasets: tuple[str, ...] = ()
+
+
+class ValuationInputs(DomainRecord):
+    """某一时点可用的估值观测，以及它们来自哪一天的取数。
+
+    `source_file` 为 `None` 表示还没有落过估值数据——这是一个**可见**的事实，
+    而不是"市场没有估值"。
+    """
+
+    as_of: datetime
+    source_file: Path | None = None
+    observations: tuple[ValuationObservation, ...] = ()
+    absent_metrics: tuple[str, ...] = ()
+    failures: tuple[ValuationFailure, ...] = ()
 
 
 class DatasetIndex:
@@ -115,6 +137,7 @@ class NormalizeOutcome(DomainRecord):
     bars: NormalizedDataset
     securities: tuple[SecurityProfile, ...] = ()
     financials: FinancialInputs = FinancialInputs()
+    valuations: ValuationInputs | None = None
 
 
 def normalize_stage(
@@ -140,6 +163,7 @@ def normalize_stage(
     report = DailyBarQualityGate().check(normalized)
 
     financials = financial_inputs(csv_root, as_of=as_of)
+    valuations = valuation_inputs(csv_root, as_of=as_of)
 
     gated = NormalizedDataset(
         dataset=normalized.dataset,
@@ -148,6 +172,7 @@ def normalize_stage(
         # The factor engine reads one normalized dataset per symbol context, so
         # the fundamentals travel with the bars rather than beside them.
         observations=financials.observations,
+        valuations=valuations.observations,
         parse_failures=normalized.parse_failures,
     )
 
@@ -158,6 +183,7 @@ def normalize_stage(
         bars=gated,
         securities=securities.securities,
         financials=financials,
+        valuations=valuations,
     )
 
 
@@ -200,6 +226,41 @@ def financial_inputs(csv_root: Path, *, as_of: datetime) -> FinancialInputs:
         reports=tuple(reports),
         observations=tuple(usable),
         absent_datasets=tuple(absent),
+    )
+
+
+def valuation_inputs(csv_root: Path, *, as_of: datetime) -> ValuationInputs:
+    """读取不晚于 `as_of` 的最新一天 neodata 估值落地，并归一化。
+
+    时点由文件选择保证：未来日期的文件不会被读到（`latest_neodata_file`
+    按 ISO 文件名比较）。没有落地过任何估值数据时 `source_file` 为 `None`——
+    这是"还没同步"，与"市场没有估值"是两回事，因子层会因此报
+    `NOT_APPLICABLE`，而不是把缺失当成 0。
+    """
+    path = latest_neodata_file(csv_root, "valuation", as_of=as_of)
+    if path is None:
+        return ValuationInputs(as_of=as_of)
+
+    columns, rows = read_raw_rows(path)
+    if not columns:
+        return ValuationInputs(as_of=as_of, source_file=path)
+
+    raw = RawDataset(
+        provider="neodata",
+        dataset="valuation",
+        fetched_at=as_of,
+        provider_version="v1",
+        status=DataStatus.VALUE,
+        row_count=len(rows),
+        payload=RawPayload(columns=columns, rows=rows),
+    )
+    outcome = NeodataValuationNormalizer().normalize(raw, as_of=as_of)
+    return ValuationInputs(
+        as_of=as_of,
+        source_file=path,
+        observations=outcome.observations,
+        absent_metrics=outcome.absent_metrics,
+        failures=outcome.failures,
     )
 
 
