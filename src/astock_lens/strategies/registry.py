@@ -1,10 +1,14 @@
 """Strategy registry.
 
-`spec §8` names seven V1 scanners. Only Momentum has an implementation today;
-the other six configurations describe dimensions the factor engine cannot yet
-measure, and their weights and thresholds are deferred. This registry resolves
-an `id` to the code that implements it and refuses the rest by name, so a run
-never reports "no candidates" when the truth is "no scanner".
+`spec §8` names seven V1 scanners. Six have an implementation; `industry_trend`
+waits for industry data. The mapping from `id` to class is **explicit**: an
+earlier version inferred "if the YAML carries weights, use the generic weighted
+scanner", which made the implementation a property of the configuration file
+and left each strategy's own eligibility rules with nowhere to live. The
+registry now names each class, so a new strategy is a new class plus one line.
+
+`build_scanner` refuses an id it has no class for, by name, so a run never
+reports "no candidates" when the truth is "no scanner".
 """
 
 from collections.abc import Callable, Mapping, Sequence
@@ -13,13 +17,20 @@ from pathlib import Path
 
 from astock_lens.strategies.config import StrategyConfig, load_strategy_config
 from astock_lens.strategies.contracts import StrategyPlugin
-from astock_lens.strategies.eligibility import EligibilityScanner
+from astock_lens.strategies.dividend import DividendScanner
+from astock_lens.strategies.garp import GarpScanner
+from astock_lens.strategies.growth import GrowthScanner
 from astock_lens.strategies.momentum import MomentumScanner
-from astock_lens.strategies.weighted import WeightedPercentileScanner
+from astock_lens.strategies.quality import QualityScanner
+from astock_lens.strategies.value import ValueScanner
 
 IMPLEMENTATIONS: Mapping[str, Callable[[StrategyConfig], StrategyPlugin]] = {
-    # 只有自带算法的 Scanner 需要在这里登记：动量有自己的横截面评分实现。
     "momentum": MomentumScanner,
+    "growth": GrowthScanner,
+    "quality": QualityScanner,
+    "dividend": DividendScanner,
+    "value": ValueScanner,
+    "garp": GarpScanner,
 }
 
 # Why the remaining scanners are not built yet. Each reason names a missing
@@ -46,23 +57,14 @@ class RegisteredStrategy:
 
 
 def build_scanner(config: StrategyConfig) -> StrategyPlugin:
-    """按声明选择实现：有权重就打分，只有要求就先做资格判定。
+    """Return the class registered for this id, or say which input it waits for.
 
-    三条规则让"权重评审"成为纯配置动作：
-
-    1. `IMPLEMENTATIONS` 里登记过的 id，用它自己的算法（目前只有动量）；
-    2. 声明了 `required_factors` 的配置：有权重 → `WeightedPercentileScanner`，
-       没有权重 → `EligibilityScanner`（只判资格、不打分）；
-    3. 既没登记、也没声明要求的配置 → 报错并写明它等待的输入。
+    There is no inference here: an id without a registered class is refused by
+    name. Inferring the implementation from the presence of weights would make
+    every strategy that happens to have weights the same strategy.
     """
     factory = IMPLEMENTATIONS.get(config.id)
     if factory is None:
-        if config.required_factors:
-            return (
-                WeightedPercentileScanner(config)
-                if config.weights
-                else EligibilityScanner(config)
-            )
         reason = UNIMPLEMENTED_REASONS.get(config.id, "no implementation is registered")
         raise StrategyNotImplementedError(
             f"strategy {config.id!r} has no implementation: {reason}; "
@@ -106,8 +108,8 @@ def unimplemented_scanners(directory: Path) -> tuple[str, ...]:
 
 
 def _runnable(config: StrategyConfig) -> bool:
-    """是否可运行：登记过实现，或声明了要求（于是能判资格、也可能能打分）。"""
-    return config.id in IMPLEMENTATIONS or bool(config.required_factors)
+    """可运行 = 登记过实现；配置里的权重不再决定这件事。"""
+    return config.id in IMPLEMENTATIONS
 
 
 def unimplemented_reasons(directory: Path) -> tuple[tuple[str, str], ...]:

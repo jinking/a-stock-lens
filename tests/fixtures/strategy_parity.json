@@ -1,0 +1,1739 @@
+{
+  "generated_from_commit": "7d58d4c",
+  "as_of": "2026-09-16T15:00:00+00:00",
+  "symbols": [
+    "600000.SH",
+    "600001.SH",
+    "600002.SH",
+    "600003.SH",
+    "600004.SH",
+    "600005.SH",
+    "600006.SH",
+    "600007.SH"
+  ],
+  "missing": [
+    [
+      "peg",
+      "600007.SH"
+    ]
+  ],
+  "values": {
+    "debt_to_asset": [
+      26.2,
+      27.9,
+      29.6,
+      31.3,
+      33.0,
+      29.7,
+      31.4,
+      33.1
+    ],
+    "dividend_paid_ratio": [
+      23.2,
+      27.9,
+      27.6,
+      27.3,
+      27.0,
+      26.7,
+      31.4,
+      31.1
+    ],
+    "gross_margin": [
+      26.2,
+      27.9,
+      29.6,
+      31.3,
+      33.0,
+      29.7,
+      31.4,
+      33.1
+    ],
+    "net_profit_parent_cagr_3y": [
+      3.7,
+      5.4,
+      7.1,
+      8.8,
+      10.5,
+      7.2,
+      8.9,
+      10.6
+    ],
+    "net_profit_parent_yoy": [
+      23.2,
+      27.9,
+      27.6,
+      27.3,
+      27.0,
+      26.7,
+      31.4,
+      31.1
+    ],
+    "ocf_to_net_profit": [
+      15.7,
+      20.4,
+      20.1,
+      19.8,
+      19.5,
+      19.2,
+      23.9,
+      23.6
+    ],
+    "pb": [
+      11.2,
+      12.9,
+      14.6,
+      16.3,
+      18.0,
+      14.7,
+      16.4,
+      18.1
+    ],
+    "pcf_operating_ttm": [
+      18.7,
+      20.4,
+      22.1,
+      23.8,
+      25.5,
+      22.2,
+      23.9,
+      25.6
+    ],
+    "pe_percentile": [
+      24.7,
+      25.4,
+      26.1,
+      26.8,
+      27.5,
+      28.2,
+      28.9,
+      29.6
+    ],
+    "pe_ttm": [
+      6.7,
+      10.4,
+      9.1,
+      12.8,
+      11.5,
+      10.2,
+      13.9,
+      12.6
+    ],
+    "peg": [
+      17.2,
+      17.9,
+      18.6,
+      19.3,
+      20.0,
+      20.7,
+      21.4,
+      22.1
+    ],
+    "proximity_52w_high": [
+      9.7,
+      10.4,
+      11.1,
+      11.8,
+      12.5,
+      13.2,
+      13.9,
+      14.6
+    ],
+    "ps_ttm": [
+      2.2,
+      2.9,
+      3.6,
+      4.3,
+      5.0,
+      5.7,
+      6.4,
+      7.1
+    ],
+    "ret_20d": [
+      20.2,
+      22.9,
+      25.6,
+      23.3,
+      26.0,
+      23.7,
+      26.4,
+      29.1
+    ],
+    "ret_60d": [
+      26.2,
+      27.9,
+      29.6,
+      31.3,
+      33.0,
+      29.7,
+      31.4,
+      33.1
+    ],
+    "revenue_cagr_3y": [
+      12.7,
+      15.4,
+      18.1,
+      15.8,
+      18.5,
+      16.2,
+      18.9,
+      21.6
+    ],
+    "revenue_yoy": [
+      6.7,
+      10.4,
+      9.1,
+      12.8,
+      11.5,
+      10.2,
+      13.9,
+      12.6
+    ],
+    "roe_ttm": [
+      23.2,
+      27.9,
+      27.6,
+      27.3,
+      27.0,
+      26.7,
+      31.4,
+      31.1
+    ]
+  },
+  "strategies": {
+    "dividend": {
+      "scanner_class": "WeightedPercentileScanner",
+      "results": [
+        {
+          "symbol": "600000.SH",
+          "eligible": true,
+          "score": 12.5,
+          "rank_percentile": 0.125,
+          "contributions": [
+            {
+              "factor": "dividend_paid_ratio",
+              "percentile": 0.125,
+              "weight": 1.0,
+              "weighted": 0.0625
+            },
+            {
+              "factor": "ocf_to_net_profit",
+              "percentile": 0.125,
+              "weight": 1.0,
+              "weighted": 0.0625
+            }
+          ]
+        },
+        {
+          "symbol": "600001.SH",
+          "eligible": true,
+          "score": 75.0,
+          "rank_percentile": 0.75,
+          "contributions": [
+            {
+              "factor": "dividend_paid_ratio",
+              "percentile": 0.75,
+              "weight": 1.0,
+              "weighted": 0.375
+            },
+            {
+              "factor": "ocf_to_net_profit",
+              "percentile": 0.75,
+              "weight": 1.0,
+              "weighted": 0.375
+            }
+          ]
+        },
+        {
+          "symbol": "600002.SH",
+          "eligible": true,
+          "score": 62.5,
+          "rank_percentile": 0.625,
+          "contributions": [
+            {
+              "factor": "dividend_paid_ratio",
+              "percentile": 0.625,
+              "weight": 1.0,
+              "weighted": 0.3125
+            },
+            {
+              "factor": "ocf_to_net_profit",
+              "percentile": 0.625,
+              "weight": 1.0,
+              "weighted": 0.3125
+            }
+          ]
+        },
+        {
+          "symbol": "600003.SH",
+          "eligible": true,
+          "score": 50.0,
+          "rank_percentile": 0.5,
+          "contributions": [
+            {
+              "factor": "dividend_paid_ratio",
+              "percentile": 0.5,
+              "weight": 1.0,
+              "weighted": 0.25
+            },
+            {
+              "factor": "ocf_to_net_profit",
+              "percentile": 0.5,
+              "weight": 1.0,
+              "weighted": 0.25
+            }
+          ]
+        },
+        {
+          "symbol": "600004.SH",
+          "eligible": true,
+          "score": 37.5,
+          "rank_percentile": 0.375,
+          "contributions": [
+            {
+              "factor": "dividend_paid_ratio",
+              "percentile": 0.375,
+              "weight": 1.0,
+              "weighted": 0.1875
+            },
+            {
+              "factor": "ocf_to_net_profit",
+              "percentile": 0.375,
+              "weight": 1.0,
+              "weighted": 0.1875
+            }
+          ]
+        },
+        {
+          "symbol": "600005.SH",
+          "eligible": true,
+          "score": 25.0,
+          "rank_percentile": 0.25,
+          "contributions": [
+            {
+              "factor": "dividend_paid_ratio",
+              "percentile": 0.25,
+              "weight": 1.0,
+              "weighted": 0.125
+            },
+            {
+              "factor": "ocf_to_net_profit",
+              "percentile": 0.25,
+              "weight": 1.0,
+              "weighted": 0.125
+            }
+          ]
+        },
+        {
+          "symbol": "600006.SH",
+          "eligible": true,
+          "score": 100.0,
+          "rank_percentile": 1.0,
+          "contributions": [
+            {
+              "factor": "dividend_paid_ratio",
+              "percentile": 1.0,
+              "weight": 1.0,
+              "weighted": 0.5
+            },
+            {
+              "factor": "ocf_to_net_profit",
+              "percentile": 1.0,
+              "weight": 1.0,
+              "weighted": 0.5
+            }
+          ]
+        },
+        {
+          "symbol": "600007.SH",
+          "eligible": true,
+          "score": 87.5,
+          "rank_percentile": 0.875,
+          "contributions": [
+            {
+              "factor": "dividend_paid_ratio",
+              "percentile": 0.875,
+              "weight": 1.0,
+              "weighted": 0.4375
+            },
+            {
+              "factor": "ocf_to_net_profit",
+              "percentile": 0.875,
+              "weight": 1.0,
+              "weighted": 0.4375
+            }
+          ]
+        }
+      ]
+    },
+    "garp": {
+      "scanner_class": "WeightedPercentileScanner",
+      "results": [
+        {
+          "symbol": "600000.SH",
+          "eligible": true,
+          "score": 48.57142857142856,
+          "rank_percentile": 0.2857142857142857,
+          "contributions": [
+            {
+              "factor": "peg",
+              "percentile": 1.0,
+              "weight": -1.0,
+              "weighted": 0.2
+            },
+            {
+              "factor": "pe_percentile",
+              "percentile": 1.0,
+              "weight": -1.0,
+              "weighted": 0.2
+            },
+            {
+              "factor": "revenue_cagr_3y",
+              "percentile": 0.14285714285714285,
+              "weight": 1.0,
+              "weighted": 0.02857142857142857
+            },
+            {
+              "factor": "net_profit_parent_cagr_3y",
+              "percentile": 0.14285714285714285,
+              "weight": 1.0,
+              "weighted": 0.02857142857142857
+            },
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.14285714285714285,
+              "weight": 1.0,
+              "weighted": 0.02857142857142857
+            }
+          ]
+        },
+        {
+          "symbol": "600001.SH",
+          "eligible": true,
+          "score": 62.857142857142854,
+          "rank_percentile": 0.7142857142857143,
+          "contributions": [
+            {
+              "factor": "peg",
+              "percentile": 0.8571428571428571,
+              "weight": -1.0,
+              "weighted": 0.17142857142857143
+            },
+            {
+              "factor": "pe_percentile",
+              "percentile": 0.8571428571428571,
+              "weight": -1.0,
+              "weighted": 0.17142857142857143
+            },
+            {
+              "factor": "revenue_cagr_3y",
+              "percentile": 0.2857142857142857,
+              "weight": 1.0,
+              "weighted": 0.05714285714285714
+            },
+            {
+              "factor": "net_profit_parent_cagr_3y",
+              "percentile": 0.2857142857142857,
+              "weight": 1.0,
+              "weighted": 0.05714285714285714
+            },
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.8571428571428571,
+              "weight": 1.0,
+              "weighted": 0.17142857142857143
+            }
+          ]
+        },
+        {
+          "symbol": "600002.SH",
+          "eligible": true,
+          "score": 65.71428571428571,
+          "rank_percentile": 1.0,
+          "contributions": [
+            {
+              "factor": "peg",
+              "percentile": 0.7142857142857143,
+              "weight": -1.0,
+              "weighted": 0.14285714285714285
+            },
+            {
+              "factor": "pe_percentile",
+              "percentile": 0.7142857142857143,
+              "weight": -1.0,
+              "weighted": 0.14285714285714285
+            },
+            {
+              "factor": "revenue_cagr_3y",
+              "percentile": 0.7142857142857143,
+              "weight": 1.0,
+              "weighted": 0.14285714285714285
+            },
+            {
+              "factor": "net_profit_parent_cagr_3y",
+              "percentile": 0.42857142857142855,
+              "weight": 1.0,
+              "weighted": 0.08571428571428572
+            },
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.7142857142857143,
+              "weight": 1.0,
+              "weighted": 0.14285714285714285
+            }
+          ]
+        },
+        {
+          "symbol": "600003.SH",
+          "eligible": true,
+          "score": 57.14285714285714,
+          "rank_percentile": 0.42857142857142855,
+          "contributions": [
+            {
+              "factor": "peg",
+              "percentile": 0.5714285714285714,
+              "weight": -1.0,
+              "weighted": 0.11428571428571428
+            },
+            {
+              "factor": "pe_percentile",
+              "percentile": 0.5714285714285714,
+              "weight": -1.0,
+              "weighted": 0.11428571428571428
+            },
+            {
+              "factor": "revenue_cagr_3y",
+              "percentile": 0.42857142857142855,
+              "weight": 1.0,
+              "weighted": 0.08571428571428572
+            },
+            {
+              "factor": "net_profit_parent_cagr_3y",
+              "percentile": 0.7142857142857143,
+              "weight": 1.0,
+              "weighted": 0.14285714285714285
+            },
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.5714285714285714,
+              "weight": 1.0,
+              "weighted": 0.11428571428571428
+            }
+          ]
+        },
+        {
+          "symbol": "600004.SH",
+          "eligible": true,
+          "score": 62.857142857142854,
+          "rank_percentile": 0.7142857142857143,
+          "contributions": [
+            {
+              "factor": "peg",
+              "percentile": 0.42857142857142855,
+              "weight": -1.0,
+              "weighted": 0.08571428571428572
+            },
+            {
+              "factor": "pe_percentile",
+              "percentile": 0.42857142857142855,
+              "weight": -1.0,
+              "weighted": 0.08571428571428572
+            },
+            {
+              "factor": "revenue_cagr_3y",
+              "percentile": 0.8571428571428571,
+              "weight": 1.0,
+              "weighted": 0.17142857142857143
+            },
+            {
+              "factor": "net_profit_parent_cagr_3y",
+              "percentile": 1.0,
+              "weight": 1.0,
+              "weighted": 0.2
+            },
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.42857142857142855,
+              "weight": 1.0,
+              "weighted": 0.08571428571428572
+            }
+          ]
+        },
+        {
+          "symbol": "600005.SH",
+          "eligible": true,
+          "score": 40.0,
+          "rank_percentile": 0.14285714285714285,
+          "contributions": [
+            {
+              "factor": "peg",
+              "percentile": 0.2857142857142857,
+              "weight": -1.0,
+              "weighted": 0.05714285714285714
+            },
+            {
+              "factor": "pe_percentile",
+              "percentile": 0.2857142857142857,
+              "weight": -1.0,
+              "weighted": 0.05714285714285714
+            },
+            {
+              "factor": "revenue_cagr_3y",
+              "percentile": 0.5714285714285714,
+              "weight": 1.0,
+              "weighted": 0.11428571428571428
+            },
+            {
+              "factor": "net_profit_parent_cagr_3y",
+              "percentile": 0.5714285714285714,
+              "weight": 1.0,
+              "weighted": 0.11428571428571428
+            },
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.2857142857142857,
+              "weight": 1.0,
+              "weighted": 0.05714285714285714
+            }
+          ]
+        },
+        {
+          "symbol": "600006.SH",
+          "eligible": true,
+          "score": 62.857142857142854,
+          "rank_percentile": 0.7142857142857143,
+          "contributions": [
+            {
+              "factor": "peg",
+              "percentile": 0.14285714285714285,
+              "weight": -1.0,
+              "weighted": 0.02857142857142857
+            },
+            {
+              "factor": "pe_percentile",
+              "percentile": 0.14285714285714285,
+              "weight": -1.0,
+              "weighted": 0.02857142857142857
+            },
+            {
+              "factor": "revenue_cagr_3y",
+              "percentile": 1.0,
+              "weight": 1.0,
+              "weighted": 0.2
+            },
+            {
+              "factor": "net_profit_parent_cagr_3y",
+              "percentile": 0.8571428571428571,
+              "weight": 1.0,
+              "weighted": 0.17142857142857143
+            },
+            {
+              "factor": "roe_ttm",
+              "percentile": 1.0,
+              "weight": 1.0,
+              "weighted": 0.2
+            }
+          ]
+        },
+        {
+          "symbol": "600007.SH",
+          "eligible": false,
+          "score": null,
+          "rank_percentile": null,
+          "contributions": []
+        }
+      ]
+    },
+    "growth": {
+      "scanner_class": "WeightedPercentileScanner",
+      "results": [
+        {
+          "symbol": "600000.SH",
+          "eligible": true,
+          "score": 12.5,
+          "rank_percentile": 0.125,
+          "contributions": [
+            {
+              "factor": "revenue_yoy",
+              "percentile": 0.125,
+              "weight": 1.0,
+              "weighted": 0.03125
+            },
+            {
+              "factor": "revenue_cagr_3y",
+              "percentile": 0.125,
+              "weight": 1.0,
+              "weighted": 0.03125
+            },
+            {
+              "factor": "net_profit_parent_yoy",
+              "percentile": 0.125,
+              "weight": 1.0,
+              "weighted": 0.03125
+            },
+            {
+              "factor": "net_profit_parent_cagr_3y",
+              "percentile": 0.125,
+              "weight": 1.0,
+              "weighted": 0.03125
+            }
+          ]
+        },
+        {
+          "symbol": "600001.SH",
+          "eligible": true,
+          "score": 43.75,
+          "rank_percentile": 0.375,
+          "contributions": [
+            {
+              "factor": "revenue_yoy",
+              "percentile": 0.5,
+              "weight": 1.0,
+              "weighted": 0.125
+            },
+            {
+              "factor": "revenue_cagr_3y",
+              "percentile": 0.25,
+              "weight": 1.0,
+              "weighted": 0.0625
+            },
+            {
+              "factor": "net_profit_parent_yoy",
+              "percentile": 0.75,
+              "weight": 1.0,
+              "weighted": 0.1875
+            },
+            {
+              "factor": "net_profit_parent_cagr_3y",
+              "percentile": 0.25,
+              "weight": 1.0,
+              "weighted": 0.0625
+            }
+          ]
+        },
+        {
+          "symbol": "600002.SH",
+          "eligible": true,
+          "score": 46.875,
+          "rank_percentile": 0.5,
+          "contributions": [
+            {
+              "factor": "revenue_yoy",
+              "percentile": 0.25,
+              "weight": 1.0,
+              "weighted": 0.0625
+            },
+            {
+              "factor": "revenue_cagr_3y",
+              "percentile": 0.625,
+              "weight": 1.0,
+              "weighted": 0.15625
+            },
+            {
+              "factor": "net_profit_parent_yoy",
+              "percentile": 0.625,
+              "weight": 1.0,
+              "weighted": 0.15625
+            },
+            {
+              "factor": "net_profit_parent_cagr_3y",
+              "percentile": 0.375,
+              "weight": 1.0,
+              "weighted": 0.09375
+            }
+          ]
+        },
+        {
+          "symbol": "600003.SH",
+          "eligible": true,
+          "score": 59.375,
+          "rank_percentile": 0.625,
+          "contributions": [
+            {
+              "factor": "revenue_yoy",
+              "percentile": 0.875,
+              "weight": 1.0,
+              "weighted": 0.21875
+            },
+            {
+              "factor": "revenue_cagr_3y",
+              "percentile": 0.375,
+              "weight": 1.0,
+              "weighted": 0.09375
+            },
+            {
+              "factor": "net_profit_parent_yoy",
+              "percentile": 0.5,
+              "weight": 1.0,
+              "weighted": 0.125
+            },
+            {
+              "factor": "net_profit_parent_cagr_3y",
+              "percentile": 0.625,
+              "weight": 1.0,
+              "weighted": 0.15625
+            }
+          ]
+        },
+        {
+          "symbol": "600004.SH",
+          "eligible": true,
+          "score": 65.625,
+          "rank_percentile": 0.75,
+          "contributions": [
+            {
+              "factor": "revenue_yoy",
+              "percentile": 0.625,
+              "weight": 1.0,
+              "weighted": 0.15625
+            },
+            {
+              "factor": "revenue_cagr_3y",
+              "percentile": 0.75,
+              "weight": 1.0,
+              "weighted": 0.1875
+            },
+            {
+              "factor": "net_profit_parent_yoy",
+              "percentile": 0.375,
+              "weight": 1.0,
+              "weighted": 0.09375
+            },
+            {
+              "factor": "net_profit_parent_cagr_3y",
+              "percentile": 0.875,
+              "weight": 1.0,
+              "weighted": 0.21875
+            }
+          ]
+        },
+        {
+          "symbol": "600005.SH",
+          "eligible": true,
+          "score": 40.625,
+          "rank_percentile": 0.25,
+          "contributions": [
+            {
+              "factor": "revenue_yoy",
+              "percentile": 0.375,
+              "weight": 1.0,
+              "weighted": 0.09375
+            },
+            {
+              "factor": "revenue_cagr_3y",
+              "percentile": 0.5,
+              "weight": 1.0,
+              "weighted": 0.125
+            },
+            {
+              "factor": "net_profit_parent_yoy",
+              "percentile": 0.25,
+              "weight": 1.0,
+              "weighted": 0.0625
+            },
+            {
+              "factor": "net_profit_parent_cagr_3y",
+              "percentile": 0.5,
+              "weight": 1.0,
+              "weighted": 0.125
+            }
+          ]
+        },
+        {
+          "symbol": "600006.SH",
+          "eligible": true,
+          "score": 90.625,
+          "rank_percentile": 0.9375,
+          "contributions": [
+            {
+              "factor": "revenue_yoy",
+              "percentile": 1.0,
+              "weight": 1.0,
+              "weighted": 0.25
+            },
+            {
+              "factor": "revenue_cagr_3y",
+              "percentile": 0.875,
+              "weight": 1.0,
+              "weighted": 0.21875
+            },
+            {
+              "factor": "net_profit_parent_yoy",
+              "percentile": 1.0,
+              "weight": 1.0,
+              "weighted": 0.25
+            },
+            {
+              "factor": "net_profit_parent_cagr_3y",
+              "percentile": 0.75,
+              "weight": 1.0,
+              "weighted": 0.1875
+            }
+          ]
+        },
+        {
+          "symbol": "600007.SH",
+          "eligible": true,
+          "score": 90.625,
+          "rank_percentile": 0.9375,
+          "contributions": [
+            {
+              "factor": "revenue_yoy",
+              "percentile": 0.75,
+              "weight": 1.0,
+              "weighted": 0.1875
+            },
+            {
+              "factor": "revenue_cagr_3y",
+              "percentile": 1.0,
+              "weight": 1.0,
+              "weighted": 0.25
+            },
+            {
+              "factor": "net_profit_parent_yoy",
+              "percentile": 0.875,
+              "weight": 1.0,
+              "weighted": 0.21875
+            },
+            {
+              "factor": "net_profit_parent_cagr_3y",
+              "percentile": 1.0,
+              "weight": 1.0,
+              "weighted": 0.25
+            }
+          ]
+        }
+      ]
+    },
+    "momentum": {
+      "scanner_class": "MomentumScanner",
+      "results": [
+        {
+          "symbol": "600000.SH",
+          "eligible": true,
+          "score": 12.5,
+          "rank_percentile": 0.125,
+          "contributions": [
+            {
+              "factor": "ret_20d",
+              "percentile": 0.125,
+              "weight": 1.0,
+              "weighted": 0.041666666666666664
+            },
+            {
+              "factor": "ret_60d",
+              "percentile": 0.125,
+              "weight": 1.0,
+              "weighted": 0.041666666666666664
+            },
+            {
+              "factor": "proximity_52w_high",
+              "percentile": 0.125,
+              "weight": 1.0,
+              "weighted": 0.041666666666666664
+            }
+          ]
+        },
+        {
+          "symbol": "600001.SH",
+          "eligible": true,
+          "score": 25.0,
+          "rank_percentile": 0.25,
+          "contributions": [
+            {
+              "factor": "ret_20d",
+              "percentile": 0.25,
+              "weight": 1.0,
+              "weighted": 0.08333333333333333
+            },
+            {
+              "factor": "ret_60d",
+              "percentile": 0.25,
+              "weight": 1.0,
+              "weighted": 0.08333333333333333
+            },
+            {
+              "factor": "proximity_52w_high",
+              "percentile": 0.25,
+              "weight": 1.0,
+              "weighted": 0.08333333333333333
+            }
+          ]
+        },
+        {
+          "symbol": "600002.SH",
+          "eligible": true,
+          "score": 45.83333333333333,
+          "rank_percentile": 0.375,
+          "contributions": [
+            {
+              "factor": "ret_20d",
+              "percentile": 0.625,
+              "weight": 1.0,
+              "weighted": 0.20833333333333334
+            },
+            {
+              "factor": "ret_60d",
+              "percentile": 0.375,
+              "weight": 1.0,
+              "weighted": 0.125
+            },
+            {
+              "factor": "proximity_52w_high",
+              "percentile": 0.375,
+              "weight": 1.0,
+              "weighted": 0.125
+            }
+          ]
+        },
+        {
+          "symbol": "600003.SH",
+          "eligible": true,
+          "score": 50.0,
+          "rank_percentile": 0.5,
+          "contributions": [
+            {
+              "factor": "ret_20d",
+              "percentile": 0.375,
+              "weight": 1.0,
+              "weighted": 0.125
+            },
+            {
+              "factor": "ret_60d",
+              "percentile": 0.625,
+              "weight": 1.0,
+              "weighted": 0.20833333333333334
+            },
+            {
+              "factor": "proximity_52w_high",
+              "percentile": 0.5,
+              "weight": 1.0,
+              "weighted": 0.16666666666666666
+            }
+          ]
+        },
+        {
+          "symbol": "600004.SH",
+          "eligible": true,
+          "score": 75.0,
+          "rank_percentile": 0.75,
+          "contributions": [
+            {
+              "factor": "ret_20d",
+              "percentile": 0.75,
+              "weight": 1.0,
+              "weighted": 0.25
+            },
+            {
+              "factor": "ret_60d",
+              "percentile": 0.875,
+              "weight": 1.0,
+              "weighted": 0.2916666666666667
+            },
+            {
+              "factor": "proximity_52w_high",
+              "percentile": 0.625,
+              "weight": 1.0,
+              "weighted": 0.20833333333333334
+            }
+          ]
+        },
+        {
+          "symbol": "600005.SH",
+          "eligible": true,
+          "score": 58.333333333333336,
+          "rank_percentile": 0.625,
+          "contributions": [
+            {
+              "factor": "ret_20d",
+              "percentile": 0.5,
+              "weight": 1.0,
+              "weighted": 0.16666666666666666
+            },
+            {
+              "factor": "ret_60d",
+              "percentile": 0.5,
+              "weight": 1.0,
+              "weighted": 0.16666666666666666
+            },
+            {
+              "factor": "proximity_52w_high",
+              "percentile": 0.75,
+              "weight": 1.0,
+              "weighted": 0.25
+            }
+          ]
+        },
+        {
+          "symbol": "600006.SH",
+          "eligible": true,
+          "score": 83.33333333333334,
+          "rank_percentile": 0.875,
+          "contributions": [
+            {
+              "factor": "ret_20d",
+              "percentile": 0.875,
+              "weight": 1.0,
+              "weighted": 0.2916666666666667
+            },
+            {
+              "factor": "ret_60d",
+              "percentile": 0.75,
+              "weight": 1.0,
+              "weighted": 0.25
+            },
+            {
+              "factor": "proximity_52w_high",
+              "percentile": 0.875,
+              "weight": 1.0,
+              "weighted": 0.2916666666666667
+            }
+          ]
+        },
+        {
+          "symbol": "600007.SH",
+          "eligible": true,
+          "score": 100.0,
+          "rank_percentile": 1.0,
+          "contributions": [
+            {
+              "factor": "ret_20d",
+              "percentile": 1.0,
+              "weight": 1.0,
+              "weighted": 0.3333333333333333
+            },
+            {
+              "factor": "ret_60d",
+              "percentile": 1.0,
+              "weight": 1.0,
+              "weighted": 0.3333333333333333
+            },
+            {
+              "factor": "proximity_52w_high",
+              "percentile": 1.0,
+              "weight": 1.0,
+              "weighted": 0.3333333333333333
+            }
+          ]
+        }
+      ]
+    },
+    "quality": {
+      "scanner_class": "WeightedPercentileScanner",
+      "results": [
+        {
+          "symbol": "600000.SH",
+          "eligible": true,
+          "score": 34.375,
+          "rank_percentile": 0.125,
+          "contributions": [
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.125,
+              "weight": 1.0,
+              "weighted": 0.03125
+            },
+            {
+              "factor": "gross_margin",
+              "percentile": 0.125,
+              "weight": 1.0,
+              "weighted": 0.03125
+            },
+            {
+              "factor": "debt_to_asset",
+              "percentile": 1.0,
+              "weight": -1.0,
+              "weighted": 0.25
+            },
+            {
+              "factor": "ocf_to_net_profit",
+              "percentile": 0.125,
+              "weight": 1.0,
+              "weighted": 0.03125
+            }
+          ]
+        },
+        {
+          "symbol": "600001.SH",
+          "eligible": true,
+          "score": 65.625,
+          "rank_percentile": 0.75,
+          "contributions": [
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.75,
+              "weight": 1.0,
+              "weighted": 0.1875
+            },
+            {
+              "factor": "gross_margin",
+              "percentile": 0.25,
+              "weight": 1.0,
+              "weighted": 0.0625
+            },
+            {
+              "factor": "debt_to_asset",
+              "percentile": 0.875,
+              "weight": -1.0,
+              "weighted": 0.21875
+            },
+            {
+              "factor": "ocf_to_net_profit",
+              "percentile": 0.75,
+              "weight": 1.0,
+              "weighted": 0.1875
+            }
+          ]
+        },
+        {
+          "symbol": "600002.SH",
+          "eligible": true,
+          "score": 59.375,
+          "rank_percentile": 0.625,
+          "contributions": [
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.625,
+              "weight": 1.0,
+              "weighted": 0.15625
+            },
+            {
+              "factor": "gross_margin",
+              "percentile": 0.375,
+              "weight": 1.0,
+              "weighted": 0.09375
+            },
+            {
+              "factor": "debt_to_asset",
+              "percentile": 0.75,
+              "weight": -1.0,
+              "weighted": 0.1875
+            },
+            {
+              "factor": "ocf_to_net_profit",
+              "percentile": 0.625,
+              "weight": 1.0,
+              "weighted": 0.15625
+            }
+          ]
+        },
+        {
+          "symbol": "600003.SH",
+          "eligible": true,
+          "score": 53.125,
+          "rank_percentile": 0.5,
+          "contributions": [
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.5,
+              "weight": 1.0,
+              "weighted": 0.125
+            },
+            {
+              "factor": "gross_margin",
+              "percentile": 0.625,
+              "weight": 1.0,
+              "weighted": 0.15625
+            },
+            {
+              "factor": "debt_to_asset",
+              "percentile": 0.5,
+              "weight": -1.0,
+              "weighted": 0.125
+            },
+            {
+              "factor": "ocf_to_net_profit",
+              "percentile": 0.5,
+              "weight": 1.0,
+              "weighted": 0.125
+            }
+          ]
+        },
+        {
+          "symbol": "600004.SH",
+          "eligible": true,
+          "score": 46.875,
+          "rank_percentile": 0.375,
+          "contributions": [
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.375,
+              "weight": 1.0,
+              "weighted": 0.09375
+            },
+            {
+              "factor": "gross_margin",
+              "percentile": 0.875,
+              "weight": 1.0,
+              "weighted": 0.21875
+            },
+            {
+              "factor": "debt_to_asset",
+              "percentile": 0.25,
+              "weight": -1.0,
+              "weighted": 0.0625
+            },
+            {
+              "factor": "ocf_to_net_profit",
+              "percentile": 0.375,
+              "weight": 1.0,
+              "weighted": 0.09375
+            }
+          ]
+        },
+        {
+          "symbol": "600005.SH",
+          "eligible": true,
+          "score": 40.625,
+          "rank_percentile": 0.25,
+          "contributions": [
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.25,
+              "weight": 1.0,
+              "weighted": 0.0625
+            },
+            {
+              "factor": "gross_margin",
+              "percentile": 0.5,
+              "weight": 1.0,
+              "weighted": 0.125
+            },
+            {
+              "factor": "debt_to_asset",
+              "percentile": 0.625,
+              "weight": -1.0,
+              "weighted": 0.15625
+            },
+            {
+              "factor": "ocf_to_net_profit",
+              "percentile": 0.25,
+              "weight": 1.0,
+              "weighted": 0.0625
+            }
+          ]
+        },
+        {
+          "symbol": "600006.SH",
+          "eligible": true,
+          "score": 78.125,
+          "rank_percentile": 1.0,
+          "contributions": [
+            {
+              "factor": "roe_ttm",
+              "percentile": 1.0,
+              "weight": 1.0,
+              "weighted": 0.25
+            },
+            {
+              "factor": "gross_margin",
+              "percentile": 0.75,
+              "weight": 1.0,
+              "weighted": 0.1875
+            },
+            {
+              "factor": "debt_to_asset",
+              "percentile": 0.375,
+              "weight": -1.0,
+              "weighted": 0.09375
+            },
+            {
+              "factor": "ocf_to_net_profit",
+              "percentile": 1.0,
+              "weight": 1.0,
+              "weighted": 0.25
+            }
+          ]
+        },
+        {
+          "symbol": "600007.SH",
+          "eligible": true,
+          "score": 71.875,
+          "rank_percentile": 0.875,
+          "contributions": [
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.875,
+              "weight": 1.0,
+              "weighted": 0.21875
+            },
+            {
+              "factor": "gross_margin",
+              "percentile": 1.0,
+              "weight": 1.0,
+              "weighted": 0.25
+            },
+            {
+              "factor": "debt_to_asset",
+              "percentile": 0.125,
+              "weight": -1.0,
+              "weighted": 0.03125
+            },
+            {
+              "factor": "ocf_to_net_profit",
+              "percentile": 0.875,
+              "weight": 1.0,
+              "weighted": 0.21875
+            }
+          ]
+        }
+      ]
+    },
+    "value": {
+      "scanner_class": "WeightedPercentileScanner",
+      "results": [
+        {
+          "symbol": "600000.SH",
+          "eligible": true,
+          "score": 85.41666666666666,
+          "rank_percentile": 1.0,
+          "contributions": [
+            {
+              "factor": "pe_ttm",
+              "percentile": 1.0,
+              "weight": -1.0,
+              "weighted": 0.16666666666666666
+            },
+            {
+              "factor": "pb",
+              "percentile": 1.0,
+              "weight": -1.0,
+              "weighted": 0.16666666666666666
+            },
+            {
+              "factor": "ps_ttm",
+              "percentile": 1.0,
+              "weight": -1.0,
+              "weighted": 0.16666666666666666
+            },
+            {
+              "factor": "pe_percentile",
+              "percentile": 1.0,
+              "weight": -1.0,
+              "weighted": 0.16666666666666666
+            },
+            {
+              "factor": "pcf_operating_ttm",
+              "percentile": 1.0,
+              "weight": -1.0,
+              "weighted": 0.16666666666666666
+            },
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.125,
+              "weight": 1.0,
+              "weighted": 0.020833333333333332
+            }
+          ]
+        },
+        {
+          "symbol": "600001.SH",
+          "eligible": true,
+          "score": 81.25,
+          "rank_percentile": 0.875,
+          "contributions": [
+            {
+              "factor": "pe_ttm",
+              "percentile": 0.625,
+              "weight": -1.0,
+              "weighted": 0.10416666666666667
+            },
+            {
+              "factor": "pb",
+              "percentile": 0.875,
+              "weight": -1.0,
+              "weighted": 0.14583333333333334
+            },
+            {
+              "factor": "ps_ttm",
+              "percentile": 0.875,
+              "weight": -1.0,
+              "weighted": 0.14583333333333334
+            },
+            {
+              "factor": "pe_percentile",
+              "percentile": 0.875,
+              "weight": -1.0,
+              "weighted": 0.14583333333333334
+            },
+            {
+              "factor": "pcf_operating_ttm",
+              "percentile": 0.875,
+              "weight": -1.0,
+              "weighted": 0.14583333333333334
+            },
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.75,
+              "weight": 1.0,
+              "weighted": 0.125
+            }
+          ]
+        },
+        {
+          "symbol": "600002.SH",
+          "eligible": true,
+          "score": 75.0,
+          "rank_percentile": 0.75,
+          "contributions": [
+            {
+              "factor": "pe_ttm",
+              "percentile": 0.875,
+              "weight": -1.0,
+              "weighted": 0.14583333333333334
+            },
+            {
+              "factor": "pb",
+              "percentile": 0.75,
+              "weight": -1.0,
+              "weighted": 0.125
+            },
+            {
+              "factor": "ps_ttm",
+              "percentile": 0.75,
+              "weight": -1.0,
+              "weighted": 0.125
+            },
+            {
+              "factor": "pe_percentile",
+              "percentile": 0.75,
+              "weight": -1.0,
+              "weighted": 0.125
+            },
+            {
+              "factor": "pcf_operating_ttm",
+              "percentile": 0.75,
+              "weight": -1.0,
+              "weighted": 0.125
+            },
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.625,
+              "weight": 1.0,
+              "weighted": 0.10416666666666667
+            }
+          ]
+        },
+        {
+          "symbol": "600003.SH",
+          "eligible": true,
+          "score": 50.0,
+          "rank_percentile": 0.5625,
+          "contributions": [
+            {
+              "factor": "pe_ttm",
+              "percentile": 0.25,
+              "weight": -1.0,
+              "weighted": 0.041666666666666664
+            },
+            {
+              "factor": "pb",
+              "percentile": 0.5,
+              "weight": -1.0,
+              "weighted": 0.08333333333333333
+            },
+            {
+              "factor": "ps_ttm",
+              "percentile": 0.625,
+              "weight": -1.0,
+              "weighted": 0.10416666666666667
+            },
+            {
+              "factor": "pe_percentile",
+              "percentile": 0.625,
+              "weight": -1.0,
+              "weighted": 0.10416666666666667
+            },
+            {
+              "factor": "pcf_operating_ttm",
+              "percentile": 0.5,
+              "weight": -1.0,
+              "weighted": 0.08333333333333333
+            },
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.5,
+              "weight": 1.0,
+              "weighted": 0.08333333333333333
+            }
+          ]
+        },
+        {
+          "symbol": "600004.SH",
+          "eligible": true,
+          "score": 39.58333333333333,
+          "rank_percentile": 0.3125,
+          "contributions": [
+            {
+              "factor": "pe_ttm",
+              "percentile": 0.5,
+              "weight": -1.0,
+              "weighted": 0.08333333333333333
+            },
+            {
+              "factor": "pb",
+              "percentile": 0.25,
+              "weight": -1.0,
+              "weighted": 0.041666666666666664
+            },
+            {
+              "factor": "ps_ttm",
+              "percentile": 0.5,
+              "weight": -1.0,
+              "weighted": 0.08333333333333333
+            },
+            {
+              "factor": "pe_percentile",
+              "percentile": 0.5,
+              "weight": -1.0,
+              "weighted": 0.08333333333333333
+            },
+            {
+              "factor": "pcf_operating_ttm",
+              "percentile": 0.25,
+              "weight": -1.0,
+              "weighted": 0.041666666666666664
+            },
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.375,
+              "weight": 1.0,
+              "weighted": 0.0625
+            }
+          ]
+        },
+        {
+          "symbol": "600005.SH",
+          "eligible": true,
+          "score": 50.0,
+          "rank_percentile": 0.5625,
+          "contributions": [
+            {
+              "factor": "pe_ttm",
+              "percentile": 0.75,
+              "weight": -1.0,
+              "weighted": 0.125
+            },
+            {
+              "factor": "pb",
+              "percentile": 0.625,
+              "weight": -1.0,
+              "weighted": 0.10416666666666667
+            },
+            {
+              "factor": "ps_ttm",
+              "percentile": 0.375,
+              "weight": -1.0,
+              "weighted": 0.0625
+            },
+            {
+              "factor": "pe_percentile",
+              "percentile": 0.375,
+              "weight": -1.0,
+              "weighted": 0.0625
+            },
+            {
+              "factor": "pcf_operating_ttm",
+              "percentile": 0.625,
+              "weight": -1.0,
+              "weighted": 0.10416666666666667
+            },
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.25,
+              "weight": 1.0,
+              "weighted": 0.041666666666666664
+            }
+          ]
+        },
+        {
+          "symbol": "600006.SH",
+          "eligible": true,
+          "score": 39.58333333333333,
+          "rank_percentile": 0.3125,
+          "contributions": [
+            {
+              "factor": "pe_ttm",
+              "percentile": 0.125,
+              "weight": -1.0,
+              "weighted": 0.020833333333333332
+            },
+            {
+              "factor": "pb",
+              "percentile": 0.375,
+              "weight": -1.0,
+              "weighted": 0.0625
+            },
+            {
+              "factor": "ps_ttm",
+              "percentile": 0.25,
+              "weight": -1.0,
+              "weighted": 0.041666666666666664
+            },
+            {
+              "factor": "pe_percentile",
+              "percentile": 0.25,
+              "weight": -1.0,
+              "weighted": 0.041666666666666664
+            },
+            {
+              "factor": "pcf_operating_ttm",
+              "percentile": 0.375,
+              "weight": -1.0,
+              "weighted": 0.0625
+            },
+            {
+              "factor": "roe_ttm",
+              "percentile": 1.0,
+              "weight": 1.0,
+              "weighted": 0.16666666666666666
+            }
+          ]
+        },
+        {
+          "symbol": "600007.SH",
+          "eligible": true,
+          "score": 29.166666666666668,
+          "rank_percentile": 0.125,
+          "contributions": [
+            {
+              "factor": "pe_ttm",
+              "percentile": 0.375,
+              "weight": -1.0,
+              "weighted": 0.0625
+            },
+            {
+              "factor": "pb",
+              "percentile": 0.125,
+              "weight": -1.0,
+              "weighted": 0.020833333333333332
+            },
+            {
+              "factor": "ps_ttm",
+              "percentile": 0.125,
+              "weight": -1.0,
+              "weighted": 0.020833333333333332
+            },
+            {
+              "factor": "pe_percentile",
+              "percentile": 0.125,
+              "weight": -1.0,
+              "weighted": 0.020833333333333332
+            },
+            {
+              "factor": "pcf_operating_ttm",
+              "percentile": 0.125,
+              "weight": -1.0,
+              "weighted": 0.020833333333333332
+            },
+            {
+              "factor": "roe_ttm",
+              "percentile": 0.875,
+              "weight": 1.0,
+              "weighted": 0.14583333333333334
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

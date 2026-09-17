@@ -10,8 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from astock_lens.strategies.config import StrategyConfig
-from astock_lens.strategies.eligibility import EligibilityScanner
+from astock_lens.strategies.config import StrategyConfig, load_strategy_config
 from astock_lens.strategies.momentum import MomentumScanner
 from astock_lens.strategies.registry import (
     IMPLEMENTATIONS,
@@ -23,10 +22,20 @@ from astock_lens.strategies.registry import (
     unimplemented_reasons,
     unimplemented_scanners,
 )
-from astock_lens.strategies.weighted import WeightedPercentileScanner
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIGS = ROOT / "configs" / "strategies"
+
+# 每个策略解析到它自己的 Scanner 类。这不是命名偏好：一个由 YAML 权重决定的
+# 通用实现，会让"Growth 的资格规则"和"Dividend 的资格规则"在代码里无处安放。
+EXPECTED_SCANNERS: dict[str, str] = {
+    "momentum": "MomentumScanner",
+    "growth": "GrowthScanner",
+    "quality": "QualityScanner",
+    "dividend": "DividendScanner",
+    "value": "ValueScanner",
+    "garp": "GarpScanner",
+}
 
 
 def _config(strategy_id: str, **overrides: object) -> StrategyConfig:
@@ -50,9 +59,9 @@ def test_every_configured_scanner_is_either_built_or_explained() -> None:
     assert built & explained == set()
 
 
-def test_four_scanners_run_and_three_report_what_they_wait_for() -> None:
-    # 只有自带算法的 Scanner 需要登记；其余靠"是否声明了要求"判定可运行。
-    assert set(IMPLEMENTATIONS) == {"momentum"}
+def test_six_scanners_run_and_one_reports_what_it_waits_for() -> None:
+    # 实现必须显式登记：不再靠"YAML 里有没有权重"来推断该用哪个类。
+    assert set(IMPLEMENTATIONS) == set(EXPECTED_SCANNERS)
     assert {item.config.id for item in load_scanners(CONFIGS)} == {
         "dividend",
         "garp",
@@ -61,8 +70,25 @@ def test_four_scanners_run_and_three_report_what_they_wait_for() -> None:
         "quality",
         "value",
     }
-    # 估值数据接入后 Value 与 GARP 有了要求；只剩 Industry Trend 等行业数据。
     assert set(unimplemented_scanners(CONFIGS)) == {"industry_trend"}
+
+
+def test_every_configured_strategy_resolves_to_its_own_scanner() -> None:
+    """六个在打分的策略各自拥有独立 Scanner 边界。"""
+    for strategy_id, class_name in EXPECTED_SCANNERS.items():
+        config = load_strategy_config(CONFIGS / f"{strategy_id}.yaml")
+
+        scanner = build_scanner(config)
+
+        assert type(scanner).__name__ == class_name, strategy_id
+
+
+def test_the_registry_no_longer_infers_an_implementation_from_weights() -> None:
+    """权重是配置，不是类型判定器：有权重不再自动变成同一个类。"""
+    config = load_strategy_config(CONFIGS / "growth.yaml")
+
+    assert config.weights
+    assert type(build_scanner(config)).__name__ == "GrowthScanner"
 
 
 def test_the_blocked_scanners_name_a_missing_input() -> None:
@@ -80,26 +106,33 @@ def test_a_blocked_scanner_says_why_when_it_is_asked_to_run() -> None:
     assert "industry data" in message
 
 
-def test_the_built_scanners_bind_to_the_implementation_their_config_needs() -> None:
+def test_the_built_scanners_bind_to_the_class_the_registry_names() -> None:
     loaded = {item.config.id: item.plugin for item in load_scanners(CONFIGS)}
 
     assert isinstance(loaded["momentum"], MomentumScanner)
-    for strategy_id in ("growth", "quality", "dividend"):
-        # 权重已于 2026-09-17 评审通过，因此这三个走打分实现。
-        assert isinstance(loaded[strategy_id], WeightedPercentileScanner)
+    for strategy_id, class_name in EXPECTED_SCANNERS.items():
+        assert type(loaded[strategy_id]).__name__ == class_name
         assert loaded[strategy_id].required_factors()
-    # Value 与 GARP 的权重均于 2026-09-17 评审通过 → 两者都打分。
-    for strategy_id in ("value", "garp"):
-        assert isinstance(loaded[strategy_id], WeightedPercentileScanner)
 
 
-def test_a_configuration_without_reviewed_weights_judges_eligibility_only() -> None:
-    """权重评审是唯一开关：没权重就不产生分数。"""
-    scored = _config("quality", required_factors=["roe_ttm"], weights={"roe_ttm": 1.0})
-    unscored = _config("quality", required_factors=["roe_ttm"])
+def test_an_unregistered_strategy_is_refused_even_when_it_has_weights() -> None:
+    """权重不再是"可运行"的依据：没登记实现就是没实现。"""
+    unregistered = _config(
+        "someone_elses_idea",
+        required_factors=["roe_ttm"],
+        weights={"roe_ttm": 1.0},
+    )
 
-    assert isinstance(build_scanner(scored), WeightedPercentileScanner)
-    assert isinstance(build_scanner(unscored), EligibilityScanner)
+    with pytest.raises(StrategyNotImplementedError):
+        build_scanner(unregistered)
+
+
+def test_a_registered_strategy_still_needs_reviewed_weights() -> None:
+    """登记了类也不够：没有已评审的权重，打分无从谈起。"""
+    without_weights = _config("quality", required_factors=["roe_ttm"])
+
+    with pytest.raises(ValueError, match="declares no weights"):
+        build_scanner(without_weights)
 
 
 def test_shipped_weights_cover_their_required_factors_exactly() -> None:

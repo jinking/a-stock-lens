@@ -1,9 +1,8 @@
 """Eligibility-only scanners.
 
 `docs/STRATEGY_SYSTEM.md` §5 defers every scanner's weights, score thresholds,
-`rank_percentile` and `confidence`. Momentum shipped with a draft weight set
-explicitly marked `PENDING REVIEW`; the scanners built here go one step further
-and report **eligibility only**, because they have no reviewed weights at all.
+`rank_percentile` and `confidence`. A scanned symbol can therefore be judged on
+eligibility alone when nobody has approved a weight set for it yet.
 
 That is a deliberate half-step, not a stub. Eligibility is a real verdict —
 "this symbol's evidence is complete enough for this scanner to consider it" —
@@ -11,11 +10,15 @@ it is the first half of the funnel the design describes, and it is falsifiable.
 A score would require a number nobody has approved, and a made-up threshold
 reads downstream as a product judgement.
 
-One class serves the scanners bound to it because, with scoring deferred, the
-only thing that distinguishes them today is *which factors they demand* — and
-that lives in `configs/strategies/*.yaml`, not here. When a scanner's weights
-are reviewed it gets its own scoring implementation, and the registry binding
-is the seam where that swap happens.
+**现状（2026-09-17 核心执行链硬化）**：六个策略的权重都已评审通过，各自有了
+独立的 Scanner 类，`registry.IMPLEMENTATIONS` 里不再有自动落到这个类的规则，
+因此本模块目前**不被任何生产路径引用**。保留它的理由是一个真实用途：某个策略
+暂时只有资格规则、没有已评审的权重时，它仍然是一个可登记的 Plugin 实现——
+登记处就在 `registry.IMPLEMENTATIONS`。若项目所有者认为这条退路不需要，删除
+本模块与其测试即可，不影响任何现有策略。
+
+早先的版本让这个类服务于"配置里有要求但没写权重"的一切策略，那等于让 YAML
+决定用哪个实现；那条规则已经随 Task 6 移除。
 """
 
 from collections.abc import Sequence
