@@ -18,12 +18,8 @@ from astock_lens.strategies.momentum import MomentumScanner
 from astock_lens.strategies.weighted import WeightedPercentileScanner
 
 IMPLEMENTATIONS: Mapping[str, Callable[[StrategyConfig], StrategyPlugin]] = {
+    # 只有自带算法的 Scanner 需要在这里登记：动量有自己的横截面评分实现。
     "momentum": MomentumScanner,
-    # Eligibility only: their weights and thresholds are deferred, so a score
-    # would be a number nobody reviewed.
-    "growth": EligibilityScanner,
-    "quality": EligibilityScanner,
-    "dividend": EligibilityScanner,
 }
 
 # Why the remaining scanners are not built yet. Each reason names a missing
@@ -59,13 +55,23 @@ class RegisteredStrategy:
 
 
 def build_scanner(config: StrategyConfig) -> StrategyPlugin:
-    """Return the scanner implementation for one configuration."""
+    """按声明选择实现：有权重就打分，只有要求就先做资格判定。
+
+    三条规则让"权重评审"成为纯配置动作：
+
+    1. `IMPLEMENTATIONS` 里登记过的 id，用它自己的算法（目前只有动量）；
+    2. 声明了 `required_factors` 的配置：有权重 → `WeightedPercentileScanner`，
+       没有权重 → `EligibilityScanner`（只判资格、不打分）；
+    3. 既没登记、也没声明要求的配置 → 报错并写明它等待的输入。
+    """
     factory = IMPLEMENTATIONS.get(config.id)
-    if factory is None and config.weights:
-        # The seam where a review becomes behaviour: a scanner whose weights
-        # have been approved starts scoring without a code change.
-        return WeightedPercentileScanner(config)
     if factory is None:
+        if config.required_factors:
+            return (
+                WeightedPercentileScanner(config)
+                if config.weights
+                else EligibilityScanner(config)
+            )
         reason = UNIMPLEMENTED_REASONS.get(config.id, "no implementation is registered")
         raise StrategyNotImplementedError(
             f"strategy {config.id!r} has no implementation: {reason}; "
@@ -109,13 +115,8 @@ def unimplemented_scanners(directory: Path) -> tuple[str, ...]:
 
 
 def _runnable(config: StrategyConfig) -> bool:
-    """Whether a configuration has something to run.
-
-    Either a scanner is registered for its id, or it carries reviewed weights
-    that `WeightedPercentileScanner` can score with. A configuration with
-    neither is the case `unimplemented_scanners` reports.
-    """
-    return config.id in IMPLEMENTATIONS or bool(config.weights)
+    """是否可运行：登记过实现，或声明了要求（于是能判资格、也可能能打分）。"""
+    return config.id in IMPLEMENTATIONS or bool(config.required_factors)
 
 
 def unimplemented_reasons(directory: Path) -> tuple[tuple[str, str], ...]:

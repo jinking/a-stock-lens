@@ -23,6 +23,7 @@ from astock_lens.strategies.registry import (
     unimplemented_reasons,
     unimplemented_scanners,
 )
+from astock_lens.strategies.weighted import WeightedPercentileScanner
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIGS = ROOT / "configs" / "strategies"
@@ -42,7 +43,7 @@ def test_every_configured_scanner_is_either_built_or_explained() -> None:
     """The two sets must partition the configurations — no silent gaps."""
     configured = {path.stem for path in strategy_paths(CONFIGS)}
 
-    built = set(IMPLEMENTATIONS)
+    built = set(IMPLEMENTATIONS) | {item.config.id for item in load_scanners(CONFIGS)}
     explained = set(UNIMPLEMENTED_REASONS)
 
     assert built | explained >= configured
@@ -50,7 +51,14 @@ def test_every_configured_scanner_is_either_built_or_explained() -> None:
 
 
 def test_four_scanners_run_and_three_report_what_they_wait_for() -> None:
-    assert set(IMPLEMENTATIONS) == {"momentum", "growth", "quality", "dividend"}
+    # 只有自带算法的 Scanner 需要登记；其余靠"是否声明了要求"判定可运行。
+    assert set(IMPLEMENTATIONS) == {"momentum"}
+    assert {item.config.id for item in load_scanners(CONFIGS)} == {
+        "dividend",
+        "growth",
+        "momentum",
+        "quality",
+    }
     assert set(unimplemented_scanners(CONFIGS)) == {"garp", "value", "industry_trend"}
 
 
@@ -76,8 +84,34 @@ def test_the_built_scanners_bind_to_the_implementation_their_config_needs() -> N
 
     assert isinstance(loaded["momentum"], MomentumScanner)
     for strategy_id in ("growth", "quality", "dividend"):
-        assert isinstance(loaded[strategy_id], EligibilityScanner)
+        # 权重已于 2026-09-17 评审通过，因此这三个走打分实现。
+        assert isinstance(loaded[strategy_id], WeightedPercentileScanner)
         assert loaded[strategy_id].required_factors()
+
+
+def test_a_configuration_without_reviewed_weights_judges_eligibility_only() -> None:
+    """权重评审是唯一开关：没权重就不产生分数。"""
+    scored = _config("quality", required_factors=["roe_ttm"], weights={"roe_ttm": 1.0})
+    unscored = _config("quality", required_factors=["roe_ttm"])
+
+    assert isinstance(build_scanner(scored), WeightedPercentileScanner)
+    assert isinstance(build_scanner(unscored), EligibilityScanner)
+
+
+def test_shipped_weights_cover_their_required_factors_exactly() -> None:
+    """配置守卫：权重表与要求表一旦对不上，这里就失败。
+
+    该守卫存在的理由很具体——2026-09-17 给三个 Scanner 写入等权时，注册表里还硬绑着
+    资格判定实现，结果 19 个测试同时失败。配置与实现的一致性应当由一个断言来守。
+    """
+    from astock_lens.strategies.config import load_strategy_config
+
+    for path in strategy_paths(CONFIGS):
+        config = load_strategy_config(path)
+        if not config.weights:
+            continue
+        assert set(config.weights) == set(config.required_factors), path.name
+        assert all(weight != 0 for weight in config.weights.values()), path.name
 
 
 def test_loading_skips_a_blocked_scanner_instead_of_failing() -> None:

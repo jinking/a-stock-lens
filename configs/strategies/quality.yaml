@@ -9,6 +9,16 @@ required_factors:
   - gross_margin
   - debt_to_asset
   - ocf_to_net_profit
+# 权重已由项目所有者于 2026-09-17 评审通过：四个维度等权。
+#
+# 等权是刻意的中性选择，不是"没想好"：评审实测显示不同权重会让 top-12 只重合 3 个
+# （收益+现金流优先 vs 等权），因此在没有依据说哪个维度更重要之前，不对它们排序。
+# 负号表示极性：`debt_to_asset` 越低越好（见 docs/REVIEW_NOTES.md 的权重评审一节）。
+weights:
+  roe_ttm: 1.0
+  gross_margin: 1.0
+  debt_to_asset: -1.0
+  ocf_to_net_profit: 1.0
 dimensions:
   - ROE and ROIC
   - gross margin and net margin

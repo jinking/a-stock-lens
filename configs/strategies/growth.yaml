@@ -10,6 +10,17 @@ required_factors:
   - revenue_cagr_3y
   - net_profit_parent_yoy
   - net_profit_parent_cagr_3y
+# 权重已由项目所有者于 2026-09-17 评审通过：四个维度等权。
+#
+# 待确认项（本次评审记录，尚未处理）：全市场实测榜首的 `revenue_yoy` 达 1819%、
+# `net_profit_parent_yoy` 达 71528%，百分位排名把 3000% 与 70000% 压成相邻名次，
+# 因此换权重几乎不改变榜单（等权 vs 3 年持续性优先重合 88%）。是否稳健化
+# （缩尾 / 要求两端同时成立 / 其他）仍待所有者决定。
+weights:
+  revenue_yoy: 1.0
+  revenue_cagr_3y: 1.0
+  net_profit_parent_yoy: 1.0
+  net_profit_parent_cagr_3y: 1.0
 dimensions:
   - revenue and profit year-over-year growth
   - three-year CAGR

@@ -3,10 +3,19 @@ enabled: true
 version: v1
 description: Dividend sustainability and cash-flow coverage, not yield alone.
 # 设计要求分红看"可持续性与现金流覆盖"而不是只看股息率：支付率 + 现金流覆盖是
-# 两个现在就能算的维度（股息率还需要市值口径，属 Deferred）。权重与阈值同样 Deferred。
+# 两个现在就能算的维度（股息率还需要市值口径，属 Deferred）。
 required_factors:
-  - dividend_payout_ttm
+  - dividend_paid_ratio
   - ocf_to_net_profit
+# 权重已由项目所有者于 2026-09-17 评审通过（等权，两个维度都取正号）。
+#
+# 依据与待确认项：
+# - 支付率改用源站年报口径，代替原先会在分母塌缩时爆炸的 `dividend_payout_ttm`；
+# - 两个因子都取正号：支付率表达"回报股东的程度"，现金流覆盖表达"这分红是不是真有钱撑着"；
+# - 若日后希望偏向留存再投资项目，把 `dividend_paid_ratio` 改成负数即可，无需改代码。
+weights:
+  dividend_paid_ratio: 1.0
+  ocf_to_net_profit: 1.0
 dimensions:
   - dividend yield
   - dividend sustainability

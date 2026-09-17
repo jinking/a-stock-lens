@@ -117,13 +117,18 @@ CANDIDATES: Mapping[str, tuple[Candidate, ...]] = {
     "dividend": (
         Candidate(
             "equal",
-            {"dividend_payout_ttm": 1.0, "ocf_to_net_profit": 1.0},
+            {"dividend_paid_ratio": 1.0, "ocf_to_net_profit": 1.0},
             "neutral baseline: payout and cash coverage weigh the same",
         ),
         Candidate(
             "coverage_first",
-            {"dividend_payout_ttm": 0.5, "ocf_to_net_profit": 1.5},
+            {"dividend_paid_ratio": 0.5, "ocf_to_net_profit": 1.5},
             "the design's emphasis: coverage before headline payout",
+        ),
+        Candidate(
+            "retention_first",
+            {"dividend_paid_ratio": -0.5, "ocf_to_net_profit": 1.5},
+            "payout inverted: prefer companies that keep more cash in the business",
         ),
     ),
 }
