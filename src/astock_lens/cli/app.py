@@ -5,6 +5,7 @@ agents without the Web UI. It never prints a reassuring summary for a run that
 did nothing — a failure exits non-zero with the reason.
 """
 
+import csv
 import json
 import os
 import platform
@@ -19,6 +20,8 @@ from zoneinfo import ZoneInfo
 import typer
 from pydantic import BaseModel, ValidationError
 
+from astock_lens.calibration.candidate_report import generate_calibration_report
+from astock_lens.calibration.render import render_json, render_markdown
 from astock_lens.candidates.models import Candidate
 from astock_lens.data.contracts import DataProvider
 from astock_lens.data.health import raw_datasets
@@ -120,6 +123,11 @@ universe_app = typer.Typer(
     help="Universe engine commands.",
 )
 app.add_typer(universe_app, name="universe")
+calibrate_app = typer.Typer(
+    no_args_is_help=True,
+    help="Candidate qualification calibration commands.",
+)
+app.add_typer(calibrate_app, name="calibrate")
 
 
 @app.callback()
@@ -1109,3 +1117,99 @@ def _research_action(
     typer.echo(
         f"{job.job_id} submitted for {job.symbol} at {job.submitted_at.isoformat()}"
     )
+
+
+def _load_industry_map(path: Path) -> dict[str, str]:
+    """Load and validate the symbol-to-industry CSV mapping."""
+    if not path.is_file():
+        typer.echo(f"industry map file not found: {path}", err=True)
+        raise typer.Exit(code=1)
+
+    mapping: dict[str, str] = {}
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            if reader.fieldnames is None:
+                typer.echo(f"industry map CSV is empty: {path}", err=True)
+                raise typer.Exit(code=1)
+            fields = [field.strip() for field in reader.fieldnames if field]
+            if "symbol" not in fields or "industry" not in fields:
+                typer.echo(
+                    f"industry map CSV must have 'symbol' and 'industry' columns: {path}",
+                    err=True,
+                )
+                raise typer.Exit(code=1)
+            for row_idx, row in enumerate(reader, start=2):
+                sym = (row.get("symbol") or "").strip()
+                ind = (row.get("industry") or "").strip()
+                if not sym or not ind:
+                    typer.echo(
+                        f"industry map row {row_idx} is missing symbol or industry",
+                        err=True,
+                    )
+                    raise typer.Exit(code=1)
+                if sym in mapping:
+                    typer.echo(
+                        f"duplicate symbol in industry map at row {row_idx}: {sym}",
+                        err=True,
+                    )
+                    raise typer.Exit(code=1)
+                mapping[sym] = ind
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        typer.echo(f"failed to read industry map {path}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if not mapping:
+        typer.echo(f"industry map CSV has no data rows: {path}", err=True)
+        raise typer.Exit(code=1)
+
+    return mapping
+
+
+@calibrate_app.command("candidates")
+def calibrate_candidates(
+    as_of: Annotated[
+        str,
+        typer.Option(
+            "--as-of",
+            help="Trade date, YYYY-MM-DD.",
+        ),
+    ],
+    industry_map: Annotated[
+        Path,
+        typer.Option(
+            "--industry-map",
+            help="Path to CSV file with symbol,industry columns.",
+        ),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option(
+            "--output-dir",
+            help="Directory where calibration reports will be written.",
+        ),
+    ],
+) -> None:
+    """Generate cross-sectional candidate calibration report without mutating state."""
+    mapping = _load_industry_map(industry_map)
+    state = _preview_state(as_of)
+    report = generate_calibration_report(
+        strategy_results=state.strategy_results,
+        factor_results=state.factor_results,
+        industry_map=mapping,
+        as_of=state.as_of,
+    )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    date_str = state.as_of.strftime("%Y-%m-%d")
+    json_path = output_dir / f"{date_str}-candidate-calibration.json"
+    md_path = output_dir / f"{date_str}-candidate-calibration.md"
+
+    json_path.write_text(render_json(report), encoding="utf-8")
+    md_path.write_text(render_markdown(report), encoding="utf-8")
+
+    typer.echo("Calibration report written:")
+    typer.echo(f"  {json_path}")
+    typer.echo(f"  {md_path}")
