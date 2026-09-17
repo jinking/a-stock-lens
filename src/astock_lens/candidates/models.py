@@ -13,6 +13,7 @@ from astock_lens.domain.enums import (
     Signal,
 )
 from astock_lens.domain.models import DomainRecord, SnapshotLineage
+from astock_lens.qualifications.models import StrategyQualification
 from astock_lens.strategies.contracts import StrategyResult
 
 
@@ -28,7 +29,9 @@ class Candidate(DomainRecord):
     as_of: datetime
     next_action: NextAction
     lineage: SnapshotLineage
+    candidate_policy_version: str = "v1"
     strategy_results: tuple[StrategyResult, ...] = ()
+    strategy_qualifications: tuple[StrategyQualification, ...] = ()
     market_validation: MarketValidation | None = None
     signal: Signal | None = None
     reasons: tuple[str, ...] = ()
