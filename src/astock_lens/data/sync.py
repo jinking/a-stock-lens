@@ -20,6 +20,8 @@ trustworthy:
 """
 
 import csv
+import os
+import tempfile
 from collections.abc import Sequence
 from datetime import date, datetime
 from pathlib import Path
@@ -578,6 +580,60 @@ def write_merged(
     the file and the payload do not share the key columns, one of them is not
     the dataset the other one is, and appending would corrupt both.
     """
+    return _merge_into_file(path, payload, keys=keys, atomic=False)
+
+
+def write_merged_atomic(
+    path: Path,
+    payload: RawPayload,
+    *,
+    keys: Sequence[str] = (SYMBOL_COLUMN, TRADE_DATE_COLUMN),
+) -> tuple[int, int]:
+    """Same merge as `write_merged`, but the file is replaced atomically.
+
+    先写同目录的临时文件，写完 `os.replace` 顶上：读者永远看不到半份行情，进程在中途被
+    杀也不会把整份日线留在写到一半的状态。冷启动的压实走这条路——一次运行里整份文件要
+    被合并多次，半成品比慢更糟。
+    """
+    return _merge_into_file(path, payload, keys=keys, atomic=True)
+
+
+def merge_payloads(payloads: Sequence[RawPayload]) -> RawPayload | None:
+    """Fold several payloads into one: column union, rows concatenated in order.
+
+    多份分片折成一份再合并，写入次数就从"每份一次"降成"整轮一次"。列取并集、缺列留空
+    （缺的格子由规范化阶段读作缺失，不会被当成 0）；没有任何行时返回 `None`，表示
+    "没有东西要合并"，而不是"合并了个空数据集"。
+    """
+    union: list[str] = []
+    present: list[RawPayload] = []
+    for payload in payloads:
+        if not payload.rows:
+            continue
+        for column in payload.columns:
+            if column not in union:
+                union.append(column)
+        present.append(payload)
+    if not present:
+        return None
+
+    columns = tuple(union)
+    rows = tuple(
+        _pad(row, payload.columns, columns)
+        for payload in present
+        for row in payload.rows
+    )
+    return RawPayload(columns=columns, rows=rows)
+
+
+def _merge_into_file(
+    path: Path,
+    payload: RawPayload,
+    *,
+    keys: Sequence[str],
+    atomic: bool,
+) -> tuple[int, int]:
+    """The one implementation of "replace by key and write it back"."""
     columns, rows = read_raw_rows(path)
     missing_keys = [key for key in keys if key not in payload.columns]
     if missing_keys:
@@ -609,13 +665,37 @@ def write_merged(
     kept = tuple(row for row in widened if _key(row, key_columns) not in seen)
     merged = (*kept, *incoming)
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as stream:
-        writer = csv.writer(stream, lineterminator="\n")
-        writer.writerow(union)
-        writer.writerows(merged)
+    if atomic:
+        _atomic_write_rows(path, union, merged)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream, lineterminator="\n")
+            writer.writerow(union)
+            writer.writerows(merged)
 
     return len(incoming), len(merged)
+
+
+def _atomic_write_rows(
+    path: Path, columns: Sequence[str], rows: Sequence[tuple[str, ...]]
+) -> None:
+    """Write a raw file through a temp file in the same directory, then replace."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream, lineterminator="\n")
+            writer.writerow(columns)
+            writer.writerows(rows)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
 
 
 def _pad(

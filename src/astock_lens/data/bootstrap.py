@@ -27,6 +27,7 @@ from typing import Protocol, runtime_checkable
 from astock_lens.data.bootstrap_checkpoint import (
     BootstrapCheckpoint,
     BootstrapSymbolState,
+    compact_bootstrap_run,
 )
 from astock_lens.data.contracts import RawDataset, RawPayload
 from astock_lens.data.sync import (
@@ -35,7 +36,6 @@ from astock_lens.data.sync import (
     TRADE_DATE_COLUMN,
     covered_symbols,
     read_raw_rows,
-    write_merged,
 )
 from astock_lens.domain.enums import DataStatus
 from astock_lens.domain.models import DomainRecord
@@ -283,37 +283,6 @@ def _payload_covers(payload: RawPayload, *, start_date: date, end_date: date) ->
     return min(days) <= start_date.isoformat() and max(days) >= end_date.isoformat()
 
 
-def _union_payloads(payloads: Sequence[RawPayload]) -> RawPayload | None:
-    """Fold several staged parts into one payload: column union, rows in order.
-
-    列取并集（供应商对不同标的的字段形状可能不同，缺的格子留空，由规范化阶段读作缺失），
-    行按分片顺序拼接；同一标的只会出现一次，所以不会把同一根 bar 写进两份。
-    """
-    parts: list[RawPayload] = []
-    union: list[str] = []
-    for payload in payloads:
-        if not payload.rows:
-            continue
-        for column in payload.columns:
-            if column not in union:
-                union.append(column)
-        parts.append(payload)
-    if not parts:
-        return None
-
-    columns = tuple(union)
-    position = {column: index for index, column in enumerate(columns)}
-    rows: list[tuple[str, ...]] = []
-    for payload in parts:
-        for row in payload.rows:
-            folded = [""] * len(columns)
-            for index, column in enumerate(payload.columns):
-                if index < len(row):
-                    folded[position[column]] = row[index]
-            rows.append(tuple(folded))
-    return RawPayload(columns=columns, rows=tuple(rows))
-
-
 def _is_staged_success(checkpoint: BootstrapCheckpoint, symbol: str) -> bool:
     entry = checkpoint.entry_for(symbol)
     return entry is not None and entry.status is BootstrapSymbolState.SUCCESS
@@ -430,11 +399,9 @@ def land_bar_chunks(
             )
             failed.append(fetch.symbol)
 
-    rows_written = 0
-    # 整份文件只在这里被写一次：行数是本次合并写进去的行（含续跑补回的历史分片）。
-    merged = _union_payloads(list(staged.values()))
-    if merged is not None:
-        rows_written, _ = write_merged(path, merged)
+    # 整份文件只在这里被写一次，而且走 Task 7 的确定性压实（唯一 canonical 合并路径）：
+    # 行数是本次合并写进去的行（含续跑补回的历史分片）。
+    rows_written, _ = compact_bootstrap_run(checkpoint=checkpoint, canonical_path=path)
 
     return ChunkSyncResult(
         requested_symbols=requested,

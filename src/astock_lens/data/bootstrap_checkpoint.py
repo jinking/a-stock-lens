@@ -28,6 +28,8 @@ from datetime import UTC, date, datetime
 from enum import Enum
 from pathlib import Path
 
+from astock_lens.data.contracts import RawPayload
+from astock_lens.data.sync import merge_payloads, read_raw_rows, write_merged_atomic
 from astock_lens.domain.models import DomainRecord
 
 
@@ -81,6 +83,35 @@ def _mkstemp(path: Path) -> tuple[int, str]:
     return tempfile.mkstemp(
         dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
     )
+
+
+def compact_bootstrap_run(
+    *,
+    checkpoint: BootstrapCheckpoint,
+    canonical_path: Path,
+) -> tuple[int, int]:
+    """把本轮**成功**标的的分片一次性、确定性地合并进整份行情文件。
+
+    顺序只由内容决定：清单里成功的标的按 symbol 排序（`manifest()` 本身有序），分片就按这个
+    顺序读，于是同一批分片无论按什么顺序落盘，合并结果逐字节相同；同一次运行重复压实也不会
+    改动文件（同键替换 + 确定的顺序）。整份文件只被读写一次，写入走原子替换，进程在中途被杀
+    不会留下半份行情。
+
+    失败标的的分片不参与合并：`TIMEOUT` / `SOURCE_ERROR` / `EMPTY` 是"这次没拿到"，不是"拿到了
+    零根 bar"，把它当成功合并进去就是静默兜底。没有成功分片时不动整份文件，返回 `(0, 0)`。
+    """
+    payloads: list[RawPayload] = []
+    for entry in checkpoint.manifest().entries:
+        if entry.status is not BootstrapSymbolState.SUCCESS:
+            continue
+        columns, rows = read_raw_rows(checkpoint.parts_path(entry.symbol))
+        if columns and rows:
+            payloads.append(RawPayload(columns=columns, rows=rows))
+
+    payload = merge_payloads(payloads)
+    if payload is None:
+        return (0, 0)
+    return write_merged_atomic(canonical_path, payload)
 
 
 class BootstrapCheckpoint:

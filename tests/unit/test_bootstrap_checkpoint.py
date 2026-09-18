@@ -11,11 +11,12 @@
 `daily_bars.csv`，而是逐标的落分片；整份文件在一次落地调用里只合并一次。
 """
 
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from time import sleep
 
-from astock_lens.data import bootstrap
+from astock_lens.data import bootstrap, bootstrap_checkpoint
 from astock_lens.data.bootstrap import BootstrapRequirement, land_bar_chunks
 from astock_lens.data.bootstrap_checkpoint import (
     BootstrapCheckpoint,
@@ -256,15 +257,18 @@ def test_landing_a_chunk_stages_a_part_per_symbol(local_tmp: Path) -> None:
 def test_the_canonical_file_is_merged_once_per_landing_call(
     local_tmp: Path, monkeypatch
 ) -> None:
-    """三块落地只许合并一次整份 `daily_bars.csv`，不得每块重写一遍。"""
+    """三块落地只许合并一次整份 `daily_bars.csv`，不得每块重写一遍。
+
+    合并路径只有一条（Task 7 的确定性压实），所以这里数的就是它被调用几次。
+    """
     merges: list[Path] = []
-    real = bootstrap.write_merged
+    real = bootstrap.compact_bootstrap_run
 
-    def counted(path: Path, payload: RawPayload, **kwargs: object):
-        merges.append(path)
-        return real(path, payload, **kwargs)  # type: ignore[arg-type]
+    def counted(*, checkpoint: BootstrapCheckpoint, canonical_path: Path):
+        merges.append(canonical_path)
+        return real(checkpoint=checkpoint, canonical_path=canonical_path)
 
-    monkeypatch.setattr(bootstrap, "write_merged", counted)
+    monkeypatch.setattr(bootstrap, "compact_bootstrap_run", counted)
 
     bootstrap.bootstrap_liquidity_history(
         provider=_BulkFetcher(),
@@ -354,3 +358,93 @@ def test_a_rerun_does_not_refetch_symbols_whose_part_is_already_staged(
     assert {row[index] for row in rows} == {"000001.SZ"}, (
         "已暂存的行必须被补进整份文件，不得留在分片里成为孤儿数据"
     )
+
+
+def _canonical(path: Path, rows: Sequence[tuple[str, ...]] = ()) -> Path:
+    """写一份已存在的整份行情文件（含表头）。"""
+    lines = [",".join(BAR_COLUMNS), *(",".join(row) for row in rows)]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _stage(checkpoint: BootstrapCheckpoint, symbols: Sequence[str]) -> None:
+    for symbol in symbols:
+        checkpoint.record_success(symbol, columns=BAR_COLUMNS, rows=_rows(symbol))
+
+
+def test_compaction_does_not_depend_on_the_order_the_parts_were_staged(
+    local_tmp: Path,
+) -> None:
+    """压实必须只由**内容**决定：同一个运行的分片，无论按什么顺序落盘，合并结果逐字节相同。"""
+    symbols = ("000001.SZ", "000002.SZ", "600519.SH")
+    forward_root = local_tmp / "forward"
+    backward_root = local_tmp / "backward"
+    forward_root.mkdir()
+    backward_root.mkdir()
+    _stage(_checkpoint(forward_root), symbols)
+    _stage(_checkpoint(backward_root), tuple(reversed(symbols)))
+
+    forward_result = bootstrap_checkpoint.compact_bootstrap_run(
+        checkpoint=_checkpoint(forward_root),
+        canonical_path=forward_root / "daily_bars.csv",
+    )
+    backward_result = bootstrap_checkpoint.compact_bootstrap_run(
+        checkpoint=_checkpoint(backward_root),
+        canonical_path=backward_root / "daily_bars.csv",
+    )
+
+    assert forward_result == backward_result
+    assert (forward_root / "daily_bars.csv").read_bytes() == (
+        backward_root / "daily_bars.csv"
+    ).read_bytes(), "落盘顺序不得改变整份行情文件的字节"
+
+
+def test_compacting_twice_leaves_the_file_unchanged(local_tmp: Path) -> None:
+    """压实是幂等的：同一次运行压两遍，第二遍不得改动内容。"""
+    checkpoint = _checkpoint(local_tmp)
+    _stage(checkpoint, ("000001.SZ", "600519.SH"))
+    canonical = local_tmp / "daily_bars.csv"
+
+    first = bootstrap_checkpoint.compact_bootstrap_run(
+        checkpoint=checkpoint, canonical_path=canonical
+    )
+    after_first = canonical.read_bytes()
+    second = bootstrap_checkpoint.compact_bootstrap_run(
+        checkpoint=checkpoint, canonical_path=canonical
+    )
+
+    assert second == first
+    assert canonical.read_bytes() == after_first
+
+
+def test_compaction_replaces_the_keys_it_covers_instead_of_appending(
+    local_tmp: Path,
+) -> None:
+    """整份文件里已有的同键行必须被替换，而且不得动到分片没覆盖的行。"""
+    stale = ("000001.SZ", "2026-09-10", "9", "9", "9", "9", "9", "9", "0.09")
+    untouched = ("300750.SZ", "2026-09-10", "1", "1", "1", "1", "1", "1", "0.01")
+    canonical = _canonical(local_tmp / "daily_bars.csv", (stale, untouched))
+    checkpoint = _checkpoint(local_tmp)
+    fresh = (
+        "000001.SZ",
+        "2026-09-10",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1000",
+        "0.01",
+    )
+    checkpoint.record_success("000001.SZ", columns=BAR_COLUMNS, rows=(fresh,))
+
+    bootstrap_checkpoint.compact_bootstrap_run(
+        checkpoint=checkpoint, canonical_path=canonical
+    )
+
+    _, rows = read_raw_rows(canonical)
+    keys = [tuple(row) for row in rows]
+    assert len(keys) == len(set(keys)), "同键行只能有一条"
+    assert stale not in keys, "旧行必须被同键的新行替换，而不是留下来"
+    assert fresh in keys
+    assert untouched in keys, "分片没覆盖的行必须原样保留"

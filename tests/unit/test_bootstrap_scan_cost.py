@@ -115,9 +115,11 @@ def test_the_flow_reads_the_landed_file_a_constant_number_of_times(
         "once per symbol; read "
         f"{calls['whole_file']} times for {len(SYMBOLS)} symbols"
     )
-    # 分片读取按标的数线性增长，且每只标的最多读一次（不是每块、每轮重复读）。
+    # 分片读取按标的数线性增长：同一只标的的分片每轮最多读两次（续跑判定一次、压实一次），
+    # 不是每块读一次、也不是按整份文件的行数重复读。这条用例只有一轮，所以上界是标的数。
     assert calls["parts"] <= len(SYMBOLS), (
-        f"每只标的的分片最多读一次；实际读取 {calls['parts']} 次，标的数 {len(SYMBOLS)}"
+        "每只标的的分片每轮最多读两次；实际读取 "
+        f"{calls['parts']} 次，标的数 {len(SYMBOLS)}"
     )
 
 
