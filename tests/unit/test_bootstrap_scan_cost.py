@@ -100,6 +100,7 @@ def test_the_flow_reads_the_landed_file_a_constant_number_of_times(
         chunk_size=20,
     )
 
+    assert calls["count"] >= 1, "成本测试必须确认确实读取过落地文件"
     # 一次运行最多读几次：覆盖判定 + 每轮扩展一次计数 + 收尾一次。60 只标的
     # 只应有的个位数次数；按标的重复读会是 60 次以上。
     assert calls["count"] <= 8, (
