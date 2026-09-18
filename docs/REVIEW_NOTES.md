@@ -480,3 +480,47 @@ uv run astock sync --as-of 2026-09-17 --valuation --symbol 600519.SH --symbol 00
 - 只跑只读分析执行链（`_preview_state` / `run_analysis`），严禁调用 `run_daily`，不写 Snapshot、Watchlist、Job 目录；
 - 输出 `<YYYY-MM-DD>-candidate-calibration.json` 与 `.md` 两个产物，均显式标记 `CALIBRATION ONLY — NOT APPROVED PRODUCT RULE` 警告；
 - 为项目所有者审定绝对质量门槛提供全市场分布、分位数敏感性、行业集中度与重合度证据。
+
+## 十四、行业成员映射链路（2026-09-18，Task 7）
+
+校准报告的"行业分布与集中度"与 `astock calibrate candidates --industry-map` 都需要一份
+可审计的行业映射。本节的结论是：**来源取既有 WeStock CLI 的 `sector` 组**，不新增第三方依赖。
+
+### 7A 探源（2026-09-18 实测，非推断）
+
+| 命令 | 实测结果 |
+| --- | --- |
+| `westock sector --help` | 存在 `sector` 组：constituent / info / ranking / oper / valuation / forecast / finance |
+| `westock sector ranking --kind industry` | **124 个板块**，稳定 `pt0…` 代码 + 名称（`pt01801995 电视广播Ⅱ`、`pt01801783 股份制银行Ⅱ`…） |
+| `westock sector constituent pt01801783` | 标题 `申万二级行业成分股-股份制银行Ⅱ [申万二级行业] (9 只)`，列为 `code,name` |
+
+按计划 7A 的来源接受顺序，第 1 条（既有 provider/CLI 提供稳定可枚举目录）即命中，因此**不触发
+STOP GATE**。计划原文把 7B 标题写作"Normalize neodata Industry Membership"，但 neodata 的行业查询
+靠板块名做意图解析、枚举不出目录，故来源改用 westock：**标题与实现的差异在此记录**，落地路径为
+`data/raw/westock/industry/<取数日>.csv`（不写进 `neodata/`，避免读者误判来源）。
+
+### 链路与不变量
+
+```text
+westock sector ranking --kind industry   （权威目录，124 个申万二级板块）
+        ↓ 逐板块
+westock sector constituent <pt 代码>      （code,name，标题自带层级声明）
+        ↓ normalize（data/normalize/industry.py）
+IndustryMembership → data/raw/westock/industry/<日期>.csv
+        ↓ build_industry_map
+symbol → industry   （astock industry export-map 写出 symbol,industry 两列）
+```
+
+- **标题必须与调用方要的行业一致**：目录说是 A、响应标题说是 B，说明这次调用拿回的是别人的答案，
+  直接报错而不是把成员挂到错误的板块名下。
+- **无法解析的代码必须报错**，不跳过：跳过会让某只标的从行业分布里消失，而覆盖率数字看不出少了谁。
+- **多归属必须拒绝**：同一 symbol 落在两个不同 industry 时抛 `IndustryMembershipAmbiguous`
+  （文案含 `BLOCKED_PRIMARY_INDUSTRY_SEMANTICS`），绝不"先到先得"。申万二级本身是划分，正常情况下
+  不会触发；这条防的是源站将来改成概念/主题口径时悄悄给出一个假的主行业。
+- **时点由 `as_of` 保证**：晚于 `as_of` 的成员记录不可见，与其余数据层同一条规则。
+
+### 命令
+
+- `astock sync-industry --as-of <日期>`：先取目录、再逐板块取成员，落成按取数日命名的文件（重跑幂等）。
+- `astock industry export-map --as-of <日期> --output <路径>`：写出**恰好两列**的 `symbol,industry` CSV；
+  除该输出文件外不触碰 Snapshot / Watchlist / Job。

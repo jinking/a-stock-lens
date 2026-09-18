@@ -25,6 +25,11 @@ from datetime import date, datetime
 from pathlib import Path
 
 from astock_lens.data.contracts import DataProvider, FetchRequest, RawPayload
+from astock_lens.data.industry import IndustryMembership, IndustrySource
+from astock_lens.data.normalize.industry import (
+    normalize_constituents,
+    parse_sector_catalog,
+)
 from astock_lens.domain.enums import DataStatus
 from astock_lens.domain.models import DomainRecord
 
@@ -193,6 +198,105 @@ def land_financial_statements(
         )
 
     return SyncResult(as_of=as_of, landings=tuple(landings))
+
+
+INDUSTRY_ROOT = "westock/industry"
+INDUSTRY_COLUMNS: tuple[str, ...] = (
+    "symbol",
+    "industry_id",
+    "industry_name",
+    "as_of",
+    "provider",
+    "source_ref",
+)
+
+
+def land_industry_memberships(
+    *,
+    source: "IndustrySource",
+    root: Path,
+    as_of: datetime,
+) -> DatasetLanding:
+    """把行业目录与成员关系落成一个按取数日命名的文件。
+
+    目录先枚举再逐板块取成员，因此文件里的每一行都带着它是**哪个板块、哪一天**
+    问来的。同一取数日重跑即覆盖，幂等。
+
+    没有目录、或某个板块一行都没回来，都是失败而不是空文件：行业覆盖缺失会让
+    校准报告少一整项证据。
+    """
+    catalog = parse_sector_catalog(source.catalog_text())
+    if not catalog:
+        raise ValueError("行业目录为空：没有可枚举的板块，无法建立成员映射")
+
+    memberships: list[IndustryMembership] = []
+    empty_boards: list[str] = []
+    for entry in catalog:
+        found = normalize_constituents(
+            source.constituent_text(entry.industry_id),
+            industry_id=entry.industry_id,
+            industry_name=entry.industry_name,
+            as_of=as_of,
+            provider=source.provider,
+        )
+        if not found:
+            empty_boards.append(entry.industry_id)
+            continue
+        memberships.extend(found)
+
+    path = root / INDUSTRY_ROOT / f"{as_of.date().isoformat()}.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(INDUSTRY_COLUMNS)
+        for membership in memberships:
+            writer.writerow(
+                (
+                    membership.symbol,
+                    membership.industry_id,
+                    membership.industry_name,
+                    membership.as_of.isoformat(),
+                    membership.provider,
+                    membership.source_ref or "",
+                )
+            )
+
+    note = None
+    if empty_boards:
+        note = (
+            f"{len(empty_boards)} boards returned no constituents: {empty_boards[:5]}"
+        )
+    return DatasetLanding(
+        dataset="industry",
+        path=path,
+        status=DataStatus.VALUE,
+        rows_written=len(memberships),
+        rows_total=len(memberships),
+        note=note,
+    )
+
+
+def read_industry_memberships(path: Path) -> tuple["IndustryMembership", ...]:
+    """读回一个已落地的行业文件，供映射与导出使用。"""
+    columns, rows = read_raw_rows(path)
+    if not columns:
+        return ()
+    missing = [column for column in INDUSTRY_COLUMNS if column not in columns]
+    if missing:
+        raise ValueError(f"{path} lacks the columns {missing}; it has {columns}")
+    index = {column: columns.index(column) for column in INDUSTRY_COLUMNS}
+
+    return tuple(
+        IndustryMembership(
+            symbol=row[index["symbol"]],
+            industry_id=row[index["industry_id"]],
+            industry_name=row[index["industry_name"]],
+            as_of=datetime.fromisoformat(row[index["as_of"]]),
+            provider=row[index["provider"]],
+            source_ref=row[index["source_ref"]] or None,
+        )
+        for row in rows
+    )
 
 
 def land_neodata_blocks(

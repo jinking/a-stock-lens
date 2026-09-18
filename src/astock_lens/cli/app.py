@@ -32,6 +32,10 @@ from astock_lens.data.bootstrap import (
 )
 from astock_lens.data.contracts import DataProvider, FetchRequest
 from astock_lens.data.health import raw_datasets
+from astock_lens.data.industry import (
+    WestockSectorSource,
+    build_industry_map,
+)
 from astock_lens.data.normalize.csv_securities import CsvSecurityNormalizer
 from astock_lens.data.providers.akshare_provider import AkShareProvider
 from astock_lens.data.providers.local import LocalCsvProvider
@@ -41,12 +45,15 @@ from astock_lens.data.snapshots.resolve import resolve_snapshot_store
 from astock_lens.data.snapshots.store import SnapshotStore
 from astock_lens.data.sync import (
     DONE_STATUSES,
+    INDUSTRY_ROOT,
     DatasetLanding,
     SyncResult,
     land_financial_statements,
+    land_industry_memberships,
     land_neodata_blocks,
     land_raw,
     land_securities_listing,
+    read_industry_memberships,
     read_raw_rows,
     read_symbols,
 )
@@ -940,6 +947,64 @@ def _land(day: datetime) -> SyncResult:
             f"provider {health.provider} is not usable: {health.message}"
         )
     return land_raw(provider=provider, root=_csv_root(), as_of=day)
+
+
+industry_app = typer.Typer(
+    no_args_is_help=True,
+    help="Industry membership commands.",
+)
+app.add_typer(industry_app, name="industry")
+
+
+@app.command("sync-industry")
+def sync_industry(as_of: Annotated[str, AS_OF_OPTION]) -> None:
+    """Land the canonical industry catalog and its memberships.
+
+    Catalog first, then one call per board: what lands is a per-fetch-day file
+    whose every row says which board it came from and when it was asked for.
+    The catalog is the authority — this never invents a board list.
+    """
+    day = _as_of(as_of)
+    landing = land_industry_memberships(
+        source=WestockSectorSource(), root=_csv_root(), as_of=day
+    )
+    typer.echo(f"industry {landing.status.value}: {landing.rows_written} memberships")
+    typer.echo(f"written to {landing.path}")
+    if landing.note is not None:
+        typer.echo(f"note: {landing.note}", err=True)
+
+
+@industry_app.command("export-map")
+def industry_export_map(
+    as_of: Annotated[str, AS_OF_OPTION],
+    output: Annotated[
+        Path, typer.Option("--output", help="写出的 symbol,industry CSV 路径。")
+    ],
+) -> None:
+    """Write the `symbol,industry` CSV the calibration command consumes.
+
+    Only the named output file is written: Snapshot / Watchlist / Job state is
+    untouched, so exporting a map can never change what the system believes.
+    """
+    day = _as_of(as_of)
+    path = _csv_root() / INDUSTRY_ROOT / f"{day.date().isoformat()}.csv"
+    memberships = read_industry_memberships(path)
+    if not memberships:
+        typer.echo(
+            f"no landed industry memberships at {path}; run `astock sync-industry` "
+            "first",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    mapping = build_industry_map(memberships, as_of=day)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(("symbol", "industry"))
+        for symbol in sorted(mapping):
+            writer.writerow((symbol, mapping[symbol]))
+    typer.echo(f"industry map: {len(mapping)} symbols written to {output}")
 
 
 @app.command("sync-research")
