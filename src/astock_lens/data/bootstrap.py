@@ -169,24 +169,36 @@ def _chunks(items: Sequence[str], size: int) -> Iterator[tuple[str, ...]]:
         yield tuple(items[start : start + size])
 
 
-def _count_bars(path: Path, symbol: str, *, end_date: date, column: str) -> int:
-    """Count the symbol's landed bars carrying `column`, up to `end_date`."""
+def _bar_counts(path: Path, *, end_date: date, column: str) -> dict[str, int]:
+    """Count every symbol's usable bars in **one** pass over the landed file.
+
+    Reading the file once per symbol is what made the whole-market bootstrap
+    spend half an hour in pure CPU after its fetches had finished: 5,301 symbols
+    × a 97,641-row parse. Counting all symbols in a single pass is the same
+    answer for the price of one read.
+    """
     columns, rows = read_raw_rows(path)
     needed = (SYMBOL_COLUMN, TRADE_DATE_COLUMN, column)
     if not all(column in columns for column in needed):
-        return 0
+        return {}
     symbol_at = columns.index(SYMBOL_COLUMN)
     date_at = columns.index(TRADE_DATE_COLUMN)
     value_at = columns.index(column)
     limit = end_date.isoformat()
 
-    return sum(
-        1
-        for row in rows
-        if row[symbol_at] == symbol
-        and row[date_at] <= limit
-        and row[value_at].strip() != ""
-    )
+    counts: dict[str, int] = {}
+    for row in rows:
+        if row[date_at] > limit or not row[value_at].strip():
+            continue
+        symbol = row[symbol_at]
+        if symbol:
+            counts[symbol] = counts.get(symbol, 0) + 1
+    return counts
+
+
+def _count_bars(path: Path, symbol: str, *, end_date: date, column: str) -> int:
+    """One symbol's usable bar count, up to `end_date`."""
+    return _bar_counts(path, end_date=end_date, column=column).get(symbol, 0)
 
 
 def valid_amount_bars(path: Path, symbol: str, *, end_date: date) -> int:
@@ -358,10 +370,8 @@ def _extend_history(
         )
         failed.extend(item for item in result.failed_symbols if item not in failed)
 
-        measured = {
-            symbol: _count_bars(path, symbol, end_date=end_date, column=column)
-            for symbol in short
-        }
+        counts = _bar_counts(path, end_date=end_date, column=column)
+        measured = {symbol: counts.get(symbol, 0) for symbol in short}
         if measured == counted:
             break
         counted = measured
@@ -372,16 +382,14 @@ def _extend_history(
         short = still_short
         start_date -= timedelta(days=windows)
 
+    final_counts = _bar_counts(path, end_date=end_date, column=column)
     coverage = tuple(
         BootstrapSymbolCoverage(
             symbol=symbol,
-            valid_bars=count,
-            satisfied=count >= windows,
+            valid_bars=final_counts.get(symbol, 0),
+            satisfied=final_counts.get(symbol, 0) >= windows,
         )
-        for symbol, count in (
-            (symbol, _count_bars(path, symbol, end_date=end_date, column=column))
-            for symbol in dict.fromkeys(symbols)
-        )
+        for symbol in dict.fromkeys(symbols)
     )
     return BootstrapSyncResult(
         as_of=as_of,
