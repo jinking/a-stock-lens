@@ -37,7 +37,81 @@ from astock_lens.pipelines.stages import (
 )
 from astock_lens.strategies.contracts import StrategyResult
 from astock_lens.strategies.registry import RegisteredStrategy
+from astock_lens.universe.builder import LIQUIDITY_FACTOR
 from astock_lens.universe.config import UniverseConfig
+from astock_lens.universe.models import UniverseExclusion
+from astock_lens.universe.prefilter import prefilter_listing
+
+
+class ResearchUniverseState(DomainRecord):
+    """Which symbols the research population holds, and what kept the rest out.
+
+    Two counts are kept apart on purpose: the listing prefilter (what listing
+    metadata alone allows) and the research universe (what the approved
+    Universe rules admit once the liquidity measure exists). Collapsing them
+    would hide where a symbol was dropped.
+    """
+
+    as_of: datetime
+    listing_prefilter_symbols: tuple[str, ...]
+    research_symbols: tuple[str, ...]
+    excluded: tuple[UniverseExclusion, ...] = ()
+
+
+def compute_research_universe(
+    *,
+    csv_root: Path,
+    as_of: datetime,
+    universe_config: UniverseConfig,
+    factor_configs: Sequence[FactorConfig],
+    dataset: str = DEFAULT_DATASET,
+    securities_dataset: str = DEFAULT_SECURITIES_DATASET,
+) -> ResearchUniverseState:
+    """Materialize the research population before anything expensive happens.
+
+    Only the liquidity factor is computed here. The research population decides
+    *which* symbols are worth measuring, so computing the other 23 factors first
+    would spend the run's most expensive work on symbols that may never enter
+    the research population at all.
+
+    `dataset` / `securities_dataset` are the same knobs the rest of the pipeline
+    exposes, so a caller can point this at whatever the daily run would read.
+    """
+    outcome = normalize_stage(
+        csv_root=csv_root,
+        as_of=as_of,
+        dataset=dataset,
+        securities_dataset=securities_dataset,
+    )
+    prefiltered = prefilter_listing(
+        outcome.securities, config=universe_config, as_of=as_of
+    )
+
+    liquidity_configs = tuple(
+        config for config in factor_configs if config.name == LIQUIDITY_FACTOR
+    )
+    if not liquidity_configs:
+        raise ValueError(
+            f"the research universe needs the {LIQUIDITY_FACTOR} factor "
+            "configuration: the Universe's liquidity rule consumes it"
+        )
+    liquidity_results = factor_stage(
+        outcome=outcome, factor_configs=liquidity_configs, as_of=as_of
+    )
+    snapshot = universe_stage(
+        outcome=outcome,
+        factor_results=liquidity_results,
+        config=universe_config,
+        as_of=as_of,
+    )
+    return ResearchUniverseState(
+        as_of=as_of,
+        listing_prefilter_symbols=prefiltered.included,
+        research_symbols=snapshot.included,
+        excluded=snapshot.exclusions,
+    )
+
+
 from astock_lens.universe.models import UniverseSnapshot
 
 __all__ = ["AnalysisState", "FactorState", "compute_factor_state", "run_analysis"]

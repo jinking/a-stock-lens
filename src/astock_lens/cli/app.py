@@ -58,6 +58,7 @@ from astock_lens.pipelines.analysis import (
     AnalysisState,
     FactorState,
     compute_factor_state,
+    compute_research_universe,
     run_analysis,
 )
 from astock_lens.pipelines.daily import DailyRunResult, run_daily
@@ -440,6 +441,33 @@ def factors_compute(as_of: Annotated[str, AS_OF_OPTION]) -> None:
     report = measured.outcome.quality_report
     typer.echo(f"quality: {report.accepted}/{report.checked} bars accepted", err=True)
     typer.echo("snapshot: none (a computation does not write)", err=True)
+
+
+@universe_app.command("research")
+def universe_research(as_of: Annotated[str, AS_OF_OPTION]) -> None:
+    """Show the Research Universe this data would produce. It writes nothing.
+
+    The count is reported, not enforced: the approved semantics put the target
+    around 2,000–3,000 symbols as an observation, and a result of 1,850 or 3,200
+    must never move a threshold to reach a rounder number.
+    """
+    day = _as_of(as_of)
+    state = compute_research_universe(
+        csv_root=_csv_root(),
+        as_of=day,
+        universe_config=load_universe_config(_universe_config_path()),
+        factor_configs=_factor_configs(),
+        dataset=_dataset(),
+        securities_dataset=_securities_dataset(),
+    )
+
+    by_rule = Counter(exclusion.rule.value for exclusion in state.excluded)
+    typer.echo(f"listing prefilter: {len(state.listing_prefilter_symbols)} symbols")
+    typer.echo(f"research universe: {len(state.research_symbols)} symbols")
+    for rule, count in sorted(by_rule.items()):
+        typer.echo(f"  excluded by {rule}: {count}")
+    typer.echo("target size is observational (approximately 2,000-3,000), not a quota")
+    typer.echo("snapshot: none written (preview)", err=True)
 
 
 @universe_app.command("bootstrap-requirement")

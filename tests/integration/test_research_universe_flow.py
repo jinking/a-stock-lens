@@ -13,6 +13,10 @@ whether the network is up, not whether the flow is correct.
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+import pytest
+from typer.testing import CliRunner
+
+from astock_lens.cli.app import app
 from astock_lens.data.bootstrap import (
     BootstrapRequirement,
     ChunkSyncResult,
@@ -22,6 +26,10 @@ from astock_lens.data.bootstrap import (
 from astock_lens.data.contracts import FetchRequest, RawDataset, RawPayload
 from astock_lens.data.sync import read_raw_rows
 from astock_lens.domain.enums import DataStatus
+from astock_lens.factors.config import FactorConfig, load_factor_config
+from astock_lens.pipelines import analysis
+from astock_lens.pipelines.analysis import compute_research_universe
+from astock_lens.universe.config import UniverseConfig, load_universe_config
 
 AS_OF = datetime(2026, 9, 17, 15, 0, tzinfo=UTC)
 END_DATE = date(2026, 9, 17)
@@ -276,3 +284,71 @@ def test_history_that_runs_out_is_reported_short_not_padded(local_tmp: Path) -> 
     columns, rows = read_raw_rows(_bars_path(local_tmp))
     assert len(rows) == 8, "no row may be invented to reach the requirement"
     assert columns == BAR_COLUMNS
+
+
+FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "csv"
+
+
+def _universe_config() -> UniverseConfig:
+    return load_universe_config(
+        Path(__file__).resolve().parents[2] / "configs" / "universe.yaml"
+    )
+
+
+def _factor_configs() -> tuple[FactorConfig, ...]:
+    directory = Path(__file__).resolve().parents[2] / "configs" / "factors"
+    return tuple(load_factor_config(path) for path in sorted(directory.glob("*.yaml")))
+
+
+def test_the_research_universe_is_a_subset_of_the_listing_prefilter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The two layers must agree: nothing reaches research that the prefilter dropped."""
+    seen: list[tuple[str, ...]] = []
+    original = analysis.factor_stage
+
+    def watching(*, outcome, factor_configs, as_of):
+        seen.append(tuple(config.name for config in factor_configs))
+        return original(outcome=outcome, factor_configs=factor_configs, as_of=as_of)
+
+    # Patch where the flow looks it up: `analysis` imported the stage directly.
+    monkeypatch.setattr(analysis, "factor_stage", watching)
+
+    state = compute_research_universe(
+        csv_root=FIXTURE_ROOT,
+        as_of=datetime(2026, 9, 4, 15, 0, tzinfo=UTC),
+        universe_config=_universe_config(),
+        factor_configs=_factor_configs(),
+        dataset="daily_bars_long",
+    )
+
+    assert set(state.research_symbols) <= set(state.listing_prefilter_symbols)
+    assert state.research_symbols, "the fixture carries symbols that must survive"
+    assert seen == [("avg_amount_20d",)], (
+        "deciding membership must compute the liquidity measure only, not all "
+        f"24 factors; saw {seen}"
+    )
+
+
+def test_the_research_command_reports_an_observational_target_and_writes_nothing(
+    local_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot_root = local_tmp / "snapshots"
+    watchlist_root = local_tmp / "watchlist"
+    job_root = local_tmp / "jobs"
+    for root in (snapshot_root, watchlist_root, job_root):
+        root.mkdir()
+    monkeypatch.setenv("ASTOCK_CSV_ROOT", str(FIXTURE_ROOT))
+    monkeypatch.setenv("ASTOCK_DATASET", "daily_bars_long")
+    monkeypatch.setenv("ASTOCK_SNAPSHOT_ROOT", str(snapshot_root))
+    monkeypatch.setenv("ASTOCK_WATCHLIST_ROOT", str(watchlist_root))
+    monkeypatch.setenv("ASTOCK_JOB_ROOT", str(job_root))
+
+    result = CliRunner().invoke(app, ["universe", "research", "--as-of", "2026-09-04"])
+
+    assert result.exit_code == 0, result.output
+    assert "not a quota" in result.stdout
+    assert "research universe" in result.stdout
+    assert list(snapshot_root.iterdir()) == []
+    assert list(watchlist_root.iterdir()) == []
+    assert list(job_root.iterdir()) == []
