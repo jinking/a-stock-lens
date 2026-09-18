@@ -312,6 +312,23 @@ class _HeartbeatSink:
         typer.echo(render_progress(progress))
 
 
+def _benchmark_subset(symbols: Sequence[str], *, limit: int) -> tuple[str, ...]:
+    """基准/运维专用：从预筛结果里确定性地取 `limit` 只标的。
+
+    **不是产品规则**，因此不进 `configs/`，也不改变 Universe 语义：预筛仍然在全市场列表上
+    跑，这里只决定"这次真正去取历史的是哪几只"，用于在跑全市场之前先用小样本验证真实链路。
+    抽样等距跨越整份列表，避免"只取代码最小的 100 只"把交易所与板块偏差带进基准；同样的输入
+    永远得到同样的子集。
+    """
+    if limit <= 0:
+        raise ValueError(f"limit must be positive, got {limit}")
+    ordered = tuple(dict.fromkeys(symbols))
+    if limit >= len(ordered):
+        return ordered
+    stride = len(ordered) // limit
+    return tuple(ordered[::stride][:limit])
+
+
 def _today_close() -> datetime:
     """The A-share close on the current date in Shanghai."""
     today = datetime.now(SHANGHAI).date()
@@ -1142,6 +1159,16 @@ def sync_bootstrap(
             ),
         ),
     ] = 1,
+    limit_symbols: Annotated[
+        int | None,
+        typer.Option(
+            "--limit-symbols",
+            help=(
+                "基准/运维专用：只对确定性抽样后的前 N 只标的取历史。默认不限制；"
+                "它不改变产品 Universe 语义，也不是产品阈值。"
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Land the least price history a cold start needs, resumably.
 
@@ -1195,13 +1222,21 @@ def sync_bootstrap(
         f"{requirement.factor_name} per symbol, window read from configs/factors"
     )
 
+    population = prefiltered.included
+    if limit_symbols is not None:
+        population = _benchmark_subset(population, limit=limit_symbols)
+        typer.echo(
+            f"benchmark subset: {len(population)} of {len(prefiltered.included)} "
+            "prefiltered symbols (operator-only; product Universe unchanged)"
+        )
+
     result = bootstrap_liquidity_history(
         # 同上：批量来源没有证据背书，接线为 None，补缺逐标的进行。
         batch_source=None,
         fallback_source=_symbol_bar_provider(provider),
         root=root,
         as_of=day,
-        symbols=prefiltered.included,
+        symbols=population,
         requirement=requirement,
         end_date=day.date(),
         batch_size=batch_size,

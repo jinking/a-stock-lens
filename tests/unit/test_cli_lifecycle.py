@@ -447,8 +447,108 @@ def test_sync_lands_raw_data_and_reports_what_it_wrote(
     assert result.exit_code == 0, result.output
     assert (raw_root / "securities.csv").is_file()
     assert (raw_root / "daily_bars.csv").is_file()
-    assert "securities" in result.stdout
     assert "daily_bars" in result.stdout
+    assert "securities" in result.stdout
+
+
+class ListingProvider(StubProvider):
+    """一份能过预筛的上市列表 + 逐标的行情，全部来自内存。"""
+
+    def __init__(self, *, count: int = 30) -> None:
+        super().__init__()
+        self.symbols = tuple(f"{index:06d}.SZ" for index in range(count))
+        self.symbol_requests: list[str] = []
+
+    def fetch(self, request: FetchRequest) -> RawDataset:
+        if request.dataset != "securities":
+            return super().fetch(request)
+        self.requests.append(request)
+        rows = (
+            *(
+                (symbol, f"name{index}", "SZSE", "2015-01-05", "False", "False", "")
+                for index, symbol in enumerate(self.symbols)
+            ),
+        )
+        return self._dataset(
+            request,
+            (
+                "symbol",
+                "name",
+                "exchange",
+                "list_date",
+                "is_st",
+                "is_delisting_board",
+                "suspended_trading_days",
+            ),
+            rows,
+        )
+
+    def fetch_symbol_bars(
+        self,
+        symbol: str,
+        *,
+        as_of: datetime,
+        start_date,
+        end_date,
+    ) -> RawDataset:
+        self.symbol_requests.append(symbol)
+        return RawDataset(
+            provider="stub",
+            dataset="daily_bars",
+            fetched_at=datetime(2026, 9, 4, 15, 5, tzinfo=UTC),
+            provider_version="v1",
+            status=DataStatus.VALUE,
+            row_count=1,
+            payload=RawPayload(
+                columns=("symbol", "trade_date", "close", "amount"),
+                rows=((symbol, DAY, "10.5", "30000000"),),
+            ),
+        )
+
+
+def test_sync_bootstrap_can_be_limited_to_a_deterministic_benchmark_subset(
+    local_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """基准子集只决定"这次取哪几只"，不改变产品 Universe 语义。"""
+    import astock_lens.cli.app as cli_module
+
+    provider = ListingProvider(count=30)
+    monkeypatch.setattr(cli_module, "_bulk_provider", lambda: provider)
+    raw_root = local_tmp / "raw"
+
+    result = CliRunner().invoke(
+        app,
+        ["sync-bootstrap", "--as-of", DAY, "--limit-symbols", "10"],
+        env=_env(local_tmp) | {"ASTOCK_CSV_ROOT": str(raw_root)},
+    )
+
+    expected = cli_module._benchmark_subset(provider.symbols, limit=10)
+    assert result.exit_code == 0, result.output
+    assert "benchmark subset: 10 of 30" in result.stdout, result.stdout
+    assert len(expected) == 10
+    assert set(provider.symbol_requests) == set(expected), (
+        "只应对基准子集内的标的取历史；多出来的是 "
+        f"{sorted(set(provider.symbol_requests) - set(expected))[:5]}"
+    )
+    # 预筛本身仍跑在全量列表上：30 只都进了 prefilter，只有取数被限制。
+    assert "prefilter: 30 symbols pass listing rules" in result.stdout, result.stdout
+
+
+def test_benchmark_subset_is_deterministic_and_spread_across_the_listing() -> None:
+    import astock_lens.cli.app as cli_module
+
+    symbols = tuple(f"{index:06d}.SZ" for index in range(1000))
+
+    first = cli_module._benchmark_subset(symbols, limit=100)
+    again = cli_module._benchmark_subset(symbols, limit=100)
+
+    assert first == again, "同样的输入必须得到同样的子集"
+    assert len(first) == 100
+    assert first != symbols[:100], "抽样要跨整份列表，不是只取代码最小的 100 只"
+    assert first[0] == symbols[0] and first[-1] != symbols[99]
+
+    with pytest.raises(ValueError, match="limit"):
+        cli_module._benchmark_subset(symbols, limit=0)
 
 
 def test_sync_can_also_land_the_financial_statements(
