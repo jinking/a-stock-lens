@@ -306,10 +306,15 @@ class _HeartbeatSink:
 
     冷启动命令自己输出进度（设计文档 §3.6）：外部 watcher 只是第二块屏幕上的便利工具，
     不再是判断"还在动"的唯一途径。这一行里的每个数字都来自本次 invocation。
+
+    必须**逐行 flush**：stdout 被重定向到日志文件时是按块缓冲的（8 KB），不 flush 的话
+    一行心跳要等几十行之后才落盘——2026-09-18 真实 100 只门禁里实测：日志里 0 行心跳，
+    而缓冲区里正躺着刚打印的进度，"进度可见"在 cron/重定向场景下等于没实现。
     """
 
     def emit(self, progress: BootstrapProgress) -> None:
         typer.echo(render_progress(progress))
+        sys.stdout.flush()
 
 
 def _benchmark_subset(symbols: Sequence[str], *, limit: int) -> tuple[str, ...]:

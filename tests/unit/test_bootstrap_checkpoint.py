@@ -137,6 +137,48 @@ def test_a_deferred_record_is_not_on_disk_until_it_is_flushed(local_tmp: Path) -
     assert entry.status is BootstrapSymbolState.SUCCESS
 
 
+def test_a_part_without_a_manifest_entry_is_still_landed_evidence(
+    local_tmp: Path,
+) -> None:
+    """硬崩在攒批 flush 之前：分片在、清单没有条目，也必须算"已抓到"。
+
+    2026-09-18 真实 100 只门禁：进程被 kill -9 时 89 份分片已落盘、清单只有 64 条，
+    只看清单的续跑会把那 25 只重抓一遍。
+    """
+    crashed = _checkpoint(local_tmp)
+    crashed.record_success(
+        "000001.SZ",
+        columns=BAR_COLUMNS,
+        rows=_rows("000001.SZ"),
+        flush=False,
+    )
+    assert _checkpoint(local_tmp).entry_for("000001.SZ") is None, "前提：清单里没有条目"
+
+    provider = _SymbolFetcher(failing=frozenset())
+    result = land_bar_chunks(
+        fallback_source=provider,
+        root=local_tmp,
+        as_of=AS_OF_MOMENT,
+        symbols=("000001.SZ",),
+        start_date=START_DATE,
+        end_date=END_DATE,
+        batch_size=10,
+        checkpoint=_checkpoint(local_tmp),
+    )
+
+    assert provider.requests == [], "分片已经覆盖窗口，不得重抓"
+    assert result.completed_symbols == ()
+    adopted = _checkpoint(local_tmp).entry_for("000001.SZ")
+    assert adopted is not None, "跳过之后必须把这只标的补记进清单"
+    assert adopted.status is BootstrapSymbolState.SUCCESS
+    assert adopted.bars == len(_rows("000001.SZ"))
+    columns, rows = read_raw_rows(local_tmp / "daily_bars.csv")
+    index = columns.index("symbol")
+    assert {row[index] for row in rows} == {"000001.SZ"}, (
+        "没有清单条目的分片也必须被压实进整份文件，不能成为孤儿数据"
+    )
+
+
 def test_a_landing_call_does_not_rewrite_the_manifest_once_per_symbol(
     local_tmp: Path, monkeypatch
 ) -> None:
@@ -312,35 +354,47 @@ def test_landing_a_chunk_stages_a_part_per_symbol(local_tmp: Path) -> None:
 def test_the_canonical_file_is_merged_once_per_landing_call(
     local_tmp: Path, monkeypatch
 ) -> None:
-    """三块落地只许合并一次整份 `daily_bars.csv`，不得每块重写一遍。
+    """合并次数不得随块数增长：三个块与一个块必须一样多。
 
-    合并路径只有一条（Task 7 的确定性压实），所以这里数的就是它被调用几次。
+    合并路径只有一条（Task 7 的确定性压实），所以这里数的就是它被调用几次。只剩"每块合并
+    一次"的实现会随块数线性增长——那正是 2026-09-18 空转的根因。
     """
-    merges: list[Path] = []
+    symbols = tuple(f"{index:06d}.SZ" for index in range(60))
     real = bootstrap.compact_bootstrap_run
 
-    def counted(*, checkpoint: BootstrapCheckpoint, canonical_path: Path):
-        merges.append(canonical_path)
-        return real(checkpoint=checkpoint, canonical_path=canonical_path)
+    def merges_for(root: Path, *, batch_size: int) -> int:
+        seen: list[Path] = []
 
-    monkeypatch.setattr(bootstrap, "compact_bootstrap_run", counted)
+        def counted(*, checkpoint: BootstrapCheckpoint, canonical_path: Path):
+            seen.append(canonical_path)
+            return real(checkpoint=checkpoint, canonical_path=canonical_path)
 
-    bootstrap.bootstrap_liquidity_history(
-        batch_source=None,
-        fallback_source=_BulkFetcher(),
-        root=local_tmp,
-        as_of=AS_OF_MOMENT,
-        symbols=tuple(f"{index:06d}.SZ" for index in range(60)),
-        requirement=BootstrapRequirement(
-            factor_name="avg_amount_20d", required_valid_bars=20
-        ),
-        end_date=END_DATE,
-        batch_size=20,
+        bootstrap.compact_bootstrap_run = counted
+        try:
+            bootstrap.bootstrap_liquidity_history(
+                batch_source=None,
+                fallback_source=_BulkFetcher(),
+                root=root,
+                as_of=AS_OF_MOMENT,
+                symbols=symbols,
+                requirement=BootstrapRequirement(
+                    factor_name="avg_amount_20d", required_valid_bars=20
+                ),
+                end_date=END_DATE,
+                batch_size=batch_size,
+            )
+        finally:
+            bootstrap.compact_bootstrap_run = real
+        return len(seen)
+
+    three_chunks = merges_for(local_tmp / "three", batch_size=20)
+    one_chunk = merges_for(local_tmp / "one", batch_size=100)
+
+    assert three_chunks == one_chunk, (
+        f"三块合并 {three_chunks} 次、一块合并 {one_chunk} 次：合并次数跟着块数走了"
     )
-
-    assert len(merges) == 1, (
-        "一次落地调用只应把分片合并进整份文件一次；实际 "
-        f"{len(merges)} 次（每块一次就是 2026-09-18 空转的根因）"
+    assert three_chunks <= 3, (
+        f"一次运行最多 3 次合并（开跑、落地、收尾），实际 {three_chunks}"
     )
 
 

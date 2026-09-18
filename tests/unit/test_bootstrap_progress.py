@@ -59,16 +59,20 @@ def test_progress_is_emitted_only_once_the_heartbeat_interval_elapses() -> None:
         total=10, sink=sink, heartbeat_seconds=15.0, now=clock
     )
 
-    for _ in range(5):
+    tracker.record(processed=1)
+    assert len(sink.emitted) == 1, "启动就该有一行，让操作者知道这次要处理多少只"
+    assert sink.emitted[0].processed == 1
+
+    for _ in range(4):
         tracker.record(processed=1)
-    assert sink.emitted == [], "间隔没到就不该刷屏"
+    assert len(sink.emitted) == 1, "间隔没到就不该刷屏"
 
     clock.advance(16.0)
     tracker.record(processed=1)
 
-    assert len(sink.emitted) == 1
-    assert sink.emitted[0].processed == 6
-    assert sink.emitted[0].pending == 4
+    assert len(sink.emitted) == 2
+    assert sink.emitted[1].processed == 6
+    assert sink.emitted[1].pending == 4
 
 
 def test_finishing_always_leaves_a_last_line() -> None:
@@ -81,7 +85,8 @@ def test_finishing_always_leaves_a_last_line() -> None:
 
     progress = tracker.finish()
 
-    assert [item.processed for item in sink.emitted] == [4]
+    assert [item.processed for item in sink.emitted] == [4, 4]
+    assert sink.emitted[-1] is not None, "收尾那条必须带完整的最终数字"
     assert progress.pending == 0
 
 
@@ -129,10 +134,15 @@ class _SlowFallback:
     """每只标的都慢慢回答：慢运行正是心跳存在的理由。"""
 
     def __init__(
-        self, *, delay_seconds: float, short: frozenset[str] = frozenset()
+        self,
+        *,
+        delay_seconds: float,
+        short: frozenset[str] = frozenset(),
+        failing: frozenset[str] = frozenset(),
     ) -> None:
         self._delay = delay_seconds
         self._short = short
+        self._failing = failing
         self.calls: list[str] = []
 
     def fetch_symbol_bars(
@@ -145,6 +155,16 @@ class _SlowFallback:
     ) -> RawDataset:
         self.calls.append(symbol)
         time.sleep(self._delay)
+        if symbol in self._failing:
+            return RawDataset(
+                provider="slow",
+                dataset="daily_bars",
+                fetched_at=AS_OF,
+                provider_version="test",
+                status=DataStatus.SOURCE_ERROR,
+                row_count=0,
+                message=f"{symbol} could not be fetched",
+            )
         days = 5 if symbol in self._short else 30
         rows = tuple(
             (
@@ -174,10 +194,13 @@ def _run_with_progress(
     heartbeat_seconds: float,
     delay_seconds: float = 0.0,
     short: frozenset[str] = frozenset(),
+    failing: frozenset[str] = frozenset(),
 ):
     return bootstrap_liquidity_history(
         batch_source=None,
-        fallback_source=_SlowFallback(delay_seconds=delay_seconds, short=short),
+        fallback_source=_SlowFallback(
+            delay_seconds=delay_seconds, short=short, failing=failing
+        ),
         root=root,
         as_of=AS_OF,
         symbols=symbols,
@@ -197,7 +220,12 @@ def test_a_slow_fake_run_emits_progress_before_it_finishes(local_tmp: Path) -> N
     symbols = ("000001.SZ", "000002.SZ", "000003.SZ")
 
     result = _run_with_progress(
-        local_tmp, symbols, sink=sink, heartbeat_seconds=0.05, delay_seconds=0.1
+        # 0.4 秒 × 3 只 ≈ 1.2 秒：跨过"速率必须有实测窗口"的 1 秒门槛。
+        local_tmp,
+        symbols,
+        sink=sink,
+        heartbeat_seconds=0.05,
+        delay_seconds=0.4,
     )
 
     assert len(sink.emitted) >= 2, (
@@ -254,6 +282,44 @@ def test_a_symbol_short_of_history_is_not_reported_as_satisfied(
         f"{sink.emitted[-1].satisfied}"
     )
     assert sink.emitted[-1].processed == len(symbols)
+
+
+def test_the_heartbeat_counts_failed_symbols_not_failed_attempts(
+    local_tmp: Path,
+) -> None:
+    """一只标的重试失败多轮只能算"失败 1 只"，否则心跳会夸大成两倍。
+
+    2026-09-18 真实 100 只门禁实测：5 只 BJ 标的（腾讯接口不支持）被重试一次后，
+    心跳写出 `failed 10`，而清单里只有 5 条 source_error。
+    """
+    sink = _CollectingSink()
+    symbols = ("000001.SZ", "000002.SZ")
+
+    result = _run_with_progress(
+        local_tmp,
+        symbols,
+        sink=sink,
+        heartbeat_seconds=0.0,
+        failing=frozenset({"000002.SZ"}),
+    )
+
+    assert result.failed_symbols == ("000002.SZ",)
+    assert sink.emitted[-1].failed == 1, (
+        f"失败只数了 1 只标的，心跳却写 {sink.emitted[-1].failed}"
+    )
+
+
+def test_throughput_needs_a_measured_window() -> None:
+    """不到 1 秒的分母给不出有意义的速率：宁可不写。"""
+    clock = _Clock()
+    tracker = BootstrapProgressTracker(total=10, now=clock)
+    tracker.record(processed=5)
+
+    assert tracker.snapshot().throughput_per_second == 0.0, "秒级以下不印速率"
+
+    clock.advance(2.0)
+
+    assert tracker.snapshot().throughput_per_second == 2.5
 
 
 def test_the_watcher_script_no_longer_writes_down_the_market_size() -> None:

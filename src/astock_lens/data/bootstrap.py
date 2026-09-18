@@ -266,9 +266,16 @@ def _payload_covers(payload: RawPayload, *, start_date: date, end_date: date) ->
     return min(days) <= start_date.isoformat() and max(days) >= end_date.isoformat()
 
 
-def _is_staged_success(checkpoint: BootstrapCheckpoint, symbol: str) -> bool:
+def _is_landed_evidence(checkpoint: BootstrapCheckpoint, symbol: str) -> bool:
+    """分片本身就是"这只标的抓到过"的证据。
+
+    清单是攒批落盘的（`MANIFEST_FLUSH_EVERY`），进程被硬杀时最多有一批条目还没写下来，
+    但分片在 `record_success` 里已经先落盘了。只看清单会让这些已完成的分片被重抓一次——
+    2026-09-18 真实 100 只门禁的续跑就是靠这条改回来的。清单条目一旦存在且是失败状态，
+    则不算"已落地"：那只标的这一轮没拿到数据，必须重试。
+    """
     entry = checkpoint.entry_for(symbol)
-    return entry is not None and entry.status is BootstrapSymbolState.SUCCESS
+    return entry is None or entry.status is BootstrapSymbolState.SUCCESS
 
 
 def _attempt_landed(attempt: FallbackAttempt) -> bool:
@@ -436,9 +443,14 @@ def land_bar_chunks(
     resumed = {
         symbol
         for symbol, payload in staged.items()
-        if _is_staged_success(checkpoint, symbol)
+        if _is_landed_evidence(checkpoint, symbol)
         and _payload_covers(payload, start_date=start_date, end_date=end_date)
     }
+    # 跳过是因为分片已经在磁盘上；如果清单里还没有这只标的（崩溃在两次清单写之间），
+    # 补记一条，否则清单会永远缺它一条，外部观察者分不清"没抓到"和"没记上"。
+    for symbol in sorted(resumed):
+        if checkpoint.entry_for(symbol) is None:
+            checkpoint.adopt_success(symbol, bars=len(staged[symbol].rows))
     pending = [
         symbol
         for symbol in requested
@@ -487,7 +499,8 @@ def land_bar_chunks(
             )
             failed.append(attempt.symbol)
             if tracker is not None:
-                tracker.record(processed=1, failed=1)
+                # failed 由上层按"多少只标的"覆盖，避免同一只标的跨轮重试被算成多次失败。
+                tracker.record(processed=1)
 
         report_inflight: Callable[[int], None] | None = None
         if tracker is not None:
@@ -639,6 +652,11 @@ def _extend_history(
     checkpoint = BootstrapCheckpoint(
         root, as_of=as_of.date(), required_valid_bars=windows
     )
+    # 续跑从"已落盘的那份"开始：先把本轮已落盘的分片压实回整份文件，再按实测 bar 数判断
+    # 谁还缺。崩溃恰好落在两次清单写之间时，分片是唯一的证据（2026-09-18 真实 100 只门禁
+    # 实测：56 份分片、清单一行没有），只看整份文件会把它们全部重抓一遍。
+    compact_bootstrap_run(checkpoint=checkpoint, canonical_path=path)
+    checkpoint.adopt_staged_parts()
     # 进度只由本次 invocation 推导：总数就是这个调用点收到的标的集合。
     tracker = BootstrapProgressTracker(
         total=len(dict.fromkeys(symbols)),
@@ -650,10 +668,13 @@ def _extend_history(
         symbol for symbol in dict.fromkeys(symbols) if counts.get(symbol, 0) < windows
     ]
     failed: list[str] = []
+    satisfied_now = sum(
+        1 for symbol in dict.fromkeys(symbols) if counts.get(symbol, 0) >= windows
+    )
     tracker.measure(
-        satisfied=sum(
-            1 for symbol in dict.fromkeys(symbols) if counts.get(symbol, 0) >= windows
-        )
+        processed=satisfied_now,
+        satisfied=satisfied_now,
+        failed=0,
     )
 
     while short:
@@ -675,12 +696,15 @@ def _extend_history(
 
         previous = {symbol: counts.get(symbol, 0) for symbol in short}
         counts = _bar_counts(path, end_date=end_date, column=column)
+        satisfied_now = sum(
+            1 for symbol in dict.fromkeys(symbols) if counts.get(symbol, 0) >= windows
+        )
         tracker.measure(
-            satisfied=sum(
-                1
-                for symbol in dict.fromkeys(symbols)
-                if counts.get(symbol, 0) >= windows
-            )
+            # processed = 已有结果（实测达标 + 已经失败）的只数：续跑时它一上来就该是大数，
+            # 而不是"这次只抓了几只"。
+            processed=satisfied_now + len(failed),
+            satisfied=satisfied_now,
+            failed=len(failed),
         )
         measured = {symbol: counts.get(symbol, 0) for symbol in short}
         still_short = [symbol for symbol, count in measured.items() if count < windows]
@@ -689,6 +713,8 @@ def _extend_history(
         short = still_short
         start_date -= step
 
+    # 跑完再压实一次：一轮都没抓（全部靠已落盘证据满足）时，整份文件也必须写出来。
+    compact_bootstrap_run(checkpoint=checkpoint, canonical_path=path)
     tracker.finish()
     coverage = tuple(
         BootstrapSymbolCoverage(

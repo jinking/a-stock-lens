@@ -105,12 +105,18 @@ def compact_bootstrap_run(
 
     失败标的的分片不参与合并：`TIMEOUT` / `SOURCE_ERROR` / `EMPTY` 是"这次没拿到"，不是"拿到了
     零根 bar"，把它当成功合并进去就是静默兜底。没有成功分片时不动整份文件，返回 `(0, 0)`。
+
+    没有清单条目的分片**要**合并：分片只在 `record_success` 里落盘，所以"有分片、没条目"意味着
+    进程在攒批 flush 之前被硬杀——那批数据是真抓到的，丢掉它就等于白抓。（反之，条目明确是失败
+    状态时该分片是更早一轮的旧窗口，下一轮会重抓它，这里不合并。）
     """
     payloads: list[RawPayload] = []
-    for entry in checkpoint.manifest().entries:
-        if entry.status is not BootstrapSymbolState.SUCCESS:
+    entries = {entry.symbol: entry for entry in checkpoint.manifest().entries}
+    for part in checkpoint.iter_part_files():
+        entry = entries.get(part.stem)
+        if entry is not None and entry.status is not BootstrapSymbolState.SUCCESS:
             continue
-        columns, rows = read_raw_rows(checkpoint.parts_path(entry.symbol))
+        columns, rows = read_raw_rows(part)
         if columns and rows:
             payloads.append(RawPayload(columns=columns, rows=rows))
 
@@ -239,6 +245,42 @@ class BootstrapCheckpoint:
             + "\n",
         )
         self._unflushed = 0
+
+    def adopt_success(self, symbol: str, *, bars: int) -> BootstrapManifestEntry:
+        """把上一轮已落盘、清单却没记下来的成功补记进来。
+
+        `record_success` 先写分片再写清单，进程恰好死在两次清单写之间时，续跑会因为
+        "分片覆盖了窗口"而跳过这只标的——如果只跳过不补记，清单里就永远缺它一条，
+        而清单是留给外部观察者（watcher、运营核对）看的，缺条目与"没抓到"无法区分。
+        attempts 记 1：崩溃后无法得知真实尝试次数，只保证"至少抓到过一次"。
+        """
+        return self._record(
+            BootstrapManifestEntry(
+                symbol=symbol,
+                status=BootstrapSymbolState.SUCCESS,
+                bars=bars,
+                attempts=1,
+                last_error=None,
+                updated_at=datetime.now(UTC),
+            ),
+            flush=False,
+        )
+
+    def adopt_staged_parts(self) -> tuple[str, ...]:
+        """把"有分片、清单没条目"的标的全部补记并落盘，返回补记的 symbol。
+
+        崩溃续跑之后调用：分片是已落盘的成功证据，清单是给外部观察者看的，两者必须一致。
+        """
+        adopted: list[str] = []
+        for path in self.iter_part_files():
+            if self.entry_for(path.stem) is not None:
+                continue
+            columns, rows = read_raw_rows(path)
+            if columns and rows:
+                self.adopt_success(path.stem, bars=len(rows))
+                adopted.append(path.stem)
+        self.flush()
+        return tuple(adopted)
 
     # ---- 内部 -------------------------------------------------------------
 

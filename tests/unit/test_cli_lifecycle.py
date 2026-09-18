@@ -551,6 +551,51 @@ def test_benchmark_subset_is_deterministic_and_spread_across_the_listing() -> No
         cli_module._benchmark_subset(symbols, limit=0)
 
 
+class _RecordingStdout:
+    """记录写入与 flush 次数的假 stdout。"""
+
+    def __init__(self) -> None:
+        self.text = ""
+        self.flushes = 0
+
+    def write(self, chunk: str) -> int:
+        self.text += chunk
+        return len(chunk)
+
+    def flush(self) -> None:
+        self.flushes += 1
+
+
+def test_the_heartbeat_is_flushed_so_a_redirected_log_shows_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """stdout 被重定向时按块缓冲：不 flush 就等于没有心跳。
+
+    2026-09-18 真实 100 只门禁实测：日志里 0 行心跳，进度全躺在 8 KB 缓冲区里。
+    """
+    import astock_lens.cli.app as cli_module
+    from astock_lens.data.bootstrap_progress import BootstrapProgress
+
+    stream = _RecordingStdout()
+    monkeypatch.setattr(cli_module.sys, "stdout", stream)
+
+    cli_module._HeartbeatSink().emit(
+        BootstrapProgress(
+            total=100,
+            processed=40,
+            satisfied=39,
+            failed=1,
+            pending=60,
+            inflight=6,
+            elapsed_seconds=12.0,
+            throughput_per_second=3.3,
+        )
+    )
+
+    assert "processed 40/100" in stream.text
+    assert stream.flushes >= 1, "心跳必须逐行 flush，否则重定向日志里看不到进度"
+
+
 def test_sync_can_also_land_the_financial_statements(
     local_tmp: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

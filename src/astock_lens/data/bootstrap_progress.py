@@ -82,7 +82,9 @@ class BootstrapProgressTracker:
         self._heartbeat = heartbeat_seconds
         self._now = now
         self._started = now()
-        self._last_emit = self._started
+        # 启动即发第一行：既让操作者立刻看到"这次要处理多少只"，也顺带 flush 掉前面被
+        # 缓冲住的上市/预筛输出（2026-09-18 真实门禁里，重定向日志在前 20 秒里一行都没有）。
+        self._last_emit = self._started - heartbeat_seconds
         self._processed = 0
         self._satisfied = 0
         self._failed = 0
@@ -104,14 +106,34 @@ class BootstrapProgressTracker:
             self._inflight = inflight
         return self._emit_if_due()
 
-    def measure(self, *, satisfied: int) -> BootstrapProgress:
-        """用**实测**达标只数覆盖 `satisfied`（不是把成功落盘当成达标）。"""
-        self._satisfied = satisfied
+    def measure(
+        self,
+        *,
+        processed: int | None = None,
+        satisfied: int | None = None,
+        failed: int | None = None,
+    ) -> BootstrapProgress:
+        """用**实测**只数覆盖 `satisfied` / `failed`。
+
+        两个数都是"多少只标的"，不是"发生过多少次"：同一只标的跨轮重试失败只算一只，
+        否则心跳会写出"失败 10"而实际只失败 5 只——2026-09-18 真实 100 只门禁里踩到过。
+        `satisfied` 同样是实测达标数，不是成功落盘数。
+        """
+        if satisfied is not None:
+            self._satisfied = satisfied
+        if failed is not None:
+            self._failed = failed
+        if processed is not None:
+            # 只允许向上：这只标的是"有结果了"，不是重新开始计数。
+            self._processed = max(self._processed, processed)
         return self._emit_if_due()
 
     def snapshot(self) -> BootstrapProgress:
         elapsed = max(self._now() - self._started, 0.0)
         processed = min(self._processed, self._total)
+        # 不到 1 秒的窗口算不出有意义的速率：续跑一上来就有几十只"已满足"时，秒级以下的
+        # 分母会印出 15489.9 sym/s 这种数字（2026-09-18 真实门禁实测），宁可不给。
+        measured = elapsed >= 1.0
         return BootstrapProgress(
             total=self._total,
             processed=processed,
@@ -120,7 +142,7 @@ class BootstrapProgressTracker:
             pending=max(self._total - processed, 0),
             inflight=self._inflight,
             elapsed_seconds=elapsed,
-            throughput_per_second=(processed / elapsed) if elapsed > 0 else 0.0,
+            throughput_per_second=(processed / elapsed) if measured else 0.0,
         )
 
     def finish(self) -> BootstrapProgress:
