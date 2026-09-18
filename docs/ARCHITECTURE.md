@@ -388,12 +388,19 @@ A-Stock Lens 不直接 import 对方内部模块，避免强耦合。
 
 ## 14. 存储
 
-V1 采用：
+V1 采用**四层载体**（2026-09-18 项目所有者裁决，详细口径与迁移校验见
+`docs/STORAGE.md`）：
 
-- Parquet：大量历史时序数据；
-- DuckDB：元数据、查询、Factor Snapshot、Strategy Result、Watchlist、Job State。
+| 层 | 载体 |
+| --- | --- |
+| Raw 原始落地 | CSV（Provider 回放与故障审计） |
+| Normalized 分析数据 | Parquet（行情、财报等分析数据的读取来源） |
+| 正式快照 / Watchlist / Job 状态 | DuckDB |
+| 小型 manifest、API/CLI 交换、测试 fixture、外部 Adapter 协议 | JSON |
 
-暂不引入 PostgreSQL / Redis。
+- 归一化产物落盘后，Factor / Universe / Strategy 不得再直接读 Raw CSV；
+- 跨载体迁移必须做行数、主键与空值状态校验，并完成 CSV/Parquet 双读比对后才切换默认读取路径；
+- 暂不引入 PostgreSQL / Redis。
 
 ## 15. Snapshot Model
 

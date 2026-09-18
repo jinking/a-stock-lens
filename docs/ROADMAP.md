@@ -39,6 +39,19 @@
 - [ ] **PEG 值域复核**：源站 PEG 值域是 83–1503（正常 0–5）且出现负值。选项：接受其相对排序 / 自算 `pe_ttm / net_profit_parent_cagr_3y`。
 - [ ] **Industry Trend 的行业打分口径**：行业侧指标（收入/利润增速、估值、广度）与"行业→个股"映射的权重。
 - [ ] **停牌天数数据源**：`configs/universe.yaml` 的 `long_suspension_days` 现在是 `null`（未评审），需要能提供停牌天数的数据源。
+- [ ] **`data` extra 在本机装不上（环境阻塞）**：`uv sync --extra data` 实测跑 29 分钟后因
+  `files.pythonhosted.org` 拉取 `polars-runtime-32` 超时失败，**`pyarrow` / `polars` 至今未安装**。
+  这直接影响 `2026-09-18-storage-migration-v2-implementation-plan.md` 的技术栈（它写的是
+  PyArrow Parquet）。实测可行的替代：Parquet 的读写全部交给 **DuckDB 原生完成**
+  （`read_csv → COPY TO (FORMAT PARQUET)`、`read_parquet`），迁移链路已按这条路跑通。
+  需要所有者裁决：改用 DuckDB 原生，还是提供可用镜像源再补装 PyArrow。
+- [ ] **存储分层迁移的门禁**（2026-09-18 所有者给出四层裁决，口径见 `docs/STORAGE.md`；
+  实施步骤以 `docs/superpowers/plans/2026-09-18-storage-migration-v2-implementation-plan.md`
+  为准，早先那份 `...-storage-layer-migration-implementation-plan.md` 已标注被取代）：
+  - **已被 v2 计划回答**：目录布局（不可变数据包 `data/normalized/v1/<as_of>/<bundle_id>/`）、
+    Normalized 层装什么（值表 + 证据 + 诊断 + 表头）、现存 JSON 的处置（任务 2.6 历史迁入
+    与无损回滚出口）。
+  - **仍需所有者裁决**：见上面那条 `data` extra 装不上带来的技术栈选择（PyArrow vs DuckDB 原生）。
 - [ ] **Golden Dataset 名单**：设计要求 30–50 只固定股票覆盖多行业与边界情况，清单仍是 `Deferred`。当前本机已落地的真实数据是 5 只（`000001.SZ`、`300750.SZ`、`600519.SH`、`601318.SH`、`688981.SH`），覆盖深主板/创业板/沪主板/科创板。
 
 ---
@@ -54,7 +67,14 @@ ResearchRequest → DeepResearchAdapter` 逐项对照：
 - [ ] **Web 六个页面**：Today / Screener / Strategy / Stock Profile / Watchlist / Data Health（`web/README.md` 只有规划）。
 - [ ] **API 补齐**：当前 5 个路由（health/universe/factors/candidates/watchlist），还缺 Stock Profile、Data Health、Market Regime、Signal 等查询面。
 - [ ] **深研 Adapter 实际接线**：`CliDeepResearchAdapter` 已实现且未配置时报错，但还没接上深研仓库的真实入口（`ASTOCK_DEEP_RESEARCH_CMD`）。
-- [ ] **Parquet 存储**：设计规定时序走 Parquet、元数据走 DuckDB；现在快照是 JSON/DuckDB，Parquet 未落地。
+- [ ] **Normalized Parquet 层 + 业务状态切 DuckDB**：2026-09-18 所有者给出四层裁决
+  （Raw 继续 CSV / 分析数据走 Parquet / 快照·Watchlist·Job 走 DuckDB / JSON 只留给
+  manifest、API-CLI 交换、fixture、外部 Adapter）。实施步骤以
+  `docs/superpowers/plans/2026-09-18-storage-migration-v2-implementation-plan.md` 为准。
+  **本轮已用一次性脚本 `scripts/migrate_storage.py` 把数据实搬完并四关校验全绿**
+  （实测与产物见 `docs/REVIEW_NOTES.md` 第二十一节）：Raw 走零拷贝视图、四类归一化数据
+  落 Parquet、快照/Job 状态入 DuckDB。该脚本的**扁平目录布局是临时口径**，会被 v2 的
+  不可变数据包布局取代；默认读取路径仍是 CSV，尚未切换。
 - [ ] **因子数量**：设计目标约 40–60 个；现有 24 个。缺口主要在财务衍生（增长质量、盈利稳定性）与行业维度。
 
 ---

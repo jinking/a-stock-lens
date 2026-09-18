@@ -11,6 +11,10 @@ htmlcov/
 var/astock.duckdb
 var/logs/*.log
 data/**/*.parquet
+# 归一化 Parquet 层与它的质量门报告同属运行时产物：`docs/STORAGE.md` 规定
+# 这一层由 `NORMALIZE` 产出、可随时重建，重建的代价来自 Raw CSV，不来自版本库。
+data/normalized/**
+!data/normalized/.gitkeep
 # Runtime artifacts: `docs/DEVELOPMENT.md` keeps `data/` and `var/` out of the
 # repository, so snapshots, watchlist entries and job manifests written by a
 # local run must not show up as pending changes.

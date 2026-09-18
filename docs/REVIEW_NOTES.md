@@ -810,3 +810,85 @@ astock sync-research --as-of 2026-09-17 --workers 6 --financials
   这条路解锁，但需要新切片（板块批量 provider + 落地 + 因子接线 + 测试），且历史上 neodata
   批量覆盖很差（10 只一批只回 1–2 只），因此先做只读探针再决定。
 - 本节结论与三条岔路整理成给所有者的阅读文档：`docs/OWNER-BRIEF-2026-09-18.md`。
+
+## 二十一、存储分层迁移落地：Normalized Parquet + 业务状态入 DuckDB（2026-09-18）
+
+所有者给出四层裁决（口径落成 `docs/STORAGE.md`，任务分解见
+`docs/superpowers/plans/2026-09-18-storage-layer-migration-implementation-plan.md`）。
+本节记录**本轮实际搬完的数据**与四关校验实测，不含尚未批准的默认读取路径切换。
+
+### 21.1 搬了什么，搬到哪
+
+一次性脚本 `scripts/migrate_storage.py`（可重跑；`--state-only` 只搬状态，
+`--verify-only` 只校验不写）：
+
+| 层 | 载体与形态 | 本轮结果 |
+| --- | --- | --- |
+| Raw | **CSV 原件不动**；DuckDB 里只建 `read_csv` 视图（零拷贝，不产生第二份会漂移的副本） | `raw_daily_bars` 1,675,723 行、`raw_securities` 5,565 行、三大表各 18,418/18,423/18,423 行 |
+| Normalized | **Parquet 是权威副本**；DuckDB 里挂指向它的同名视图 | `daily_bars` 1,675,723 行 / 31.6 MB、`securities` 5,565 行、`financial_observations` 902,652 行 / 5.2 MB、`valuations` 230 行 |
+| 业务状态 | **DuckDB 实体表**，JSON 已迁入 | `snapshots` 9 行（3 类 × 3 天）、`job_runs` 33 行（3 天）、`watchlist` 0 行（尚无条目） |
+| 小对象 | JSON | 质量门报告 4 份 → `data/normalized/quality_findings/quality_findings.json`（小型 manifest） |
+
+关键取舍：归一化数据**不**在库里灌实体表。灌一份就等于承认"两份归一化数据"，和
+`pipelines/analysis.py` 里"同一个项目不能有两个真相"是同一条原则。视图用仓库相对路径，
+因此要从仓库根目录打开 `var/astock.duckdb`。副作用是库文件从 115 MB 降到 **5.5 MB**。
+
+`data/normalized/**` 与 `var/astock.duckdb` 都是运行时产物，已加进 `.gitignore`
+（保留 `.gitkeep` 占位）。
+
+### 21.2 四关校验：全市场实测全绿
+
+`--as-of 2026-09-17`，四关 + 零值检查（`docs/STORAGE.md` §4）：
+
+| 数据集 | 结构 | 计数 | 主键 | 空值/零值 | 双读摘要 |
+| --- | --- | --- | --- | --- | --- |
+| daily_bars | PASS 12 列 | PASS 1,675,723 | PASS `symbol,trade_date` | PASS | PASS `06a429ed737d` |
+| securities | PASS 7 列 | PASS 5,565 | PASS `symbol` | PASS | PASS `f9d3abce78e2` |
+| financial_observations | PASS 9 列 | PASS 902,652 | PASS `symbol,report_period,metric` | PASS | PASS `ced7628a67d6` |
+| valuations | PASS 9 列 | PASS 230 | PASS `symbol,valuation_date,metric` | PASS | PASS `a6efbe836792` |
+| snapshots / job_runs | — | PASS 9 份 ↔ 9 行 / 3 天 ↔ 3 天 | — | — | — |
+
+双读的严格程度：把 Parquet 每一行**重建成规范模型**（`DailyBar` / `SecurityProfile` /
+`FinancialObservation` / `ValuationObservation`）后与内存记录逐条做 SHA-256 摘要比对——
+不是只比行数。全市场 258 万条重建耗时约 467s。
+
+**校验器非空转的证明**：在 3 行样本上把某个 NULL `close` 改成 0 重写 Parquet，三条 P0
+同时命中（`空值 close` Parquet 0 ≠ 内存 1、`零值 close` Parquet 2 ≠ 内存 1、`双读` 摘要不一致）。
+报告落在库里的 `migration_verification` 表。
+
+### 21.3 本轮踩到并绕开的四个环境坑（留给后续切片）
+
+1. **`files.pythonhosted.org` 不可达**：`uv sync --extra data` 跑 29 分钟后以
+   `polars-runtime-32` 拉取超时失败，`pyarrow` / `polars` 至今**未安装**。
+   于是 Parquet 的读写全部改由 **DuckDB 原生完成**（DuckDB 自己就能读写 Parquet），
+   迁移链路不再依赖 pyarrow。这条也意味着 `data` extra 在本机当前是不完整的。
+2. **不要用 `executemany` 灌数据**：实测约 **6,000 行/秒**（全市场要 4.5 分钟以上）。
+   改为归一化记录先落暂存 CSV（`\N` 表示 NULL，避免空串与 NULL 混淆），
+   再由 `read_csv → COPY TO (FORMAT PARQUET)` 一票直出：167 万行暂存 78s + 导出 8s。
+3. **DuckDB Python 客户端回读 `TIMESTAMPTZ` 需要 `pytz`**，本机没有、装不上，
+   直接 `fetchmany` 会抛 `ModuleNotFoundError: No module named 'pytz'`。
+   绕法：时间列在 SQL 侧 `CAST(... AS VARCHAR)`，Python 侧 `datetime.fromisoformat` 还原，
+   比较的仍是同一瞬时（`SET TimeZone='UTC'` 固定渲染，与机器时区无关）。
+4. **沙箱不允许写 `/tmp`**（`tests/conftest.py` 早有一条同名说明），且 **Bash 默认
+   120 秒超时会杀掉长进程**。前者要求所有落盘都在仓库内，后者要求长任务必须后台跑。
+
+### 21.4 与 v2 计划的关系（重要）
+
+本轮执行到一半时，仓库里出现了 `docs/superpowers/plans/2026-09-18-storage-migration-v2-implementation-plan.md`，
+它明确**替代**早先那份 `...-storage-layer-migration-implementation-plan.md` 的实施步骤，
+并把 `docs/STORAGE.md` 当作规格引用。因此本节的产物要这样看：
+
+- 早先那份计划的实施步骤已被取代（文件已加被取代标注），门禁 A/B/C/D 大多被 v2 回答
+  （目录布局、Normalized 装什么、现存 JSON 走任务 2.6 的历史迁入与回滚）；
+- 本脚本的**扁平布局 `data/normalized/<dataset>/<dataset>.parquet` 是临时口径**，
+  会被 v2 的不可变数据包 `data/normalized/v1/<as_of>/<bundle_id>/`（8 张表 + `manifest.json`
+  + `active.json`）取代。**数据已可查，但布局不是最终形态**；
+- 一条会影响 v2 技术栈的环境事实：v2 写的是 **PyArrow Parquet**，而本机
+  `uv sync --extra data` 因 `files.pythonhosted.org` 不可达而失败，**pyarrow/polars 装不上**。
+  本轮已证明**只用 DuckDB 原生也能完成 Parquet 的读写与校验**（见 21.3 第 1、2 条），
+  需要所有者裁决走哪条路。
+
+其余未做：默认读取路径仍是 CSV（`normalize_stage(source=...)` 与 Parquet 读取器未实现）；
+三个业务后端的默认值仍是 `json`，Job 状态尚无 DuckDB 实现类；
+`Normalized` 层目前只装**过了质量门**的记录，被拒记录的明细在 `quality_findings.json` 里
+（不是 Parquet 表），v2 的证据表（`financial_evidence` / `diagnostics` / `headers`）尚未实现。
