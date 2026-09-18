@@ -35,6 +35,9 @@ class FallbackAttempt(DomainRecord):
     status: DataStatus
     dataset: RawDataset | None = None
     error: str | None = None
+    # scheduler 的 wall-clock deadline 到期时为 True。它不是 transport timeout，
+    # 但必须与"来源明确报错"分开记录，否则清单会把两者混成同一个状态。
+    timed_out: bool = False
 
 
 class SchedulerStats(DomainRecord):
@@ -164,6 +167,7 @@ def fetch_symbols_bounded(
                             "scheduler deadline elapsed; this is not a transport "
                             "timeout"
                         ),
+                        timed_out=True,
                     )
                 )
                 completed += 1

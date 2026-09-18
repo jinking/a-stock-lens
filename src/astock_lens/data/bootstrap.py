@@ -18,16 +18,20 @@ implementation detail.
 """
 
 from collections.abc import Iterator, Sequence
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Protocol, runtime_checkable
 
 from astock_lens.data.bootstrap_checkpoint import (
     BootstrapCheckpoint,
     BootstrapSymbolState,
     compact_bootstrap_run,
+)
+from astock_lens.data.bootstrap_scheduler import FallbackAttempt, fetch_symbols_bounded
+from astock_lens.data.bootstrap_sources import (
+    BatchMarketBarSource,
+    BootstrapBatchRequest,
+    SymbolBarFallbackSource,
+    validate_bootstrap_batch_result,
 )
 from astock_lens.data.contracts import RawDataset, RawPayload
 from astock_lens.data.sync import (
@@ -71,13 +75,21 @@ _EMPTY_SOURCE_STATUSES: frozenset[DataStatus] = frozenset(
     {DataStatus.VALUE, DataStatus.NULL, DataStatus.NOT_APPLICABLE}
 )
 
-# How long one symbol's fetch may occupy a worker before the chunk gives up on
-# it. Measured 2026-09-18: a resume run sat with 0% CPU, one open TCP connection
-# and an empty log for minutes because a network call never returned and the
-# chunk waited for every future. With this bound the chunk always finishes and
-# persists what answered; the straggler is recorded as a failure and retried by
-# the next round. Technical bound, not a product threshold.
+# How long the bounded scheduler waits for one fallback operation before it
+# gives up on it. Measured 2026-09-18: a resume run sat with 0% CPU, one open TCP
+# connection and an empty log for minutes because a network call never returned
+# and the chunk waited for every future. With this bound the round always
+# finishes and persists what answered; the straggler is recorded as a failure
+# and retried by the next round. This is a scheduler wall-clock bound, never a
+# claim about the transport's own timeout. Technical bound, not a product
+# threshold.
 SYMBOL_TIMEOUT_SECONDS = 60.0
+
+# How many symbols one batch request may ask for. The batch contract has no live
+# provider yet (2026-09-18 probe: `NO_BATCH_PRIMARY_AVAILABLE`), so this only
+# bounds how large a single request to a future bulk endpoint gets. Technical
+# bound, not a product threshold.
+BATCH_REQUEST_SIZE = 100
 
 
 class BootstrapRequirementNotConfigured(RuntimeError):
@@ -91,27 +103,6 @@ class BootstrapRequirement(DomainRecord):
     required_valid_bars: int
 
 
-@runtime_checkable
-class SymbolBarFetcher(Protocol):
-    """A provider that can answer for one symbol at a time.
-
-    The bootstrap needs this narrower contract than `DataProvider`: isolation
-    between symbols is only possible when a provider reports one symbol's
-    failure without discarding its neighbours.
-    """
-
-    def fetch_symbol_bars(
-        self,
-        symbol: str,
-        *,
-        as_of: datetime,
-        start_date: date,
-        end_date: date,
-    ) -> RawDataset:
-        """Fetch one symbol's bars for a range, reporting failure as a status."""
-        ...
-
-
 class ChunkSyncResult(DomainRecord):
     """What one chunked landing run did, symbol by symbol."""
 
@@ -119,19 +110,6 @@ class ChunkSyncResult(DomainRecord):
     completed_symbols: tuple[str, ...]
     failed_symbols: tuple[str, ...]
     rows_written: int
-
-
-@dataclass(frozen=True)
-class _SymbolFetch:
-    """一块里一只标的的取数结果：数据本身，以及它是不是超时的那一只。
-
-    超时与来源报错都表现为失败数据集，但清单状态不同（`TIMEOUT` / `SOURCE_ERROR`），
-    所以"为什么失败"必须跟着结果一起传下去，不能靠消息文本反推。
-    """
-
-    symbol: str
-    dataset: RawDataset
-    timed_out: bool = False
 
 
 class BootstrapSymbolCoverage(DomainRecord):
@@ -288,33 +266,117 @@ def _is_staged_success(checkpoint: BootstrapCheckpoint, symbol: str) -> bool:
     return entry is not None and entry.status is BootstrapSymbolState.SUCCESS
 
 
-def _failure_state(fetch: _SymbolFetch) -> BootstrapSymbolState:
-    """Translate one fetch into its manifest state; a failure is never a success."""
-    if fetch.timed_out:
+def _attempt_landed(attempt: FallbackAttempt) -> bool:
+    """一次 fallback 调用是否拿到了可以落盘的行。"""
+    dataset = attempt.dataset
+    return (
+        not attempt.timed_out
+        and dataset is not None
+        and dataset.status is DataStatus.VALUE
+        and dataset.payload is not None
+        and bool(dataset.payload.rows)
+    )
+
+
+def _attempt_state(attempt: FallbackAttempt) -> BootstrapSymbolState:
+    """Translate one attempt into its manifest state; a failure is never a success."""
+    if attempt.timed_out:
         return BootstrapSymbolState.TIMEOUT
-    if fetch.dataset.status in _EMPTY_SOURCE_STATUSES:
+    if attempt.dataset is not None and attempt.dataset.status in _EMPTY_SOURCE_STATUSES:
         return BootstrapSymbolState.EMPTY
     return BootstrapSymbolState.SOURCE_ERROR
 
 
-def _failure_reason(fetch: _SymbolFetch) -> str:
-    return fetch.dataset.message or fetch.dataset.status.value
+def _attempt_reason(attempt: FallbackAttempt) -> str:
+    if attempt.error:
+        return attempt.error
+    if attempt.dataset is not None:
+        return attempt.dataset.message or attempt.dataset.status.value
+    return "no answer and no reason reported"
+
+
+def _batch_rows_by_symbol(
+    dataset: RawDataset,
+) -> tuple[tuple[str, tuple[str, ...], tuple[tuple[str, ...], ...]], ...]:
+    """一组批量数据集里按 symbol 归行的结果。
+
+    批量接口的一份 payload 可能同时装着多只标的的行，所以归属只能看 `symbol` 列。没有这一
+    列就无法把行归给谁，于是返回空——这些标的会落进缺口、由逐标的补缺再取一次，而不是被
+    当成"批量已经覆盖"。
+    """
+    payload = dataset.payload
+    if (
+        dataset.status is not DataStatus.VALUE
+        or payload is None
+        or not payload.rows
+        or SYMBOL_COLUMN not in payload.columns
+    ):
+        return ()
+    index = payload.columns.index(SYMBOL_COLUMN)
+    grouped: dict[str, list[tuple[str, ...]]] = {}
+    for row in payload.rows:
+        if index >= len(row) or not row[index]:
+            continue
+        grouped.setdefault(row[index], []).append(row)
+    return tuple(
+        (symbol, payload.columns, tuple(rows)) for symbol, rows in grouped.items()
+    )
+
+
+def _land_batch_round(
+    *,
+    batch_source: BatchMarketBarSource | None,
+    checkpoint: BootstrapCheckpoint,
+    pending: Sequence[str],
+    as_of: datetime,
+    start_date: date,
+    end_date: date,
+    batch_size: int,
+) -> tuple[str, ...]:
+    """Try the batch source first, staging every symbol it actually answered for.
+
+    A batch answer is partial by nature (`missing_symbols` is explicit), so the
+    return value is the set of symbols this round's batches covered. Everything
+    the batch did not answer for — and everything it answered for outside the
+    request — stays a gap for the per-symbol fallback. Nothing here ever
+    fabricates a value for a symbol the source stayed silent about.
+    """
+    if batch_source is None or not pending:
+        return ()
+
+    covered: list[str] = []
+    for chunk in _chunks(pending, batch_size):
+        request = BootstrapBatchRequest(
+            symbols=chunk, start_date=start_date, end_date=end_date, as_of=as_of
+        )
+        result = validate_bootstrap_batch_result(
+            batch_source.fetch_recent_bars(request), as_of=as_of
+        )
+        asked = set(chunk)
+        for dataset in result.datasets:
+            for symbol, columns, rows in _batch_rows_by_symbol(dataset):
+                if symbol not in asked:
+                    continue
+                checkpoint.record_success(symbol, columns=columns, rows=rows)
+                covered.append(symbol)
+    return tuple(covered)
 
 
 def land_bar_chunks(
     *,
-    provider: SymbolBarFetcher,
+    fallback_source: SymbolBarFallbackSource,
     root: Path,
     as_of: datetime,
     symbols: Sequence[str],
     start_date: date,
     end_date: date,
-    chunk_size: int,
     checkpoint: BootstrapCheckpoint,
-    max_workers: int = 1,
-    symbol_timeout_seconds: float = SYMBOL_TIMEOUT_SECONDS,
+    batch_source: BatchMarketBarSource | None = None,
+    batch_size: int = BATCH_REQUEST_SIZE,
+    max_inflight: int = 1,
+    operation_timeout_seconds: float = SYMBOL_TIMEOUT_SECONDS,
 ) -> ChunkSyncResult:
-    """Land one range of bars for many symbols, one chunk at a time.
+    """Land one range of bars for many symbols: batch first, then only the gaps.
 
     Each symbol's bars are staged as its own part file the moment it answers
     (`data/raw/bootstrap/<as-of>/parts/<symbol>.csv`) and its state goes into the
@@ -324,26 +386,33 @@ def land_bar_chunks(
     manifest entry with its reason, and lands no part: a failure never becomes an
     empty row, and it never discards the symbols that already succeeded.
 
+    The batch source is tried first because a market-wide answer is the cheap
+    path; the per-symbol fallback runs for the gaps only. There is no live batch
+    provider in this repository (the 2026-09-18 probe concluded
+    `NO_BATCH_PRIMARY_AVAILABLE`), so `batch_source=None` is the honest default
+    and the fallback covers everything.
+
+    The fallback runs on the bounded completion-order scheduler: at most
+    `max_inflight` operations are active, results are consumed in completion
+    order, and each result is checkpointed before the scheduler forgets it.
+    `max_inflight` defaults to 1 — serial — because the source's rate-limit
+    policy is `Deferred` in the design: turning concurrency on is an explicit,
+    reviewed decision, not a default this function may take on its own.
+
     The canonical `daily_bars.csv` is merged **once per call**, from the run's
-    staged parts, not once per chunk. Rewriting the whole file after every chunk
+    successfully staged parts, not once per chunk. Rewriting the whole file after every chunk
     is what made the 2026-09-18 full-market run burn its time in I/O while the
     row count stood still; the merge cost must scale with the run, not with the
     chunk count.
-
-    `max_workers` fetches a chunk's symbols concurrently. It defaults to 1 —
-    serial — because the source's rate-limit policy is `Deferred` in the design:
-    turning concurrency on is an explicit, reviewed decision, not a default this
-    function may take on its own. Concurrency changes only how fast a chunk is
-    fetched; each symbol still has to answer for itself, and failures are still
-    recorded per symbol.
     """
-    if chunk_size <= 0:
-        raise ValueError(f"chunk_size must be positive, got {chunk_size}")
-    if max_workers <= 0:
-        raise ValueError(f"max_workers must be positive, got {max_workers}")
-    if symbol_timeout_seconds <= 0:
+    if batch_size <= 0:
+        raise ValueError(f"batch_size must be positive, got {batch_size}")
+    if max_inflight <= 0:
+        raise ValueError(f"max_inflight must be positive, got {max_inflight}")
+    if operation_timeout_seconds <= 0:
         raise ValueError(
-            f"symbol_timeout_seconds must be positive, got {symbol_timeout_seconds}"
+            "operation_timeout_seconds must be positive, got "
+            f"{operation_timeout_seconds}"
         )
 
     path = root / f"{BAR_DATASET}.csv"
@@ -367,37 +436,49 @@ def land_bar_chunks(
     completed: list[str] = []
     failed: list[str] = []
 
-    for chunk in _chunks(pending, chunk_size):
-        fetched = _fetch_chunk(
-            provider=provider,
-            chunk=chunk,
+    # 先批量。批量没覆盖到的（含它明确报的 missing_symbols）才是缺口。
+    covered = _land_batch_round(
+        batch_source=batch_source,
+        checkpoint=checkpoint,
+        pending=pending,
+        as_of=as_of,
+        start_date=start_date,
+        end_date=end_date,
+        batch_size=batch_size,
+    )
+    completed.extend(covered)
+    gaps = [symbol for symbol in pending if symbol not in set(covered)]
+
+    if gaps:
+        # 补缺走有界完成顺序调度：结果一到就落分片/记失败，调度器随后才提交下一只标的。
+        def record(attempt: FallbackAttempt) -> None:
+            if _attempt_landed(attempt):
+                dataset = attempt.dataset
+                assert dataset is not None and dataset.payload is not None
+                checkpoint.record_success(
+                    attempt.symbol,
+                    columns=dataset.payload.columns,
+                    rows=dataset.payload.rows,
+                )
+                completed.append(attempt.symbol)
+                return
+            checkpoint.record_failure(
+                attempt.symbol,
+                state=_attempt_state(attempt),
+                error=_attempt_reason(attempt),
+            )
+            failed.append(attempt.symbol)
+
+        fetch_symbols_bounded(
+            source=fallback_source,
+            symbols=gaps,
             as_of=as_of,
             start_date=start_date,
             end_date=end_date,
-            max_workers=max_workers,
-            symbol_timeout_seconds=symbol_timeout_seconds,
+            max_inflight=max_inflight,
+            operation_timeout_seconds=operation_timeout_seconds,
+            on_result=record,
         )
-        for fetch in fetched:
-            payload = fetch.dataset.payload
-            # 只有"没超时、状态是 VALUE、而且真的带了行"才算成功；其余一律记账。
-            columns = payload.columns if payload is not None else ()
-            rows = payload.rows if payload is not None else ()
-            if (
-                not fetch.timed_out
-                and fetch.dataset.status is DataStatus.VALUE
-                and columns
-                and rows
-            ):
-                checkpoint.record_success(fetch.symbol, columns=columns, rows=rows)
-                staged[fetch.symbol] = RawPayload(columns=columns, rows=rows)
-                completed.append(fetch.symbol)
-                continue
-            checkpoint.record_failure(
-                fetch.symbol,
-                state=_failure_state(fetch),
-                error=_failure_reason(fetch),
-            )
-            failed.append(fetch.symbol)
 
     # 整份文件只在这里被写一次，而且走 Task 7 的确定性压实（唯一 canonical 合并路径）：
     # 行数是本次合并写进去的行（含续跑补回的历史分片）。
@@ -411,105 +492,47 @@ def land_bar_chunks(
     )
 
 
-def _fetch_chunk(
-    *,
-    provider: SymbolBarFetcher,
-    chunk: Sequence[str],
-    as_of: datetime,
-    start_date: date,
-    end_date: date,
-    max_workers: int,
-    symbol_timeout_seconds: float,
-) -> tuple[_SymbolFetch, ...]:
-    """Fetch one chunk, in the chunk's own symbol order.
-
-    The order is what keeps the landed file stable: the same inputs produce the
-    same rows in the same sequence whether the chunk was fetched serially or
-    concurrently.
-    """
-    # 不用 `with`：上下文管理器退出时会 join 所有线程，挂住的请求会把整块拖回原样。
-    # 这里显式 shutdown(wait=False)：被放弃的请求留在线程里自生自灭，块照常结束。
-    pool = ThreadPoolExecutor(max_workers=max_workers)
-    try:
-        futures = {
-            symbol: pool.submit(
-                provider.fetch_symbol_bars,
-                symbol,
-                as_of=as_of,
-                start_date=start_date,
-                end_date=end_date,
-            )
-            for symbol in chunk
-        }
-        results: list[_SymbolFetch] = []
-        for symbol in chunk:
-            try:
-                results.append(
-                    _SymbolFetch(
-                        symbol,
-                        futures[symbol].result(timeout=symbol_timeout_seconds),
-                    )
-                )
-            except TimeoutError:
-                # 这一只没有按时回答：按超时记账，块照常结束（绝不是网络 timeout 的声明）。
-                results.append(
-                    _SymbolFetch(symbol, _timeout_dataset(symbol), timed_out=True)
-                )
-            except Exception as error:  # noqa: BLE001 — one symbol's failure
-                results.append(
-                    _SymbolFetch(
-                        symbol,
-                        RawDataset(
-                            provider="unknown",
-                            dataset=BAR_DATASET,
-                            fetched_at=datetime.now(UTC),
-                            provider_version="unknown",
-                            status=DataStatus.SOURCE_ERROR,
-                            row_count=0,
-                            message=f"{symbol} raised while fetching: {error}",
-                        ),
-                    )
-                )
-        return tuple(results)
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
-
-
 def bootstrap_liquidity_history(
     *,
-    provider: SymbolBarFetcher,
+    batch_source: BatchMarketBarSource | None,
+    fallback_source: SymbolBarFallbackSource,
     root: Path,
     as_of: datetime,
     symbols: Sequence[str],
     requirement: BootstrapRequirement,
     end_date: date,
-    chunk_size: int,
-    max_workers: int = 1,
+    batch_size: int = BATCH_REQUEST_SIZE,
+    max_inflight: int = 1,
+    operation_timeout_seconds: float = SYMBOL_TIMEOUT_SECONDS,
 ) -> BootstrapSyncResult:
     """Fetch the least history that lets the liquidity factor be measured."""
     return _extend_history(
-        provider=provider,
+        batch_source=batch_source,
+        fallback_source=fallback_source,
         root=root,
         as_of=as_of,
         symbols=symbols,
         requirement=requirement,
         end_date=end_date,
-        chunk_size=chunk_size,
+        batch_size=batch_size,
         column="amount",
-        max_workers=max_workers,
+        max_inflight=max_inflight,
+        operation_timeout_seconds=operation_timeout_seconds,
     )
 
 
 def bootstrap_strategy_history(
     *,
-    provider: SymbolBarFetcher,
+    batch_source: BatchMarketBarSource | None,
+    fallback_source: SymbolBarFallbackSource,
     root: Path,
     as_of: datetime,
     symbols: Sequence[str],
     required_price_bars: int,
     end_date: date,
-    chunk_size: int,
-    max_workers: int = 1,
+    batch_size: int = BATCH_REQUEST_SIZE,
+    max_inflight: int = 1,
+    operation_timeout_seconds: float = SYMBOL_TIMEOUT_SECONDS,
 ) -> BootstrapSyncResult:
     """Fetch the price history the strategy layer needs, for these symbols only.
 
@@ -519,7 +542,8 @@ def bootstrap_strategy_history(
     be researched.
     """
     return _extend_history(
-        provider=provider,
+        batch_source=batch_source,
+        fallback_source=fallback_source,
         root=root,
         as_of=as_of,
         symbols=symbols,
@@ -527,24 +551,26 @@ def bootstrap_strategy_history(
             factor_name=PRICE_HISTORY_LABEL, required_valid_bars=required_price_bars
         ),
         end_date=end_date,
-        chunk_size=chunk_size,
+        batch_size=batch_size,
         column="close",
-        max_workers=max_workers,
+        max_inflight=max_inflight,
+        operation_timeout_seconds=operation_timeout_seconds,
     )
 
 
 def _extend_history(
     *,
-    provider: SymbolBarFetcher,
+    batch_source: BatchMarketBarSource | None,
+    fallback_source: SymbolBarFallbackSource,
     root: Path,
     as_of: datetime,
     symbols: Sequence[str],
     requirement: BootstrapRequirement,
     end_date: date,
-    chunk_size: int,
     column: str,
-    max_workers: int = 1,
-    symbol_timeout_seconds: float = SYMBOL_TIMEOUT_SECONDS,
+    batch_size: int = BATCH_REQUEST_SIZE,
+    max_inflight: int = 1,
+    operation_timeout_seconds: float = SYMBOL_TIMEOUT_SECONDS,
 ) -> BootstrapSyncResult:
     """Fetch a range, then widen it for whatever is still short.
 
@@ -579,16 +605,17 @@ def _extend_history(
 
     while short:
         result = land_bar_chunks(
-            provider=provider,
+            batch_source=batch_source,
+            fallback_source=fallback_source,
             root=root,
             as_of=as_of,
             symbols=short,
             start_date=start_date,
             end_date=end_date,
-            chunk_size=chunk_size,
+            batch_size=batch_size,
             checkpoint=checkpoint,
-            max_workers=max_workers,
-            symbol_timeout_seconds=symbol_timeout_seconds,
+            max_inflight=max_inflight,
+            operation_timeout_seconds=operation_timeout_seconds,
         )
         failed.extend(item for item in result.failed_symbols if item not in failed)
 
@@ -646,20 +673,4 @@ def liquidity_bootstrap_requirement(
         f"no factor configuration for {LIQUIDITY_FACTOR}: the Universe's "
         "liquidity rule cannot be bootstrapped without the window its factor "
         "is defined over"
-    )
-
-
-def _timeout_dataset(symbol: str) -> RawDataset:
-    """一个标的超过时限仍未返回：按失败记账，交给下一轮重试。"""
-    return RawDataset(
-        provider="unknown",
-        dataset=BAR_DATASET,
-        fetched_at=datetime.now(UTC),
-        provider_version="unknown",
-        status=DataStatus.SOURCE_ERROR,
-        row_count=0,
-        message=(
-            f"{symbol} did not answer within the fetch time bound; recorded as a "
-            "failure so the chunk can finish and the next round can retry it"
-        ),
     )

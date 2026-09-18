@@ -166,13 +166,13 @@ def test_a_failed_symbol_keeps_the_symbols_that_succeeded(
     )
 
     result = land_bar_chunks(
-        provider=provider,
+        fallback_source=provider,
         root=local_tmp,
         as_of=AS_OF,
         symbols=("000001.SZ", "600519.SH", "300750.SZ"),
         start_date=date(2026, 8, 1),
         end_date=END_DATE,
-        chunk_size=2,
+        batch_size=2,
         checkpoint=_checkpoint(local_tmp),
     )
 
@@ -192,25 +192,25 @@ def test_a_rerun_retries_only_the_coverage_that_is_missing(local_tmp: Path) -> N
     }
     first_run = FakeBarProvider(histories, failing={"600519.SH"})
     land_bar_chunks(
-        provider=first_run,
+        fallback_source=first_run,
         root=local_tmp,
         as_of=AS_OF,
         symbols=("000001.SZ", "600519.SH"),
         start_date=date(2026, 8, 1),
         end_date=END_DATE,
-        chunk_size=10,
+        batch_size=10,
         checkpoint=_checkpoint(local_tmp),
     )
 
     second_run = FakeBarProvider(histories)
     result = land_bar_chunks(
-        provider=second_run,
+        fallback_source=second_run,
         root=local_tmp,
         as_of=AS_OF,
         symbols=("000001.SZ", "600519.SH"),
         start_date=date(2026, 8, 1),
         end_date=END_DATE,
-        chunk_size=10,
+        batch_size=10,
         checkpoint=_checkpoint(local_tmp),
     )
 
@@ -219,24 +219,20 @@ def test_a_rerun_retries_only_the_coverage_that_is_missing(local_tmp: Path) -> N
     assert _symbols_in_file(_bars_path(local_tmp)) == {"000001.SZ", "600519.SH"}
 
 
-def test_each_chunk_is_on_disk_before_the_next_chunk_is_requested(
+def test_a_finished_symbol_is_on_disk_before_the_scheduler_forgets_it(
     local_tmp: Path,
 ) -> None:
-    """Persistence per chunk is what makes a crash resumable.
+    """Persistence per completion is what makes a crash resumable.
 
-    落盘的形状变了（分片 + 清单，而不是每块重写整份 `daily_bars.csv`），要钉住的
-    性质没变：第一块的成果必须在第二块被请求之前就已经在磁盘上。
+    落盘的形状变了两次（分片 + 清单；有界完成顺序调度），要钉住的性质没变：一有标的完成
+    就得先在磁盘上，之后才能腾出 in-flight 名额去请求下一只。
     """
+    symbols = ("000001.SZ", "000002.SZ", "000003.SZ", "000004.SZ")
     seen_parts: list[set[str]] = []
     seen_file: list[bool] = []
-    provider = FakeBarProvider(
-        {
-            "000001.SZ": (date(2026, 8, 1), 1),
-            "000002.SZ": (date(2026, 8, 1), 1),
-            "600519.SH": (date(2026, 8, 1), 1),
-        }
-    )
+    provider = FakeBarProvider({symbol: (date(2026, 8, 1), 1) for symbol in symbols})
     original = provider.fetch_symbol_bars
+    max_inflight = 2
 
     def watching(symbol: str, *, as_of: datetime, start_date: date, end_date: date):
         seen_parts.append(_staged_symbols(local_tmp))
@@ -246,23 +242,26 @@ def test_each_chunk_is_on_disk_before_the_next_chunk_is_requested(
     provider.fetch_symbol_bars = watching  # type: ignore[method-assign]
 
     land_bar_chunks(
-        provider=provider,
+        fallback_source=provider,
         root=local_tmp,
         as_of=AS_OF,
-        symbols=("000001.SZ", "000002.SZ", "600519.SH"),
+        symbols=symbols,
         start_date=date(2026, 8, 1),
         end_date=END_DATE,
-        chunk_size=2,
+        batch_size=10,
+        max_inflight=max_inflight,
         checkpoint=_checkpoint(local_tmp),
     )
 
-    assert seen_parts[0] == set()
-    assert seen_parts[1] == set()
-    assert seen_parts[2] == {"000001.SZ", "000002.SZ"}, (
-        "the first chunk's parts must be on disk before the second chunk is requested"
-    )
-    assert seen_file == [False, False, False], (
-        "整份 daily_bars.csv 不得在分块过程中被反复重写；它只在落地调用结束时合并一次"
+    # 第 k 只标的被请求时，至少 k - max_inflight 只更早的标的已经把分片落在磁盘上：
+    # 名额是靠"结果已消费"腾出来的，而消费就是先落盘、再记账。
+    for requested, staged in enumerate(seen_parts, start=1):
+        assert len(staged) >= max(requested - max_inflight, 0), (
+            f"请求第 {requested} 只时只落盘了 {sorted(staged)}；"
+            "完成的标的必须先落盘再让调度器继续提交"
+        )
+    assert seen_file == [False, False, False, False], (
+        "整份 daily_bars.csv 不得在取数过程中被反复重写；它只在落地调用结束时压实一次"
     )
 
 
@@ -280,13 +279,14 @@ def test_short_history_is_extended_backward_until_it_is_enough(
     )
 
     result = bootstrap_liquidity_history(
-        provider=provider,
+        batch_source=None,
+        fallback_source=provider,
         root=local_tmp,
         as_of=AS_OF,
         symbols=("600519.SH", "300750.SZ"),
         requirement=requirement,
         end_date=END_DATE,
-        chunk_size=10,
+        batch_size=10,
     )
 
     sparse = next(item for item in result.coverage if item.symbol == "300750.SZ")
@@ -304,13 +304,14 @@ def test_history_that_runs_out_is_reported_short_not_padded(local_tmp: Path) -> 
     )
 
     result = bootstrap_liquidity_history(
-        provider=provider,
+        batch_source=None,
+        fallback_source=provider,
         root=local_tmp,
         as_of=AS_OF,
         symbols=("688981.SH",),
         requirement=requirement,
         end_date=END_DATE,
-        chunk_size=10,
+        batch_size=10,
     )
 
     coverage = result.coverage[0]

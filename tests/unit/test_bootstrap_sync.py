@@ -155,23 +155,23 @@ def test_the_cli_reports_the_derived_requirement_and_writes_nothing(
     assert list(job_root.iterdir()) == []
 
 
-def test_a_chunk_size_must_be_a_real_chunk_size(local_tmp: Path) -> None:
-    """A zero or negative chunk would loop forever or land nothing."""
-    with pytest.raises(ValueError, match="chunk_size"):
+def test_a_batch_size_must_be_a_real_batch_size(local_tmp: Path) -> None:
+    """A zero or negative batch would ask for nothing and cover nothing."""
+    with pytest.raises(ValueError, match="batch_size"):
         land_bar_chunks(
-            provider=_StubFetcher(),
+            fallback_source=_StubFetcher(),
             root=local_tmp,
             as_of=AS_OF,
             symbols=("000001.SZ",),
             start_date=date(2026, 9, 1),
             end_date=date(2026, 9, 17),
-            chunk_size=0,
+            batch_size=0,
             checkpoint=_checkpoint(local_tmp),
         )
 
 
 class _StubFetcher:
-    """Never called: the guard must reject the chunk size first."""
+    """Never called: the guard must reject the batch size first."""
 
     def fetch_symbol_bars(self, symbol: str, **_: object):  # type: ignore[no-untyped-def]
         raise AssertionError("the guard must run before any fetch")
@@ -249,13 +249,13 @@ def test_a_chunk_lands_every_symbol_it_could_fetch(local_tmp: Path) -> None:
     provider = _StubFetcherWithRows()
 
     result = land_bar_chunks(
-        provider=provider,
+        fallback_source=provider,
         root=local_tmp,
         as_of=AS_OF,
         symbols=provider.table,
         start_date=date(2026, 9, 1),
         end_date=date(2026, 9, 17),
-        chunk_size=2,
+        batch_size=2,
         checkpoint=_checkpoint(local_tmp),
     )
 
@@ -317,57 +317,59 @@ class _StubFetcherWithRows:
 def test_concurrency_changes_the_speed_and_nothing_else(local_tmp: Path) -> None:
     """6 路并发必须与串行产出完全相同的落盘结果。
 
-    并发的批准理由是速度（所有者 2026-09-18 明确同意 6 路）。它不允许改变语义：
-    成功/失败集合、写入行数、行顺序都必须与串行一致，否则"快"就变成了"结果不同"。
+    并发的批准理由是速度（所有者 2026-09-18 明确同意 6 路）。它不允许改变语义：成功/失败
+    集合、写入行数、整份文件的内容都必须与串行一致，否则"快"就变成了"结果不同"。完成顺序
+    本来就会因并发而不同（这正是有界调度器按完成顺序回调的目的），所以这里比的是集合与
+    落盘字节——行顺序由一次性压实按 symbol 裁决，与到达顺序无关。
     """
     symbols = tuple(f"{index:06d}.SZ" for index in range(12))
 
     serial_root = local_tmp / "serial"
     serial_root.mkdir()
     serial = land_bar_chunks(
-        provider=_StubFetcherWithRows(),
+        fallback_source=_StubFetcherWithRows(),
         root=serial_root,
         as_of=AS_OF,
         symbols=symbols,
         start_date=date(2026, 9, 1),
         end_date=date(2026, 9, 17),
-        chunk_size=5,
+        batch_size=5,
         checkpoint=_checkpoint(serial_root),
-        max_workers=1,
+        max_inflight=1,
     )
 
     parallel_root = local_tmp / "parallel"
     parallel_root.mkdir()
     parallel = land_bar_chunks(
-        provider=_StubFetcherWithRows(),
+        fallback_source=_StubFetcherWithRows(),
         root=parallel_root,
         as_of=AS_OF,
         symbols=symbols,
         start_date=date(2026, 9, 1),
         end_date=date(2026, 9, 17),
-        chunk_size=5,
+        batch_size=5,
         checkpoint=_checkpoint(parallel_root),
-        max_workers=6,
+        max_inflight=6,
     )
 
-    assert parallel.completed_symbols == serial.completed_symbols
-    assert parallel.failed_symbols == serial.failed_symbols
+    assert set(parallel.completed_symbols) == set(serial.completed_symbols)
+    assert set(parallel.failed_symbols) == set(serial.failed_symbols)
     assert parallel.rows_written == serial.rows_written
     assert read_raw_rows(parallel_root / "daily_bars.csv") == read_raw_rows(
         serial_root / "daily_bars.csv"
     )
 
 
-def test_a_zero_worker_count_is_refused(local_tmp: Path) -> None:
-    with pytest.raises(ValueError, match="max_workers"):
+def test_a_zero_in_flight_bound_is_refused(local_tmp: Path) -> None:
+    with pytest.raises(ValueError, match="max_inflight"):
         land_bar_chunks(
-            provider=_StubFetcherWithRows(),
+            fallback_source=_StubFetcherWithRows(),
             root=local_tmp,
             as_of=AS_OF,
             symbols=("000001.SZ",),
             start_date=date(2026, 9, 1),
             end_date=date(2026, 9, 17),
-            chunk_size=5,
+            batch_size=5,
             checkpoint=_checkpoint(local_tmp),
-            max_workers=0,
+            max_inflight=0,
         )

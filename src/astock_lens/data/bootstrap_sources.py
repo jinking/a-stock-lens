@@ -1,7 +1,7 @@
 """启动历史数据的批量优先与单标的补缺契约。"""
 
 from datetime import date, datetime
-from typing import Protocol, Self
+from typing import Protocol, Self, runtime_checkable
 
 from pydantic import model_validator
 
@@ -85,11 +85,15 @@ class BatchMarketBarSource(Protocol):
     def fetch_recent_bars(self, request: BootstrapBatchRequest) -> BatchFetchResult: ...
 
 
+@runtime_checkable
 class SymbolBarFallbackSource(Protocol):
     """能够逐标的补取行情的来源。
 
     Protocol 不能强制实现者在返回时执行运行时校验；消费方必须把返回值
     交给 `validate_bootstrap_source_dataset`，再交给后续编排使用。
+
+    `runtime_checkable` 让编排入口能在接线处就拒绝"不能逐标的取数"的
+    provider，而不是把这条限制留到流程深处才暴露。
     """
 
     def fetch_symbol_bars(

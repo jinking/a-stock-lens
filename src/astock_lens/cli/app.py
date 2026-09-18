@@ -25,12 +25,12 @@ from astock_lens.calibration.factor_distribution import CalibrationPopulation
 from astock_lens.calibration.render import render_json, render_markdown
 from astock_lens.candidates.models import Candidate
 from astock_lens.data.bootstrap import (
-    SymbolBarFetcher,
     bootstrap_liquidity_history,
     bootstrap_strategy_history,
     liquidity_bootstrap_requirement,
     strategy_history_requirement,
 )
+from astock_lens.data.bootstrap_sources import SymbolBarFallbackSource
 from astock_lens.data.contracts import DataProvider, FetchRequest
 from astock_lens.data.health import raw_datasets
 from astock_lens.data.industry import (
@@ -283,17 +283,17 @@ def _bulk_provider() -> DataProvider:
     return AkShareProvider()
 
 
-def _symbol_bar_provider(provider: DataProvider) -> SymbolBarFetcher:
+def _symbol_bar_provider(provider: DataProvider) -> SymbolBarFallbackSource:
     """The bulk provider narrowed to the symbol-level contract.
 
     Isolation between symbols is only possible when the provider answers for
     one symbol at a time. Saying which provider cannot do that here keeps the
     limitation visible, instead of failing somewhere deep in the flow.
     """
-    if not isinstance(provider, SymbolBarFetcher):
+    if not isinstance(provider, SymbolBarFallbackSource):
         typer.echo(
             f"provider {provider.health().provider} cannot fetch one symbol at a "
-            "time, so a chunked bootstrap cannot isolate failures with it",
+            "time, so the bootstrap cannot isolate failures with it",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -1019,18 +1019,21 @@ def sync_research(
             help="只为研究股票池刷新 WeStock 三大表。",
         ),
     ] = False,
-    chunk_size: Annotated[
+    batch_size: Annotated[
         int,
         typer.Option(
             "--chunk-size",
-            help="每块落地多少只标的；技术默认 100，不是产品阈值。",
+            help="一次批量请求最多覆盖多少只标的；技术默认 100，不是产品阈值。",
         ),
     ] = 100,
     workers: Annotated[
         int,
         typer.Option(
             "--workers",
-            help="并发取数的线程数；默认 1（串行），并发需所有者批准后显式传入。",
+            help=(
+                "并发取数的上限（in-flight）；默认 1（串行），"
+                "并发需所有者批准后显式传入。"
+            ),
         ),
     ] = 1,
 ) -> None:
@@ -1067,14 +1070,17 @@ def sync_research(
     typer.echo(f"price history required: {required_bars} bars per symbol")
 
     result = bootstrap_strategy_history(
-        provider=_symbol_bar_provider(provider),
+        # Task 3 的只读探测结论是 `NO_BATCH_PRIMARY_AVAILABLE`：
+        # 没有经过证据背书的批量行情来源，就不接线、不发明。
+        batch_source=None,
+        fallback_source=_symbol_bar_provider(provider),
         root=_csv_root(),
         as_of=day,
         symbols=state.research_symbols,
         required_price_bars=required_bars,
         end_date=day.date(),
-        chunk_size=chunk_size,
-        max_workers=workers,
+        batch_size=batch_size,
+        max_inflight=workers,
     )
     typer.echo(f"price history satisfied: {len(result.satisfied_symbols)}")
     typer.echo(f"price history short: {len(result.short_symbols)}")
@@ -1103,12 +1109,12 @@ def sync_research(
 @app.command("sync-bootstrap")
 def sync_bootstrap(
     as_of: Annotated[str, AS_OF_OPTION],
-    chunk_size: Annotated[
+    batch_size: Annotated[
         int,
         typer.Option(
             "--chunk-size",
             help=(
-                "每块落地多少只标的。技术默认 50，可按源站限速调整；"
+                "一次批量请求最多覆盖多少只标的。技术默认 50，可按源站限速调整；"
                 "它不是产品阈值，不写入 configs/。"
             ),
         ),
@@ -1118,7 +1124,7 @@ def sync_bootstrap(
         typer.Option(
             "--workers",
             help=(
-                "并发取数的线程数。默认 1（串行）——设计文档把限速与并发策略列为 "
+                "并发取数的上限（in-flight）。默认 1（串行）——设计文档把限速与并发策略列为 "
                 "Deferred，因此并发必须由资源所有者显式批准后传入，不是默认行为。"
             ),
         ),
@@ -1177,14 +1183,16 @@ def sync_bootstrap(
     )
 
     result = bootstrap_liquidity_history(
-        provider=_symbol_bar_provider(provider),
+        # 同上：批量来源没有证据背书，接线为 None，补缺逐标的进行。
+        batch_source=None,
+        fallback_source=_symbol_bar_provider(provider),
         root=root,
         as_of=day,
         symbols=prefiltered.included,
         requirement=requirement,
         end_date=day.date(),
-        chunk_size=chunk_size,
-        max_workers=workers,
+        batch_size=batch_size,
+        max_inflight=workers,
     )
 
     _, bar_rows = read_raw_rows(root / f"{_dataset()}.csv")

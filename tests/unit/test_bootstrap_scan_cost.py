@@ -96,7 +96,8 @@ def test_the_flow_reads_the_landed_file_a_constant_number_of_times(
     monkeypatch.setattr(bootstrap, "read_raw_rows", counted_read)
 
     bootstrap_liquidity_history(
-        provider=CountingFetcher(),
+        batch_source=None,
+        fallback_source=CountingFetcher(),
         root=local_tmp,
         as_of=AS_OF,
         symbols=SYMBOLS,
@@ -104,7 +105,7 @@ def test_the_flow_reads_the_landed_file_a_constant_number_of_times(
             factor_name="avg_amount_20d", required_valid_bars=20
         ),
         end_date=END_DATE,
-        chunk_size=20,
+        batch_size=20,
     )
 
     assert calls["whole_file"] >= 1, "成本测试必须确认确实读取过落地文件"
@@ -171,7 +172,8 @@ def test_the_first_window_is_wide_enough_to_finish_in_one_round(
     provider = RecordingFetcher()
 
     bootstrap_liquidity_history(
-        provider=provider,
+        batch_source=None,
+        fallback_source=provider,
         root=local_tmp,
         as_of=AS_OF,
         symbols=SYMBOLS[:5],
@@ -179,7 +181,7 @@ def test_the_first_window_is_wide_enough_to_finish_in_one_round(
             factor_name="avg_amount_20d", required_valid_bars=20
         ),
         end_date=END_DATE,
-        chunk_size=5,
+        batch_size=5,
     )
 
     per_symbol = {symbol: 0 for symbol in SYMBOLS[:5]}
@@ -225,18 +227,18 @@ def test_one_hung_symbol_must_not_block_the_whole_chunk(local_tmp: Path) -> None
     started = __import__("time").perf_counter()
 
     result = land_bar_chunks(
-        provider=fetcher,
+        fallback_source=fetcher,
         root=local_tmp,
         as_of=AS_OF,
         symbols=symbols,
         start_date=date(2026, 9, 1),
         end_date=END_DATE,
-        chunk_size=6,
+        batch_size=6,
         checkpoint=BootstrapCheckpoint(
             local_tmp, as_of=AS_OF.date(), required_valid_bars=20
         ),
-        max_workers=6,
-        symbol_timeout_seconds=1.0,
+        max_inflight=6,
+        operation_timeout_seconds=1.0,
     )
     elapsed = __import__("time").perf_counter() - started
 
@@ -275,7 +277,8 @@ def test_a_symbol_that_already_has_enough_bars_is_not_fetched_again(
 
     provider = RecordingFetcher()
     bootstrap_liquidity_history(
-        provider=provider,
+        batch_source=None,
+        fallback_source=provider,
         root=local_tmp,
         as_of=AS_OF,
         symbols=(symbol,),
@@ -283,7 +286,7 @@ def test_a_symbol_that_already_has_enough_bars_is_not_fetched_again(
             factor_name="avg_amount_20d", required_valid_bars=20
         ),
         end_date=END_DATE,
-        chunk_size=5,
+        batch_size=5,
     )
 
     assert provider.requests == [], (

@@ -232,13 +232,13 @@ def test_landing_a_chunk_stages_a_part_per_symbol(local_tmp: Path) -> None:
     provider = _SymbolFetcher()
 
     result = land_bar_chunks(
-        provider=provider,
+        fallback_source=provider,
         root=local_tmp,
         as_of=AS_OF_MOMENT,
         symbols=provider.table,
         start_date=START_DATE,
         end_date=END_DATE,
-        chunk_size=2,
+        batch_size=2,
         checkpoint=checkpoint,
     )
 
@@ -271,7 +271,8 @@ def test_the_canonical_file_is_merged_once_per_landing_call(
     monkeypatch.setattr(bootstrap, "compact_bootstrap_run", counted)
 
     bootstrap.bootstrap_liquidity_history(
-        provider=_BulkFetcher(),
+        batch_source=None,
+        fallback_source=_BulkFetcher(),
         root=local_tmp,
         as_of=AS_OF_MOMENT,
         symbols=tuple(f"{index:06d}.SZ" for index in range(60)),
@@ -279,7 +280,7 @@ def test_the_canonical_file_is_merged_once_per_landing_call(
             factor_name="avg_amount_20d", required_valid_bars=20
         ),
         end_date=END_DATE,
-        chunk_size=20,
+        batch_size=20,
     )
 
     assert len(merges) == 1, (
@@ -296,15 +297,15 @@ def test_a_symbol_that_does_not_answer_is_recorded_as_timeout(
     provider = _HangingFetcher(hanging="000003.SZ")
 
     result = land_bar_chunks(
-        provider=provider,
+        fallback_source=provider,
         root=local_tmp,
         as_of=AS_OF_MOMENT,
         symbols=("000001.SZ", "000003.SZ"),
         start_date=START_DATE,
         end_date=END_DATE,
-        chunk_size=2,
-        max_workers=2,
-        symbol_timeout_seconds=0.3,
+        batch_size=2,
+        max_inflight=2,
+        operation_timeout_seconds=0.3,
         checkpoint=checkpoint,
     )
 
@@ -328,26 +329,26 @@ def test_a_rerun_does_not_refetch_symbols_whose_part_is_already_staged(
     """
     first = _SymbolFetcher(failing=frozenset())
     land_bar_chunks(
-        provider=first,
+        fallback_source=first,
         root=local_tmp,
         as_of=AS_OF_MOMENT,
         symbols=("000001.SZ",),
         start_date=START_DATE,
         end_date=END_DATE,
-        chunk_size=10,
+        batch_size=10,
         checkpoint=_checkpoint(local_tmp),
     )
     (local_tmp / "daily_bars.csv").unlink()
 
     second = _SymbolFetcher()
     result = land_bar_chunks(
-        provider=second,
+        fallback_source=second,
         root=local_tmp,
         as_of=AS_OF_MOMENT,
         symbols=("000001.SZ",),
         start_date=START_DATE,
         end_date=END_DATE,
-        chunk_size=10,
+        batch_size=10,
         checkpoint=_checkpoint(local_tmp),
     )
 
