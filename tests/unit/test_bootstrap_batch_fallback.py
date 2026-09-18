@@ -86,9 +86,7 @@ def test_fallback_contract_is_invoked_one_symbol_at_a_time() -> None:
 
 def test_batch_source_contract_returns_a_batch_result() -> None:
     class RecordingBatchSource:
-        def fetch_recent_bars(
-            self, request: BootstrapBatchRequest
-        ) -> BatchFetchResult:
+        def fetch_recent_bars(self, request: BootstrapBatchRequest) -> BatchFetchResult:
             return BatchFetchResult(
                 datasets=tuple(_dataset(symbol) for symbol in request.symbols[:1]),
                 missing_symbols=request.symbols[1:],

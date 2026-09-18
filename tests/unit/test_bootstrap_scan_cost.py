@@ -18,6 +18,7 @@ from astock_lens.data.bootstrap import (
     bootstrap_liquidity_history,
     land_bar_chunks,
 )
+from astock_lens.data.bootstrap_checkpoint import BootstrapCheckpoint
 from astock_lens.data.contracts import RawDataset, RawPayload
 from astock_lens.domain.enums import DataStatus
 
@@ -80,10 +81,16 @@ def test_the_flow_reads_the_landed_file_a_constant_number_of_times(
     local_tmp: Path, monkeypatch
 ) -> None:
     real_read = bootstrap.read_raw_rows
-    calls = {"count": 0}
+    big_file = local_tmp / "daily_bars.csv"
+    calls = {"whole_file": 0, "parts": 0}
 
     def counted_read(path: Path):
-        calls["count"] += 1
+        # 按标的暂存后，分片是每只标的小文件读一次；被钉住的是"整份落地文件"的读取，
+        # 它必须与标的数无关。
+        if path == big_file:
+            calls["whole_file"] += 1
+        else:
+            calls["parts"] += 1
         return real_read(path)
 
     monkeypatch.setattr(bootstrap, "read_raw_rows", counted_read)
@@ -100,12 +107,17 @@ def test_the_flow_reads_the_landed_file_a_constant_number_of_times(
         chunk_size=20,
     )
 
-    assert calls["count"] >= 1, "成本测试必须确认确实读取过落地文件"
+    assert calls["whole_file"] >= 1, "成本测试必须确认确实读取过落地文件"
     # 一次运行最多读几次：覆盖判定 + 每轮扩展一次计数 + 收尾一次。60 只标的
     # 只应有的个位数次数；按标的重复读会是 60 次以上。
-    assert calls["count"] <= 8, (
+    assert calls["whole_file"] <= 8, (
         "the landed file must be read a constant number of times per run, not "
-        f"once per symbol; read {calls['count']} times for {len(SYMBOLS)} symbols"
+        "once per symbol; read "
+        f"{calls['whole_file']} times for {len(SYMBOLS)} symbols"
+    )
+    # 分片读取按标的数线性增长，且每只标的最多读一次（不是每块、每轮重复读）。
+    assert calls["parts"] <= len(SYMBOLS), (
+        f"每只标的的分片最多读一次；实际读取 {calls['parts']} 次，标的数 {len(SYMBOLS)}"
     )
 
 
@@ -218,6 +230,9 @@ def test_one_hung_symbol_must_not_block_the_whole_chunk(local_tmp: Path) -> None
         start_date=date(2026, 9, 1),
         end_date=END_DATE,
         chunk_size=6,
+        checkpoint=BootstrapCheckpoint(
+            local_tmp, as_of=AS_OF.date(), required_valid_bars=20
+        ),
         max_workers=6,
         symbol_timeout_seconds=1.0,
     )

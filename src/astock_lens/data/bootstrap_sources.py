@@ -20,9 +20,7 @@ def validate_bootstrap_as_of(as_of: datetime) -> datetime:
 def _validate_dataset_payload(dataset: RawDataset) -> RawDataset:
     """验证有效数据集不能用空载荷冒充成功。"""
     if dataset.status is DataStatus.VALUE and (
-        dataset.row_count == 0
-        or dataset.payload is None
-        or not dataset.payload.rows
+        dataset.row_count == 0 or dataset.payload is None or not dataset.payload.rows
     ):
         raise ValueError("empty VALUE dataset is not allowed")
     return dataset
@@ -84,9 +82,7 @@ def validate_bootstrap_batch_result(
 class BatchMarketBarSource(Protocol):
     """能够优先按批次获取近期行情的来源。"""
 
-    def fetch_recent_bars(
-        self, request: BootstrapBatchRequest
-    ) -> BatchFetchResult: ...
+    def fetch_recent_bars(self, request: BootstrapBatchRequest) -> BatchFetchResult: ...
 
 
 class SymbolBarFallbackSource(Protocol):

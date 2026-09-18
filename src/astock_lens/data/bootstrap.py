@@ -19,10 +19,15 @@ implementation detail.
 
 from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from astock_lens.data.bootstrap_checkpoint import (
+    BootstrapCheckpoint,
+    BootstrapSymbolState,
+)
 from astock_lens.data.contracts import RawDataset, RawPayload
 from astock_lens.data.sync import (
     DEFAULT_BAR_DATASET,
@@ -59,6 +64,12 @@ PRICE_HISTORY_LABEL = "strategy_price_history"
 # weekends and holidays; the extension loop below still covers genuinely sparse
 # instruments. This is a technical multiplier, not a product threshold.
 CALENDAR_DAYS_PER_REQUIRED_BAR = 2
+
+# 取数结果里"没有数据可落"的状态。它们不是错误，但也不是成功：一律记成 EMPTY，
+# 绝不写成 0 根 bar 的成功——那正是"静默兜底"。
+_EMPTY_SOURCE_STATUSES: frozenset[DataStatus] = frozenset(
+    {DataStatus.VALUE, DataStatus.NULL, DataStatus.NOT_APPLICABLE}
+)
 
 # How long one symbol's fetch may occupy a worker before the chunk gives up on
 # it. Measured 2026-09-18: a resume run sat with 0% CPU, one open TCP connection
@@ -108,6 +119,19 @@ class ChunkSyncResult(DomainRecord):
     completed_symbols: tuple[str, ...]
     failed_symbols: tuple[str, ...]
     rows_written: int
+
+
+@dataclass(frozen=True)
+class _SymbolFetch:
+    """一块里一只标的的取数结果：数据本身，以及它是不是超时的那一只。
+
+    超时与来源报错都表现为失败数据集，但清单状态不同（`TIMEOUT` / `SOURCE_ERROR`），
+    所以"为什么失败"必须跟着结果一起传下去，不能靠消息文本反推。
+    """
+
+    symbol: str
+    dataset: RawDataset
+    timed_out: bool = False
 
 
 class BootstrapSymbolCoverage(DomainRecord):
@@ -230,6 +254,84 @@ def valid_amount_bars(path: Path, symbol: str, *, end_date: date) -> int:
     return _count_bars(path, symbol, end_date=end_date, column="amount")
 
 
+def _read_staged_parts(checkpoint: BootstrapCheckpoint) -> dict[str, RawPayload]:
+    """Read the run's already-staged parts, keyed by the part's symbol.
+
+    读分片是"每只标的小文件读一次"（O(标的数 × 单只行数)），与失败复盘里的
+    "每只标的都把整份 `daily_bars.csv` 读一遍"是两件事：整份文件只在末尾合并时读写一次。
+    """
+    staged: dict[str, RawPayload] = {}
+    for path in checkpoint.iter_part_files():
+        columns, rows = read_raw_rows(path)
+        if columns and rows:
+            staged[path.stem] = RawPayload(columns=columns, rows=rows)
+    return staged
+
+
+def _payload_covers(payload: RawPayload, *, start_date: date, end_date: date) -> bool:
+    """Whether a staged part already spans the requested window.
+
+    判据与 `covered_symbols` 同源：分片里既有不晚于 `start_date` 的行、又有不早于
+    `end_date` 的行。窗口加宽后这个条件不再成立，"续跑跳过"于是不会挡掉扩展抓取。
+    """
+    if TRADE_DATE_COLUMN not in payload.columns:
+        return False
+    index = payload.columns.index(TRADE_DATE_COLUMN)
+    days = [row[index] for row in payload.rows if index < len(row) and row[index]]
+    if not days:
+        return False
+    return min(days) <= start_date.isoformat() and max(days) >= end_date.isoformat()
+
+
+def _union_payloads(payloads: Sequence[RawPayload]) -> RawPayload | None:
+    """Fold several staged parts into one payload: column union, rows in order.
+
+    列取并集（供应商对不同标的的字段形状可能不同，缺的格子留空，由规范化阶段读作缺失），
+    行按分片顺序拼接；同一标的只会出现一次，所以不会把同一根 bar 写进两份。
+    """
+    parts: list[RawPayload] = []
+    union: list[str] = []
+    for payload in payloads:
+        if not payload.rows:
+            continue
+        for column in payload.columns:
+            if column not in union:
+                union.append(column)
+        parts.append(payload)
+    if not parts:
+        return None
+
+    columns = tuple(union)
+    position = {column: index for index, column in enumerate(columns)}
+    rows: list[tuple[str, ...]] = []
+    for payload in parts:
+        for row in payload.rows:
+            folded = [""] * len(columns)
+            for index, column in enumerate(payload.columns):
+                if index < len(row):
+                    folded[position[column]] = row[index]
+            rows.append(tuple(folded))
+    return RawPayload(columns=columns, rows=tuple(rows))
+
+
+def _is_staged_success(checkpoint: BootstrapCheckpoint, symbol: str) -> bool:
+    entry = checkpoint.entry_for(symbol)
+    return entry is not None and entry.status is BootstrapSymbolState.SUCCESS
+
+
+def _failure_state(fetch: _SymbolFetch) -> BootstrapSymbolState:
+    """Translate one fetch into its manifest state; a failure is never a success."""
+    if fetch.timed_out:
+        return BootstrapSymbolState.TIMEOUT
+    if fetch.dataset.status in _EMPTY_SOURCE_STATUSES:
+        return BootstrapSymbolState.EMPTY
+    return BootstrapSymbolState.SOURCE_ERROR
+
+
+def _failure_reason(fetch: _SymbolFetch) -> str:
+    return fetch.dataset.message or fetch.dataset.status.value
+
+
 def land_bar_chunks(
     *,
     provider: SymbolBarFetcher,
@@ -239,15 +341,25 @@ def land_bar_chunks(
     start_date: date,
     end_date: date,
     chunk_size: int,
+    checkpoint: BootstrapCheckpoint,
     max_workers: int = 1,
     symbol_timeout_seconds: float = SYMBOL_TIMEOUT_SECONDS,
 ) -> ChunkSyncResult:
     """Land one range of bars for many symbols, one chunk at a time.
 
-    A chunk is persisted as soon as it finishes, so a crash costs at most the
-    chunk in flight. A symbol the source could not answer for is named in
-    `failed_symbols` and lands nothing: a failure never becomes an empty row,
-    and it never discards the symbols that already succeeded.
+    Each symbol's bars are staged as its own part file the moment it answers
+    (`data/raw/bootstrap/<as-of>/parts/<symbol>.csv`) and its state goes into the
+    run manifest, so a crash costs at most the symbols still in flight and a
+    rerun resumes from what is already staged instead of re-fetching it. A
+    symbol the source could not answer for is named in `failed_symbols`, gets a
+    manifest entry with its reason, and lands no part: a failure never becomes an
+    empty row, and it never discards the symbols that already succeeded.
+
+    The canonical `daily_bars.csv` is merged **once per call**, from the run's
+    staged parts, not once per chunk. Rewriting the whole file after every chunk
+    is what made the 2026-09-18 full-market run burn its time in I/O while the
+    row count stood still; the merge cost must scale with the run, not with the
+    chunk count.
 
     `max_workers` fetches a chunk's symbols concurrently. It defaults to 1 —
     serial — because the source's rate-limit policy is `Deferred` in the design:
@@ -268,15 +380,25 @@ def land_bar_chunks(
     path = root / f"{BAR_DATASET}.csv"
     requested = tuple(dict.fromkeys(symbols))
     already = covered_symbols(path, start_date=start_date, end_date=end_date)
-    pending = [symbol for symbol in requested if symbol not in already]
+    staged = _read_staged_parts(checkpoint)
+    # 续跑看的是"清单 + 已落盘分片"：清单说这只标的上一轮成功了、分片说它覆盖了本次窗口，
+    # 才跳过；窗口加宽时分片不再覆盖，于是照常重抓。
+    resumed = {
+        symbol
+        for symbol, payload in staged.items()
+        if _is_staged_success(checkpoint, symbol)
+        and _payload_covers(payload, start_date=start_date, end_date=end_date)
+    }
+    pending = [
+        symbol
+        for symbol in requested
+        if symbol not in already and symbol not in resumed
+    ]
 
     completed: list[str] = []
     failed: list[str] = []
-    rows_written = 0
 
     for chunk in _chunks(pending, chunk_size):
-        columns: tuple[str, ...] = ()
-        rows: list[tuple[str, ...]] = []
         fetched = _fetch_chunk(
             provider=provider,
             chunk=chunk,
@@ -286,25 +408,33 @@ def land_bar_chunks(
             max_workers=max_workers,
             symbol_timeout_seconds=symbol_timeout_seconds,
         )
-        for symbol, dataset in fetched:
-            payload = dataset.payload
+        for fetch in fetched:
+            payload = fetch.dataset.payload
+            # 只有"没超时、状态是 VALUE、而且真的带了行"才算成功；其余一律记账。
+            columns = payload.columns if payload is not None else ()
+            rows = payload.rows if payload is not None else ()
             if (
-                dataset.status is not DataStatus.VALUE
-                or payload is None
-                or not payload.rows
+                not fetch.timed_out
+                and fetch.dataset.status is DataStatus.VALUE
+                and columns
+                and rows
             ):
-                failed.append(symbol)
+                checkpoint.record_success(fetch.symbol, columns=columns, rows=rows)
+                staged[fetch.symbol] = RawPayload(columns=columns, rows=rows)
+                completed.append(fetch.symbol)
                 continue
-            if not columns:
-                columns = payload.columns
-            rows.extend(payload.rows)
-            completed.append(symbol)
-
-        if rows and columns:
-            written, _ = write_merged(
-                path, RawPayload(columns=columns, rows=tuple(rows))
+            checkpoint.record_failure(
+                fetch.symbol,
+                state=_failure_state(fetch),
+                error=_failure_reason(fetch),
             )
-            rows_written += written
+            failed.append(fetch.symbol)
+
+    rows_written = 0
+    # 整份文件只在这里被写一次：行数是本次合并写进去的行（含续跑补回的历史分片）。
+    merged = _union_payloads(list(staged.values()))
+    if merged is not None:
+        rows_written, _ = write_merged(path, merged)
 
     return ChunkSyncResult(
         requested_symbols=requested,
@@ -323,7 +453,7 @@ def _fetch_chunk(
     end_date: date,
     max_workers: int,
     symbol_timeout_seconds: float,
-) -> tuple[tuple[str, RawDataset], ...]:
+) -> tuple[_SymbolFetch, ...]:
     """Fetch one chunk, in the chunk's own symbol order.
 
     The order is what keeps the landed file stable: the same inputs produce the
@@ -344,20 +474,23 @@ def _fetch_chunk(
             )
             for symbol in chunk
         }
-        results: list[tuple[str, RawDataset]] = []
+        results: list[_SymbolFetch] = []
         for symbol in chunk:
             try:
                 results.append(
-                    (
+                    _SymbolFetch(
                         symbol,
                         futures[symbol].result(timeout=symbol_timeout_seconds),
                     )
                 )
             except TimeoutError:
-                results.append((symbol, _timeout_dataset(symbol)))
+                # 这一只没有按时回答：按超时记账，块照常结束（绝不是网络 timeout 的声明）。
+                results.append(
+                    _SymbolFetch(symbol, _timeout_dataset(symbol), timed_out=True)
+                )
             except Exception as error:  # noqa: BLE001 — one symbol's failure
                 results.append(
-                    (
+                    _SymbolFetch(
                         symbol,
                         RawDataset(
                             provider="unknown",
@@ -466,6 +599,11 @@ def _extend_history(
     # 永远判缺：窗口起点可能落在非交易日（例如周六），而标的的第一根 bar 只能是
     # 之后的第一个交易日，`earliest <= start` 于是永远不成立——实测中 400 只早已
     # 够数的标的因此被反复重抓，抓回来的数据文件里本来就有。
+    # 检查点由调用方决定 `as_of` 与所需 bar 数，整轮扩展共用同一个：
+    # 分片与清单跨轮累积，续跑与崩溃恢复都从"已落盘的那份"开始。
+    checkpoint = BootstrapCheckpoint(
+        root, as_of=as_of.date(), required_valid_bars=windows
+    )
     counts = _bar_counts(path, end_date=end_date, column=column)
     short = [
         symbol for symbol in dict.fromkeys(symbols) if counts.get(symbol, 0) < windows
@@ -481,6 +619,7 @@ def _extend_history(
             start_date=start_date,
             end_date=end_date,
             chunk_size=chunk_size,
+            checkpoint=checkpoint,
             max_workers=max_workers,
             symbol_timeout_seconds=symbol_timeout_seconds,
         )

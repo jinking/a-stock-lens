@@ -25,6 +25,7 @@ from astock_lens.data.bootstrap import (
     liquidity_bootstrap_requirement,
     strategy_history_requirement,
 )
+from astock_lens.data.bootstrap_checkpoint import BootstrapCheckpoint
 from astock_lens.data.contracts import FetchRequest, RawDataset, RawPayload
 from astock_lens.data.providers.akshare_provider import AkShareProvider
 from astock_lens.data.sync import read_raw_rows
@@ -35,6 +36,11 @@ ROOT = Path(__file__).resolve().parents[2]
 FACTOR_DIR = ROOT / "configs" / "factors"
 LIQUIDITY_FACTOR = "avg_amount_20d"
 AS_OF = datetime(2026, 9, 17, 15, 0, tzinfo=UTC)
+
+
+def _checkpoint(root: Path) -> BootstrapCheckpoint:
+    """每一块落地都必须经检查点落分片，所以每个调用点都要传一个。"""
+    return BootstrapCheckpoint(root, as_of=AS_OF.date(), required_valid_bars=20)
 
 
 def _configs() -> tuple[FactorConfig, ...]:
@@ -160,6 +166,7 @@ def test_a_chunk_size_must_be_a_real_chunk_size(local_tmp: Path) -> None:
             start_date=date(2026, 9, 1),
             end_date=date(2026, 9, 17),
             chunk_size=0,
+            checkpoint=_checkpoint(local_tmp),
         )
 
 
@@ -249,6 +256,7 @@ def test_a_chunk_lands_every_symbol_it_could_fetch(local_tmp: Path) -> None:
         start_date=date(2026, 9, 1),
         end_date=date(2026, 9, 17),
         chunk_size=2,
+        checkpoint=_checkpoint(local_tmp),
     )
 
     assert isinstance(result, ChunkSyncResult)
@@ -324,6 +332,7 @@ def test_concurrency_changes_the_speed_and_nothing_else(local_tmp: Path) -> None
         start_date=date(2026, 9, 1),
         end_date=date(2026, 9, 17),
         chunk_size=5,
+        checkpoint=_checkpoint(serial_root),
         max_workers=1,
     )
 
@@ -337,6 +346,7 @@ def test_concurrency_changes_the_speed_and_nothing_else(local_tmp: Path) -> None
         start_date=date(2026, 9, 1),
         end_date=date(2026, 9, 17),
         chunk_size=5,
+        checkpoint=_checkpoint(parallel_root),
         max_workers=6,
     )
 
@@ -358,5 +368,6 @@ def test_a_zero_worker_count_is_refused(local_tmp: Path) -> None:
             start_date=date(2026, 9, 1),
             end_date=date(2026, 9, 17),
             chunk_size=5,
+            checkpoint=_checkpoint(local_tmp),
             max_workers=0,
         )

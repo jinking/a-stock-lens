@@ -23,6 +23,7 @@ from astock_lens.data.bootstrap import (
     bootstrap_liquidity_history,
     land_bar_chunks,
 )
+from astock_lens.data.bootstrap_checkpoint import BootstrapCheckpoint
 from astock_lens.data.contracts import (
     FetchRequest,
     ProviderHealth,
@@ -128,6 +129,22 @@ def _bars_path(root: Path) -> Path:
     return root / "daily_bars.csv"
 
 
+def _parts_dir(root: Path) -> Path:
+    return root / "bootstrap" / END_DATE.isoformat() / "parts"
+
+
+def _checkpoint(root: Path) -> BootstrapCheckpoint:
+    """每块落地都经检查点落分片，所以每个调用点都要传入它。"""
+    return BootstrapCheckpoint(root, as_of=END_DATE, required_valid_bars=20)
+
+
+def _staged_symbols(root: Path) -> set[str]:
+    parts = _parts_dir(root)
+    if not parts.is_dir():
+        return set()
+    return {path.stem for path in parts.glob("*.csv")}
+
+
 def _symbols_in_file(path: Path) -> set[str]:
     columns, rows = read_raw_rows(path)
     if "symbol" not in columns:
@@ -156,6 +173,7 @@ def test_a_failed_symbol_keeps_the_symbols_that_succeeded(
         start_date=date(2026, 8, 1),
         end_date=END_DATE,
         chunk_size=2,
+        checkpoint=_checkpoint(local_tmp),
     )
 
     assert isinstance(result, ChunkSyncResult)
@@ -181,6 +199,7 @@ def test_a_rerun_retries_only_the_coverage_that_is_missing(local_tmp: Path) -> N
         start_date=date(2026, 8, 1),
         end_date=END_DATE,
         chunk_size=10,
+        checkpoint=_checkpoint(local_tmp),
     )
 
     second_run = FakeBarProvider(histories)
@@ -192,6 +211,7 @@ def test_a_rerun_retries_only_the_coverage_that_is_missing(local_tmp: Path) -> N
         start_date=date(2026, 8, 1),
         end_date=END_DATE,
         chunk_size=10,
+        checkpoint=_checkpoint(local_tmp),
     )
 
     assert [symbol for symbol, _, _ in second_run.requests] == ["600519.SH"]
@@ -202,8 +222,13 @@ def test_a_rerun_retries_only_the_coverage_that_is_missing(local_tmp: Path) -> N
 def test_each_chunk_is_on_disk_before_the_next_chunk_is_requested(
     local_tmp: Path,
 ) -> None:
-    """Persistence per chunk is what makes a crash resumable."""
-    seen: list[set[str]] = []
+    """Persistence per chunk is what makes a crash resumable.
+
+    落盘的形状变了（分片 + 清单，而不是每块重写整份 `daily_bars.csv`），要钉住的
+    性质没变：第一块的成果必须在第二块被请求之前就已经在磁盘上。
+    """
+    seen_parts: list[set[str]] = []
+    seen_file: list[bool] = []
     provider = FakeBarProvider(
         {
             "000001.SZ": (date(2026, 8, 1), 1),
@@ -214,7 +239,8 @@ def test_each_chunk_is_on_disk_before_the_next_chunk_is_requested(
     original = provider.fetch_symbol_bars
 
     def watching(symbol: str, *, as_of: datetime, start_date: date, end_date: date):
-        seen.append(_symbols_in_file(_bars_path(local_tmp)))
+        seen_parts.append(_staged_symbols(local_tmp))
+        seen_file.append(_bars_path(local_tmp).exists())
         return original(symbol, as_of=as_of, start_date=start_date, end_date=end_date)
 
     provider.fetch_symbol_bars = watching  # type: ignore[method-assign]
@@ -227,12 +253,16 @@ def test_each_chunk_is_on_disk_before_the_next_chunk_is_requested(
         start_date=date(2026, 8, 1),
         end_date=END_DATE,
         chunk_size=2,
+        checkpoint=_checkpoint(local_tmp),
     )
 
-    assert seen[0] == set()
-    assert seen[1] == set()
-    assert seen[2] == {"000001.SZ", "000002.SZ"}, (
-        "the first chunk must be persisted before the second chunk is requested"
+    assert seen_parts[0] == set()
+    assert seen_parts[1] == set()
+    assert seen_parts[2] == {"000001.SZ", "000002.SZ"}, (
+        "the first chunk's parts must be on disk before the second chunk is requested"
+    )
+    assert seen_file == [False, False, False], (
+        "整份 daily_bars.csv 不得在分块过程中被反复重写；它只在落地调用结束时合并一次"
     )
 
 

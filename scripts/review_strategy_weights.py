@@ -23,6 +23,8 @@ from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from astock_lens.strategies.weighted import WeightedPercentileScanner
+
 from astock_lens.data.contracts import FetchRequest, NormalizedDataset
 from astock_lens.data.normalize.valuations import NeodataValuationNormalizer
 from astock_lens.data.providers.neodata import NeodataProvider
@@ -33,7 +35,6 @@ from astock_lens.factors.contracts import FactorContext, FactorResult
 from astock_lens.pipelines import stages
 from astock_lens.strategies.config import StrategyConfig, load_strategy_config
 from astock_lens.strategies.contracts import StrategyContext, StrategyResult
-from astock_lens.strategies.weighted import WeightedPercentileScanner
 
 ROOT = Path(__file__).resolve().parents[1]
 STRATEGY_DIR = ROOT / "configs" / "strategies"
