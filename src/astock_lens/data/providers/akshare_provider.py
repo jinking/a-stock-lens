@@ -33,7 +33,7 @@ Failure modes, kept apart on purpose:
 import math
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, date, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from astock_lens.data.contracts import (
     FetchRequest,
@@ -133,6 +133,13 @@ _MISSING_EXTRA = (
     "akshare is not installed; run `uv sync --extra providers` to use AkShareProvider"
 )
 
+# AkShare endpoint 函数未通过本 Provider 暴露可控的连接/读取超时或取消句柄。
+# fallback scheduler 必须将 live 调用置于可单独终止的工作进程；线程/Future 等待
+# 仅是调用方 deadline，不能停止底层 I/O。
+AKSHARE_FALLBACK_REQUIRES_PROCESS_ISOLATION: Final = (
+    "AKSHARE_FALLBACK_REQUIRES_PROCESS_ISOLATION"
+)
+
 
 class _SourceError(Exception):
     """A source problem: network, emptiness, or an unexpected column set."""
@@ -143,9 +150,14 @@ class _MissingExtra(RuntimeError):
 
 
 def _live_transport(endpoint: str, params: Mapping[str, str]) -> "Frame":
-    """Call akshare over the network and stringify the frame it returns."""
+    """调用 AkShare 并转为字符串帧，不宣称具备 I/O 取消能力。
+
+    endpoint callable 自行持有网络栈，在此既未暴露 timeout 也未暴露取消句柄。
+    因而 live fallback 必须置于可终止进程边界，要求由
+    ``AKSHARE_FALLBACK_REQUIRES_PROCESS_ISOLATION`` 声明。
+    """
     try:
-        import akshare  # type: ignore[import-untyped]
+        import akshare  # type: ignore[import-not-found]
     except ImportError as error:
         raise _MissingExtra(_MISSING_EXTRA) from error
     frame = getattr(akshare, endpoint)(**dict(params))
@@ -190,6 +202,15 @@ class AkShareProvider:
         self._transport: Transport = (
             transport if transport is not None else _live_transport
         )
+
+    @property
+    def fallback_execution_requirement(self) -> str:
+        """返回 live AkShare fallback 强制使用的执行边界。
+
+        此声明特意与 scheduler deadline 分离：调用方必须把 active transport
+        放进可终止的工作进程，因为等待线程不能终止 source call。
+        """
+        return AKSHARE_FALLBACK_REQUIRES_PROCESS_ISOLATION
 
     def health(self) -> ProviderHealth:
         """Report importability. Network liveness is only proven by a fetch."""

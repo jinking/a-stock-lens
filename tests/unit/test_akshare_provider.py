@@ -13,13 +13,24 @@ the source fails loudly instead of silently matching a stale fixture.
 
 import csv
 import json
+import multiprocessing
+import sys
+import time
+import types
+from collections.abc import Mapping
 from datetime import UTC, date, datetime
+from multiprocessing.synchronize import Event
 from pathlib import Path
 
 import pytest
 
 from astock_lens.data.contracts import FetchRequest, RawDataset
-from astock_lens.data.providers.akshare_provider import SYMBOL_SUFFIX, AkShareProvider
+from astock_lens.data.providers.akshare_provider import (
+    AKSHARE_FALLBACK_REQUIRES_PROCESS_ISOLATION,
+    SYMBOL_SUFFIX,
+    AkShareProvider,
+    _live_transport,
+)
 from astock_lens.domain.enums import DataStatus
 
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "akshare"
@@ -67,7 +78,7 @@ class ReplayTransport:
         self.calls: list[tuple[str, dict[str, str]]] = []
 
     def __call__(
-        self, endpoint: str, params: dict[str, str]
+        self, endpoint: str, params: Mapping[str, str]
     ) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...]]:
         self.calls.append((endpoint, dict(params)))
         key = (endpoint, json.dumps(params, ensure_ascii=False, sort_keys=True))
@@ -110,6 +121,59 @@ def _bars_request() -> FetchRequest:
         start_date=BAR_START,
         end_date=BAR_END,
     )
+
+
+def _non_returning_live_transport(started: Event) -> None:
+    """在子进程中让 AkShare endpoint 永不返回，且不访问网络。"""
+    fake_akshare = types.ModuleType("akshare")
+
+    def block_forever(**_: str) -> None:
+        started.set()
+        while True:
+            time.sleep(0.01)
+
+    fake_akshare.stock_zh_a_hist_tx = block_forever  # type: ignore[attr-defined]
+    sys.modules["akshare"] = fake_akshare
+    _live_transport("stock_zh_a_hist_tx", {"symbol": "sz000001"})
+
+
+def test_akshare_fallback_declares_process_isolation_requirement() -> None:
+    """无取消句柄的 AkShare 调用必须由可终止进程承载。"""
+    provider = AkShareProvider()
+
+    assert (
+        provider.fallback_execution_requirement
+        == AKSHARE_FALLBACK_REQUIRES_PROCESS_ISOLATION
+    )
+
+
+def test_process_isolation_bounds_a_non_returning_live_transport() -> None:
+    """真实 wrapper 被阻塞时，只有终止子进程能给调用者 wall-clock 上界。"""
+    context = multiprocessing.get_context("spawn")
+    started = context.Event()
+    worker = context.Process(target=_non_returning_live_transport, args=(started,))
+    worker.start()
+    try:
+        assert started.wait(timeout=5), "blocking endpoint did not start"
+
+        deadline = 0.15
+        began = time.perf_counter()
+        worker.join(timeout=deadline)
+        assert worker.is_alive(), "the intentionally blocking transport returned"
+        worker.terminate()
+        worker.join(timeout=1)
+        elapsed = time.perf_counter() - began
+
+        assert worker.exitcode is not None
+        assert elapsed >= deadline
+        assert elapsed < 1.0, (
+            f"process isolation exceeded wall-clock bound: {elapsed:.3f}s"
+        )
+        print(f"terminated non-returning _live_transport in {elapsed:.3f}s")
+    finally:
+        if worker.is_alive():
+            worker.terminate()
+            worker.join(timeout=1)
 
 
 def test_recorded_fixtures_exist() -> None:
