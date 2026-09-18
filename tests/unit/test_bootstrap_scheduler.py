@@ -1,72 +1,52 @@
-"""全市场 fallback 调度器的超时边界回归测试。
-
-这些测试先固定当前线程池实现的两个缺陷：Future 的等待超时会按提交顺序累加，
-而被放弃的线程仍可能在调度器返回后继续执行。真正的 transport 超时与有界
-scheduler 由后续任务实现。
-"""
+"""有界 completion-order fallback 调度器的回归测试。"""
 
 from __future__ import annotations
 
-import threading
+import multiprocessing
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping
 from datetime import UTC, date, datetime
-from pathlib import Path
 
-from astock_lens.data.bootstrap import land_bar_chunks
+from astock_lens.data.bootstrap_scheduler import (
+    FallbackAttempt,
+    SchedulerStats,
+    fetch_symbols_bounded,
+)
+from astock_lens.data.bootstrap_sources import SymbolBarFallbackSource
 from astock_lens.data.contracts import RawDataset, RawPayload
+from astock_lens.data.providers.akshare_provider import (
+    AkShareProvider,
+)
 from astock_lens.domain.enums import DataStatus
 
 AS_OF = datetime(2026, 9, 17, 15, 0, tzinfo=UTC)
 END_DATE = date(2026, 9, 17)
-BAR_COLUMNS = (
-    "symbol",
-    "trade_date",
-    "open",
-    "high",
-    "low",
-    "close",
-    "volume",
-    "amount",
-    "turnover_rate",
-)
+BAR_COLUMNS = ("symbol", "trade_date", "close")
 
 
-class FirstNHangFetcher:
-    """前 n 个开始的操作挂起，其余操作立即完成，并记录线程状态。"""
+class ControlledSource:
+    """本地可控 source；所有计数均为跨进程共享状态。"""
 
-    def __init__(self, *, n: int, sleep_seconds: float) -> None:
-        self.n = n
-        self.sleep_seconds = sleep_seconds
-        self.active = 0
-        self.max_active = 0
-        self.started = 0
-        self.finished = 0
-        self.release = threading.Event()
-        self._lock = threading.Lock()
+    def __init__(
+        self, *, delays: dict[str, float] | None = None, hang: bool = False
+    ) -> None:
+        context = multiprocessing.get_context("fork")
+        self.delays = delays or {}
+        self.hang = hang
+        self.active = context.Value("i", 0)
+        self.max_active = context.Value("i", 0)
+        self.requests = context.Value("i", 0)
+        self._lock = context.Lock()
 
     def fetch_symbol_bars(self, symbol: str, **_: object) -> RawDataset:
         with self._lock:
-            self.started += 1
-            ordinal = self.started
-            self.active += 1
-            self.max_active = max(self.max_active, self.active)
+            self.requests.value += 1
+            self.active.value += 1
+            self.max_active.value = max(self.max_active.value, self.active.value)
         try:
-            if ordinal <= self.n:
-                # 用可释放的事件模拟远超 deadline 的阻塞，测试结束时可安全唤醒
-                # 工作线程，避免红测让 pytest 进程永久等待。
-                self.release.wait(self.sleep_seconds)
-            row = (
-                symbol,
-                END_DATE.isoformat(),
-                "1",
-                "1",
-                "1",
-                "1",
-                "1",
-                "1000",
-                "0.01",
-            )
+            if self.hang:
+                multiprocessing.Event().wait(30)
+            time.sleep(self.delays.get(symbol, 0))
             return RawDataset(
                 provider="test",
                 dataset="daily_bars",
@@ -74,73 +54,94 @@ class FirstNHangFetcher:
                 provider_version="test",
                 status=DataStatus.VALUE,
                 row_count=1,
-                payload=RawPayload(columns=BAR_COLUMNS, rows=(row,)),
+                payload=RawPayload(
+                    columns=BAR_COLUMNS,
+                    rows=((symbol, END_DATE.isoformat(), "1"),),
+                ),
             )
         finally:
             with self._lock:
-                self.active -= 1
-                self.finished += 1
+                self.active.value -= 1
+
+
+def _blocking_transport(
+    _: str, __: Mapping[str, str]
+) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...]]:
+    """模拟 AkShare transport 永不返回，不访问网络。"""
+    multiprocessing.Event().wait(30)
+    return (), ()
 
 
 def _run(
-    fetcher: FirstNHangFetcher,
-    root: Path,
-    symbols: Sequence[str],
+    source: SymbolBarFallbackSource,
+    symbols: tuple[str, ...],
     *,
-    max_inflight: int,
-    operation_timeout_seconds: float,
-):
-    return land_bar_chunks(
-        provider=fetcher,
-        root=root,
+    max_inflight: int = 2,
+    operation_timeout_seconds: float = 1.0,
+) -> tuple[list[FallbackAttempt], SchedulerStats]:
+    attempts: list[FallbackAttempt] = []
+    stats = fetch_symbols_bounded(
+        source=source,
+        symbols=symbols,
         as_of=AS_OF,
-        symbols=tuple(symbols),
         start_date=date(2026, 9, 1),
         end_date=END_DATE,
-        chunk_size=50,
-        max_workers=max_inflight,
-        symbol_timeout_seconds=operation_timeout_seconds,
+        max_inflight=max_inflight,
+        operation_timeout_seconds=operation_timeout_seconds,
+        on_result=attempts.append,
     )
+    return attempts, stats
 
 
-def test_all_inflight_workers_hanging_does_not_serialize_timeout_budget(local_tmp: Path):
-    symbols = tuple(f"{i:06d}.SZ" for i in range(50))
-    fetcher = FirstNHangFetcher(n=6, sleep_seconds=30)
+def test_fast_later_symbol_is_checkpointed_before_slow_first_symbol() -> None:
+    source = ControlledSource(delays={"slow.SZ": 0.25})
+
+    attempts, stats = _run(source, ("slow.SZ", "fast.SZ"))
+
+    assert [attempt.symbol for attempt in attempts] == ["fast.SZ", "slow.SZ"]
+    assert stats.completed == 2
+
+
+def test_max_inflight_is_bounded_for_5300_fake_symbols() -> None:
+    source = ControlledSource()
+    symbols = tuple(f"{index:06d}.SZ" for index in range(5_300))
+
+    attempts, stats = _run(source, symbols, max_inflight=6)
+
+    assert len(attempts) == len(symbols)
+    assert source.max_active.value <= 6
+    assert stats.max_inflight_observed <= 6
+
+
+def test_all_hanging_akshare_workers_are_terminated_without_serial_timeouts() -> None:
+    source = AkShareProvider(transport=_blocking_transport)
+    symbols = tuple(f"{index:06d}.SZ" for index in range(50))
+    before = {child.pid for child in multiprocessing.active_children()}
 
     started = time.perf_counter()
-    try:
-        result = _run(
-            fetcher,
-            local_tmp,
-            symbols,
-            max_inflight=6,
-            operation_timeout_seconds=0.2,
-        )
-    finally:
-        fetcher.release.set()
+    attempts, stats = _run(
+        source,
+        symbols,
+        max_inflight=6,
+        operation_timeout_seconds=0.2,
+    )
     elapsed = time.perf_counter() - started
+    after = {child.pid for child in multiprocessing.active_children()}
 
-    assert elapsed < 2.0
     assert elapsed < 1.0, f"timeouts accumulated serially: {elapsed:.3f}s"
-    assert result is not None
+    assert len(attempts) == 6
+    assert all(attempt.status is DataStatus.SOURCE_ERROR for attempt in attempts)
+    assert stats.timed_out == 6
+    assert stats.max_inflight_observed == 6
+    assert after <= before
 
 
-def test_timeout_does_not_leave_running_work_behind(local_tmp: Path):
-    symbols = tuple(f"{i:06d}.SZ" for i in range(50))
-    fetcher = FirstNHangFetcher(n=6, sleep_seconds=30)
+def test_all_success_requests_do_not_exceed_symbol_count() -> None:
+    source = ControlledSource()
+    symbols = tuple(f"{index:06d}.SZ" for index in range(30))
 
-    try:
-        _run(
-            fetcher,
-            local_tmp,
-            symbols,
-            max_inflight=6,
-            operation_timeout_seconds=0.2,
-        )
+    attempts, stats = _run(source, symbols, max_inflight=30)
 
-        assert fetcher.max_active == 6
-        assert fetcher.started >= 6
-        assert fetcher.finished == fetcher.started
-        assert fetcher.active == 0
-    finally:
-        fetcher.release.set()
+    assert len(attempts) == len(symbols)
+    assert source.requests.value <= len(symbols)
+    assert stats.submitted == len(symbols)
