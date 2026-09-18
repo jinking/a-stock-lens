@@ -56,7 +56,7 @@ research universe: 2,303 symbols        ← 目标 2,000–3,000，命中
 - 评审与实测记录：`docs/REVIEW_NOTES.md` 第十五~十九节
 - 待办与已知问题：`docs/ROADMAP.md` 第三节
 - 当日过程记录：`.workbuddy/memory/2026-09-18.md`
-- 提交：`git log --oneline 1f890b3..HEAD`（22 个，全部已推送）
+- 提交：`git log --oneline 1f890b3..HEAD`（本次重构的 23 个提交，全部已推送）
 
 ---
 
