@@ -17,7 +17,7 @@ symbols qualify for research, which is a product decision, not an
 implementation detail.
 """
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -25,6 +25,11 @@ from astock_lens.data.bootstrap_checkpoint import (
     BootstrapCheckpoint,
     BootstrapSymbolState,
     compact_bootstrap_run,
+)
+from astock_lens.data.bootstrap_progress import (
+    HEARTBEAT_SECONDS,
+    BootstrapProgressTracker,
+    ProgressSink,
 )
 from astock_lens.data.bootstrap_scheduler import FallbackAttempt, fetch_symbols_bounded
 from astock_lens.data.bootstrap_sources import (
@@ -357,8 +362,11 @@ def _land_batch_round(
             for symbol, columns, rows in _batch_rows_by_symbol(dataset):
                 if symbol not in asked:
                     continue
-                checkpoint.record_success(symbol, columns=columns, rows=rows)
+                checkpoint.record_success(
+                    symbol, columns=columns, rows=rows, flush=False
+                )
                 covered.append(symbol)
+        checkpoint.flush()
     return tuple(covered)
 
 
@@ -375,6 +383,7 @@ def land_bar_chunks(
     batch_size: int = BATCH_REQUEST_SIZE,
     max_inflight: int = 1,
     operation_timeout_seconds: float = SYMBOL_TIMEOUT_SECONDS,
+    tracker: BootstrapProgressTracker | None = None,
 ) -> ChunkSyncResult:
     """Land one range of bars for many symbols: batch first, then only the gaps.
 
@@ -404,6 +413,9 @@ def land_bar_chunks(
     is what made the 2026-09-18 full-market run burn its time in I/O while the
     row count stood still; the merge cost must scale with the run, not with the
     chunk count.
+
+    `tracker` 是整轮扩展共用的进度累计器：消化一只标的、in-flight 变化都从这条执行路径
+    自己上报，心跳因此永远和真正在跑的流程一致。
     """
     if batch_size <= 0:
         raise ValueError(f"batch_size must be positive, got {batch_size}")
@@ -447,6 +459,8 @@ def land_bar_chunks(
         batch_size=batch_size,
     )
     completed.extend(covered)
+    if tracker is not None and covered:
+        tracker.record(processed=len(covered))
     gaps = [symbol for symbol in pending if symbol not in set(covered)]
 
     if gaps:
@@ -459,15 +473,29 @@ def land_bar_chunks(
                     attempt.symbol,
                     columns=dataset.payload.columns,
                     rows=dataset.payload.rows,
+                    flush=False,
                 )
                 completed.append(attempt.symbol)
+                if tracker is not None:
+                    tracker.record(processed=1)
                 return
             checkpoint.record_failure(
                 attempt.symbol,
                 state=_attempt_state(attempt),
                 error=_attempt_reason(attempt),
+                flush=False,
             )
             failed.append(attempt.symbol)
+            if tracker is not None:
+                tracker.record(processed=1, failed=1)
+
+        report_inflight: Callable[[int], None] | None = None
+        if tracker is not None:
+
+            def report(count: int) -> None:
+                tracker.record(inflight=count)
+
+            report_inflight = report
 
         fetch_symbols_bounded(
             source=fallback_source,
@@ -478,7 +506,11 @@ def land_bar_chunks(
             max_inflight=max_inflight,
             operation_timeout_seconds=operation_timeout_seconds,
             on_result=record,
+            on_inflight=report_inflight,
         )
+
+    # 落地调用结束前一定把清单落盘：跨轮、跨进程的续跑都只看磁盘上的清单。
+    checkpoint.flush()
 
     # 整份文件只在这里被写一次，而且走 Task 7 的确定性压实（唯一 canonical 合并路径）：
     # 行数是本次合并写进去的行（含续跑补回的历史分片）。
@@ -504,6 +536,8 @@ def bootstrap_liquidity_history(
     batch_size: int = BATCH_REQUEST_SIZE,
     max_inflight: int = 1,
     operation_timeout_seconds: float = SYMBOL_TIMEOUT_SECONDS,
+    progress: ProgressSink | None = None,
+    heartbeat_seconds: float = HEARTBEAT_SECONDS,
 ) -> BootstrapSyncResult:
     """Fetch the least history that lets the liquidity factor be measured."""
     return _extend_history(
@@ -518,6 +552,8 @@ def bootstrap_liquidity_history(
         column="amount",
         max_inflight=max_inflight,
         operation_timeout_seconds=operation_timeout_seconds,
+        progress=progress,
+        heartbeat_seconds=heartbeat_seconds,
     )
 
 
@@ -533,6 +569,8 @@ def bootstrap_strategy_history(
     batch_size: int = BATCH_REQUEST_SIZE,
     max_inflight: int = 1,
     operation_timeout_seconds: float = SYMBOL_TIMEOUT_SECONDS,
+    progress: ProgressSink | None = None,
+    heartbeat_seconds: float = HEARTBEAT_SECONDS,
 ) -> BootstrapSyncResult:
     """Fetch the price history the strategy layer needs, for these symbols only.
 
@@ -555,6 +593,8 @@ def bootstrap_strategy_history(
         column="close",
         max_inflight=max_inflight,
         operation_timeout_seconds=operation_timeout_seconds,
+        progress=progress,
+        heartbeat_seconds=heartbeat_seconds,
     )
 
 
@@ -571,6 +611,8 @@ def _extend_history(
     batch_size: int = BATCH_REQUEST_SIZE,
     max_inflight: int = 1,
     operation_timeout_seconds: float = SYMBOL_TIMEOUT_SECONDS,
+    progress: ProgressSink | None = None,
+    heartbeat_seconds: float = HEARTBEAT_SECONDS,
 ) -> BootstrapSyncResult:
     """Fetch a range, then widen it for whatever is still short.
 
@@ -597,11 +639,22 @@ def _extend_history(
     checkpoint = BootstrapCheckpoint(
         root, as_of=as_of.date(), required_valid_bars=windows
     )
+    # 进度只由本次 invocation 推导：总数就是这个调用点收到的标的集合。
+    tracker = BootstrapProgressTracker(
+        total=len(dict.fromkeys(symbols)),
+        sink=progress,
+        heartbeat_seconds=heartbeat_seconds,
+    )
     counts = _bar_counts(path, end_date=end_date, column=column)
     short = [
         symbol for symbol in dict.fromkeys(symbols) if counts.get(symbol, 0) < windows
     ]
     failed: list[str] = []
+    tracker.measure(
+        satisfied=sum(
+            1 for symbol in dict.fromkeys(symbols) if counts.get(symbol, 0) >= windows
+        )
+    )
 
     while short:
         result = land_bar_chunks(
@@ -616,11 +669,19 @@ def _extend_history(
             checkpoint=checkpoint,
             max_inflight=max_inflight,
             operation_timeout_seconds=operation_timeout_seconds,
+            tracker=tracker,
         )
         failed.extend(item for item in result.failed_symbols if item not in failed)
 
         previous = {symbol: counts.get(symbol, 0) for symbol in short}
         counts = _bar_counts(path, end_date=end_date, column=column)
+        tracker.measure(
+            satisfied=sum(
+                1
+                for symbol in dict.fromkeys(symbols)
+                if counts.get(symbol, 0) >= windows
+            )
+        )
         measured = {symbol: counts.get(symbol, 0) for symbol in short}
         still_short = [symbol for symbol, count in measured.items() if count < windows]
         if not still_short or measured == previous:
@@ -628,6 +689,7 @@ def _extend_history(
         short = still_short
         start_date -= step
 
+    tracker.finish()
     coverage = tuple(
         BootstrapSymbolCoverage(
             symbol=symbol,

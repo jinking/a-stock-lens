@@ -89,6 +89,7 @@ def fetch_symbols_bounded(
     max_inflight: int,
     operation_timeout_seconds: float,
     on_result: Callable[[FallbackAttempt], None],
+    on_inflight: Callable[[int], None] | None = None,
 ) -> SchedulerStats:
     """按完成顺序回调结果，并把运行集合严格限制为 ``max_inflight``。
 
@@ -96,6 +97,9 @@ def fetch_symbols_bounded(
     process，因此底层不可控 I/O 不会遗留为运行中任务。对于没有该声明的 fake 或
     受控 source，调度器只使用 daemon 线程来提供轻量并发；其 deadline 仍只是
     scheduler 等待边界，不能被表述为 transport timeout。
+
+    `on_inflight` 在运行集合增减时收到当前活跃数：这是心跳里"inflight"的唯一来源，
+    由执行路径本身给出，而不是外部估算。
     """
     if max_inflight <= 0:
         raise ValueError("max_inflight must be positive")
@@ -137,6 +141,8 @@ def fetch_symbols_bounded(
             )
             submitted += 1
             max_observed = max(max_observed, len(active))
+            if on_inflight is not None:
+                on_inflight(len(active))
 
     submit_until_full()
     while active:
@@ -152,6 +158,8 @@ def fetch_symbols_bounded(
                 on_result(attempt)
                 completed += 1
                 completed_this_round += 1
+                if on_inflight is not None:
+                    on_inflight(len(active))
                 if attempt.status is DataStatus.SOURCE_ERROR:
                     source_errors += 1
                 continue
@@ -174,6 +182,8 @@ def fetch_symbols_bounded(
                 timed_out += 1
                 source_errors += 1
                 timed_out_this_round += 1
+                if on_inflight is not None:
+                    on_inflight(len(active))
 
         if timed_out_this_round and not completed_this_round:
             draining_after_timeout = True

@@ -62,6 +62,12 @@ class BootstrapManifest(DomainRecord):
     entries: tuple[BootstrapManifestEntry, ...] = ()
 
 
+# 攒够这么多条未落盘记录就原子重写一次清单。逐只重写会让写放大变成 O(N²)（实测 5,300 只
+# 84.4 秒）；攒批之后写入次数与标的数成正比、单次代价仍是"清单大小"，崩溃时最多丢掉这一批
+# 记录——分片已经落盘，重跑最多少抓几只。技术节流值，不是产品阈值。
+MANIFEST_FLUSH_EVERY = 64
+
+
 def _atomic_write_text(path: Path, text: str) -> None:
     """先写临时文件再原子替换：读者永远看不到半份清单。"""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -127,6 +133,7 @@ class BootstrapCheckpoint:
         self._entries: dict[str, BootstrapManifestEntry] = {
             entry.symbol: entry for entry in self._load_entries()
         }
+        self._unflushed = 0
 
     # ---- 读取 -------------------------------------------------------------
 
@@ -165,8 +172,14 @@ class BootstrapCheckpoint:
         *,
         columns: Sequence[str],
         rows: Sequence[Sequence[str]],
+        flush: bool = True,
     ) -> BootstrapManifestEntry:
-        """落一份分片并记状态；重复成功覆盖自己的分片，不产生第二份。"""
+        """落一份分片并记状态；重复成功覆盖自己的分片，不产生第二份。
+
+        `flush=False` 表示"先攒着"：分片此刻已经落盘，清单等 `flush()` 或攒够
+        `MANIFEST_FLUSH_EVERY` 条再一次性原子写。批量落地内循环用它把写放大从
+        O(N²) 压回 O(N)，落地调用结束前一定会 flush。
+        """
         path = self.parts_path(symbol)
         path.parent.mkdir(parents=True, exist_ok=True)
         handle, temporary = _mkstemp(path)
@@ -185,7 +198,8 @@ class BootstrapCheckpoint:
                 attempts=(previous.attempts if previous else 0) + 1,
                 last_error=None,
                 updated_at=datetime.now(UTC),
-            )
+            ),
+            flush=flush,
         )
 
     def record_failure(
@@ -194,8 +208,9 @@ class BootstrapCheckpoint:
         *,
         state: BootstrapSymbolState,
         error: str | None = None,
+        flush: bool = True,
     ) -> BootstrapManifestEntry:
-        """记一次失败；分片不写，绝不把失败写成空数据。"""
+        """记一次失败；分片不写，绝不把失败写成空数据。语义同 `record_success`。"""
         previous = self._entries.get(symbol)
         return self._record(
             BootstrapManifestEntry(
@@ -205,13 +220,14 @@ class BootstrapCheckpoint:
                 attempts=(previous.attempts if previous else 0) + 1,
                 last_error=error,
                 updated_at=datetime.now(UTC),
-            )
+            ),
+            flush=flush,
         )
 
-    # ---- 内部 -------------------------------------------------------------
-
-    def _record(self, entry: BootstrapManifestEntry) -> BootstrapManifestEntry:
-        self._entries[entry.symbol] = entry
+    def flush(self) -> None:
+        """把清单原子写到磁盘；没有未落盘的改动时什么都不做。"""
+        if self._unflushed == 0:
+            return
         _atomic_write_text(
             self._manifest_path,
             json.dumps(
@@ -222,6 +238,17 @@ class BootstrapCheckpoint:
             )
             + "\n",
         )
+        self._unflushed = 0
+
+    # ---- 内部 -------------------------------------------------------------
+
+    def _record(
+        self, entry: BootstrapManifestEntry, *, flush: bool
+    ) -> BootstrapManifestEntry:
+        self._entries[entry.symbol] = entry
+        self._unflushed += 1
+        if flush or self._unflushed >= MANIFEST_FLUSH_EVERY:
+            self.flush()
         return entry
 
     def _load_entries(self) -> tuple[BootstrapManifestEntry, ...]:

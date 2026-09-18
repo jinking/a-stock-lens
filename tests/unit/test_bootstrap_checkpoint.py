@@ -118,6 +118,61 @@ def test_a_failure_is_recorded_with_its_reason(local_tmp: Path) -> None:
     assert entry.attempts == 1
 
 
+def test_a_deferred_record_is_not_on_disk_until_it_is_flushed(local_tmp: Path) -> None:
+    """`flush=False` 只推迟清单：分片先落盘，清单要等 flush。"""
+    checkpoint = _checkpoint(local_tmp)
+    checkpoint.record_success(
+        "000001.SZ", columns=BAR_COLUMNS, rows=_rows("000001.SZ"), flush=False
+    )
+
+    assert _checkpoint(local_tmp).entry_for("000001.SZ") is None, (
+        "未 flush 的记录不该出现在磁盘上"
+    )
+    assert checkpoint.parts_path("000001.SZ").is_file(), "分片必须已经落盘"
+
+    checkpoint.flush()
+
+    entry = _checkpoint(local_tmp).entry_for("000001.SZ")
+    assert entry is not None
+    assert entry.status is BootstrapSymbolState.SUCCESS
+
+
+def test_a_landing_call_does_not_rewrite_the_manifest_once_per_symbol(
+    local_tmp: Path, monkeypatch
+) -> None:
+    """清单写入次数必须与标的数无关（攒批），否则写放大回到 O(N²)。"""
+    writes = {"count": 0}
+    real = bootstrap_checkpoint._atomic_write_text
+
+    def counted(path: Path, text: str) -> None:
+        writes["count"] += 1
+        real(path, text)
+
+    monkeypatch.setattr(bootstrap_checkpoint, "_atomic_write_text", counted)
+    symbols = tuple(f"{index:06d}.SZ" for index in range(70))
+    checkpoint = BootstrapCheckpoint(local_tmp, as_of=AS_OF, required_valid_bars=20)
+
+    result = land_bar_chunks(
+        fallback_source=_BulkFetcher(),
+        root=local_tmp,
+        as_of=AS_OF_MOMENT,
+        symbols=symbols,
+        start_date=START_DATE,
+        end_date=END_DATE,
+        batch_size=100,
+        checkpoint=checkpoint,
+    )
+
+    assert set(result.completed_symbols) == set(symbols)
+    assert 1 <= writes["count"] <= 3, (
+        f"70 只标的最多允许 3 次清单写（攒批阈值 + 收尾），实际 {writes['count']} 次"
+    )
+    reopened = BootstrapCheckpoint(local_tmp, as_of=AS_OF, required_valid_bars=20)
+    assert len(reopened.manifest().entries) == len(symbols), (
+        "攒批不得让清单在落地调用结束时还没落盘"
+    )
+
+
 class _SymbolFetcher:
     """两只正常、一只失败——真实冷启动的形状（失败不得丢掉成功的邻居）。"""
 

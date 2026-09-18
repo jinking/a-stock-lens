@@ -494,4 +494,7 @@ def test_only_the_research_universe_is_asked_for_expensive_history(
         f"{sorted(set(provider.asked) - set(surviving))}"
     )
     assert len(set(provider.asked)) == 40
+    # 命令自己给出进度（设计文档 §3.6）：外部 watcher 不再是唯一手段。
+    assert "processed 40/40" in result.stdout, result.stdout
+    assert "sym/s" in result.stdout, result.stdout
     assert "valuation enrichment: BLOCKED_PENDING_INDUSTRY_PATH" in result.stdout

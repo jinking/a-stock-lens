@@ -30,6 +30,7 @@ from astock_lens.data.bootstrap import (
     liquidity_bootstrap_requirement,
     strategy_history_requirement,
 )
+from astock_lens.data.bootstrap_progress import BootstrapProgress, render_progress
 from astock_lens.data.bootstrap_sources import SymbolBarFallbackSource
 from astock_lens.data.contracts import DataProvider, FetchRequest
 from astock_lens.data.health import raw_datasets
@@ -298,6 +299,17 @@ def _symbol_bar_provider(provider: DataProvider) -> SymbolBarFallbackSource:
         )
         raise typer.Exit(code=1)
     return provider
+
+
+class _HeartbeatSink:
+    """把进度快照打成一行。
+
+    冷启动命令自己输出进度（设计文档 §3.6）：外部 watcher 只是第二块屏幕上的便利工具，
+    不再是判断"还在动"的唯一途径。这一行里的每个数字都来自本次 invocation。
+    """
+
+    def emit(self, progress: BootstrapProgress) -> None:
+        typer.echo(render_progress(progress))
 
 
 def _today_close() -> datetime:
@@ -1081,6 +1093,7 @@ def sync_research(
         end_date=day.date(),
         batch_size=batch_size,
         max_inflight=workers,
+        progress=_HeartbeatSink(),
     )
     typer.echo(f"price history satisfied: {len(result.satisfied_symbols)}")
     typer.echo(f"price history short: {len(result.short_symbols)}")
@@ -1193,6 +1206,7 @@ def sync_bootstrap(
         end_date=day.date(),
         batch_size=batch_size,
         max_inflight=workers,
+        progress=_HeartbeatSink(),
     )
 
     _, bar_rows = read_raw_rows(root / f"{_dataset()}.csv")
