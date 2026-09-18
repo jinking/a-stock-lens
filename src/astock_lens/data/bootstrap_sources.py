@@ -104,3 +104,33 @@ class SymbolBarFallbackSource(Protocol):
         start_date: date,
         end_date: date,
     ) -> RawDataset: ...
+
+
+class ValidatedSymbolBarFallbackSource:
+    """把裸的 fallback 结构接口包成强制校验的消费边界。
+
+    `SymbolBarFallbackSource` 只描述实现者的结构，不能拦截实现者直接返回的
+    `RawDataset`。bootstrap 编排必须消费本 adapter，才能在调用 source 前拒绝
+    naive `as_of`，并在返回后拒绝空的 `VALUE` 数据集。
+    """
+
+    def __init__(self, source: SymbolBarFallbackSource) -> None:
+        self._source = source
+
+    def fetch_symbol_bars(
+        self,
+        symbol: str,
+        *,
+        as_of: datetime,
+        start_date: date,
+        end_date: date,
+    ) -> RawDataset:
+        """按原 Protocol 签名取数，并强制执行启动数据校验。"""
+        validate_bootstrap_as_of(as_of)
+        dataset = self._source.fetch_symbol_bars(
+            symbol,
+            as_of=as_of,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        return validate_bootstrap_source_dataset(dataset, as_of=as_of)

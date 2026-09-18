@@ -9,6 +9,7 @@ from astock_lens.data.bootstrap_sources import (
     BatchMarketBarSource,
     BootstrapBatchRequest,
     SymbolBarFallbackSource,
+    ValidatedSymbolBarFallbackSource,
     validate_bootstrap_batch_result,
     validate_bootstrap_source_dataset,
 )
@@ -155,3 +156,63 @@ def test_batch_validation_rejects_naive_as_of() -> None:
             result,
             as_of=datetime.fromisoformat("2026-09-18T15:00:00"),
         )
+
+
+class StaticFallback:
+    def __init__(self, dataset: RawDataset) -> None:
+        self.dataset = dataset
+        self.calls: list[datetime] = []
+
+    def fetch_symbol_bars(
+        self,
+        symbol: str,
+        *,
+        as_of: datetime,
+        start_date: date,
+        end_date: date,
+    ) -> RawDataset:
+        self.calls.append(as_of)
+        return self.dataset
+
+
+def test_validated_fallback_rejects_naive_as_of_before_source_call() -> None:
+    source = StaticFallback(_dataset("000001.SZ"))
+    fallback = ValidatedSymbolBarFallbackSource(source)
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        fallback.fetch_symbol_bars(
+            "000001.SZ",
+            as_of=datetime.fromisoformat("2026-09-18T15:00:00"),
+            start_date=START_DATE,
+            end_date=END_DATE,
+        )
+
+    assert source.calls == []
+
+
+def test_validated_fallback_rejects_empty_value_after_source_call() -> None:
+    source = StaticFallback(_dataset("000001.SZ", empty=True))
+    fallback = ValidatedSymbolBarFallbackSource(source)
+
+    with pytest.raises(ValueError, match="empty VALUE"):
+        fallback.fetch_symbol_bars(
+            "000001.SZ",
+            as_of=AS_OF,
+            start_date=START_DATE,
+            end_date=END_DATE,
+        )
+
+
+def test_validated_fallback_allows_value_and_explicit_source_error() -> None:
+    for status, empty in ((DataStatus.VALUE, False), (DataStatus.SOURCE_ERROR, True)):
+        source = StaticFallback(_dataset("000001.SZ", status=status, empty=empty))
+        fallback = ValidatedSymbolBarFallbackSource(source)
+
+        result = fallback.fetch_symbol_bars(
+            "000001.SZ",
+            as_of=AS_OF,
+            start_date=START_DATE,
+            end_date=END_DATE,
+        )
+
+        assert result.status is status
