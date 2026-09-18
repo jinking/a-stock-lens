@@ -16,6 +16,7 @@ from astock_lens.data import bootstrap
 from astock_lens.data.bootstrap import (
     BootstrapRequirement,
     bootstrap_liquidity_history,
+    land_bar_chunks,
 )
 from astock_lens.data.contracts import RawDataset, RawPayload
 from astock_lens.domain.enums import DataStatus
@@ -173,3 +174,60 @@ def test_the_first_window_is_wide_enough_to_finish_in_one_round(
         "a daily-history symbol must be satisfied by the first window; rounds per "
         f"symbol were {per_symbol}"
     )
+
+
+class HangingFetcher:
+    """一只标的永久挂住，其余正常返回。"""
+
+    def __init__(self, hanging: str) -> None:
+        self.hanging = hanging
+
+    def fetch_symbol_bars(self, symbol: str, *, as_of, start_date, end_date):
+        if symbol == self.hanging:
+            __import__("time").sleep(60)
+        row = (symbol, end_date.isoformat(), "1", "1", "1", "1", "1", "1000", "0.01")
+        return RawDataset(
+            provider="hanging",
+            dataset="daily_bars",
+            fetched_at=datetime.now(UTC),
+            provider_version="test",
+            status=DataStatus.VALUE,
+            row_count=1,
+            payload=RawPayload(columns=BAR_COLUMNS, rows=(row,)),
+        )
+
+
+def test_one_hung_symbol_must_not_block_the_whole_chunk(local_tmp: Path) -> None:
+    """块落盘不得依赖"所有请求都返回"。
+
+    2026-09-18 全池续跑实测：进程 3 分钟零落盘、0% CPU、只有 1 条 TCP 连接、
+    日志 0 字节——某个网络请求永久挂住，而分块落盘要等整块所有 future 返回，
+    于是一只标的把整轮都拖成静止。这里用一只故意挂 60 秒的标的钉住修复：
+    整块必须在有界时间内完成落盘，挂住的那只按失败记账、下一轮再试。
+    """
+    symbols = tuple(f"{index:06d}.SZ" for index in range(6))
+    fetcher = HangingFetcher(hanging="000003.SZ")
+    started = __import__("time").perf_counter()
+
+    result = land_bar_chunks(
+        provider=fetcher,
+        root=local_tmp,
+        as_of=AS_OF,
+        symbols=symbols,
+        start_date=date(2026, 9, 1),
+        end_date=END_DATE,
+        chunk_size=6,
+        max_workers=6,
+        symbol_timeout_seconds=1.0,
+    )
+    elapsed = __import__("time").perf_counter() - started
+
+    assert elapsed < 10, (
+        f"the chunk must not wait for the hung symbol; took {elapsed:.1f}s"
+    )
+    assert result.failed_symbols == ("000003.SZ",)
+    assert set(result.completed_symbols) == set(symbols) - {"000003.SZ"}
+    columns, rows = bootstrap.read_raw_rows(local_tmp / "daily_bars.csv")
+    assert {row[columns.index("symbol")] for row in rows} == set(symbols) - {
+        "000003.SZ"
+    }, "the symbols that answered must be persisted before the round ends"

@@ -60,6 +60,14 @@ PRICE_HISTORY_LABEL = "strategy_price_history"
 # instruments. This is a technical multiplier, not a product threshold.
 CALENDAR_DAYS_PER_REQUIRED_BAR = 2
 
+# How long one symbol's fetch may occupy a worker before the chunk gives up on
+# it. Measured 2026-09-18: a resume run sat with 0% CPU, one open TCP connection
+# and an empty log for minutes because a network call never returned and the
+# chunk waited for every future. With this bound the chunk always finishes and
+# persists what answered; the straggler is recorded as a failure and retried by
+# the next round. Technical bound, not a product threshold.
+SYMBOL_TIMEOUT_SECONDS = 60.0
+
 
 class BootstrapRequirementNotConfigured(RuntimeError):
     """Raised when no reviewed liquidity window can be resolved from config."""
@@ -232,6 +240,7 @@ def land_bar_chunks(
     end_date: date,
     chunk_size: int,
     max_workers: int = 1,
+    symbol_timeout_seconds: float = SYMBOL_TIMEOUT_SECONDS,
 ) -> ChunkSyncResult:
     """Land one range of bars for many symbols, one chunk at a time.
 
@@ -251,6 +260,10 @@ def land_bar_chunks(
         raise ValueError(f"chunk_size must be positive, got {chunk_size}")
     if max_workers <= 0:
         raise ValueError(f"max_workers must be positive, got {max_workers}")
+    if symbol_timeout_seconds <= 0:
+        raise ValueError(
+            f"symbol_timeout_seconds must be positive, got {symbol_timeout_seconds}"
+        )
 
     path = root / f"{BAR_DATASET}.csv"
     requested = tuple(dict.fromkeys(symbols))
@@ -271,6 +284,7 @@ def land_bar_chunks(
             start_date=start_date,
             end_date=end_date,
             max_workers=max_workers,
+            symbol_timeout_seconds=symbol_timeout_seconds,
         )
         for symbol, dataset in fetched:
             payload = dataset.payload
@@ -308,6 +322,7 @@ def _fetch_chunk(
     start_date: date,
     end_date: date,
     max_workers: int,
+    symbol_timeout_seconds: float,
 ) -> tuple[tuple[str, RawDataset], ...]:
     """Fetch one chunk, in the chunk's own symbol order.
 
@@ -315,18 +330,10 @@ def _fetch_chunk(
     same rows in the same sequence whether the chunk was fetched serially or
     concurrently.
     """
-    if max_workers == 1:
-        return tuple(
-            (
-                symbol,
-                provider.fetch_symbol_bars(
-                    symbol, as_of=as_of, start_date=start_date, end_date=end_date
-                ),
-            )
-            for symbol in chunk
-        )
-
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    # 不用 `with`：上下文管理器退出时会 join 所有线程，挂住的请求会把整块拖回原样。
+    # 这里显式 shutdown(wait=False)：被放弃的请求留在线程里自生自灭，块照常结束。
+    pool = ThreadPoolExecutor(max_workers=max_workers)
+    try:
         futures = {
             symbol: pool.submit(
                 provider.fetch_symbol_bars,
@@ -340,7 +347,14 @@ def _fetch_chunk(
         results: list[tuple[str, RawDataset]] = []
         for symbol in chunk:
             try:
-                results.append((symbol, futures[symbol].result()))
+                results.append(
+                    (
+                        symbol,
+                        futures[symbol].result(timeout=symbol_timeout_seconds),
+                    )
+                )
+            except TimeoutError:
+                results.append((symbol, _timeout_dataset(symbol)))
             except Exception as error:  # noqa: BLE001 — one symbol's failure
                 results.append(
                     (
@@ -357,6 +371,8 @@ def _fetch_chunk(
                     )
                 )
         return tuple(results)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def bootstrap_liquidity_history(
@@ -520,4 +536,20 @@ def liquidity_bootstrap_requirement(
         f"no factor configuration for {LIQUIDITY_FACTOR}: the Universe's "
         "liquidity rule cannot be bootstrapped without the window its factor "
         "is defined over"
+    )
+
+
+def _timeout_dataset(symbol: str) -> RawDataset:
+    """一个标的超过时限仍未返回：按失败记账，交给下一轮重试。"""
+    return RawDataset(
+        provider="unknown",
+        dataset=BAR_DATASET,
+        fetched_at=datetime.now(UTC),
+        provider_version="unknown",
+        status=DataStatus.SOURCE_ERROR,
+        row_count=0,
+        message=(
+            f"{symbol} did not answer within the fetch time bound; recorded as a "
+            "failure so the chunk can finish and the next round can retry it"
+        ),
     )
