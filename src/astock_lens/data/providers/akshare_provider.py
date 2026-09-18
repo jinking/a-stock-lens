@@ -254,6 +254,84 @@ class AkShareProvider:
             row_count=0,
         )
 
+    def fetch_symbol_bars(
+        self,
+        symbol: str,
+        *,
+        as_of: datetime,
+        start_date: date | None,
+        end_date: date | None,
+    ) -> RawDataset:
+        """Fetch one symbol's bars, reporting a source problem as a status.
+
+        The batch interface (`fetch`) fails the whole dataset when any symbol
+        fails, which is the right answer for a single-date sync but useless for
+        a whole-market cold start. This primitive answers for one symbol, so a
+        chunked caller can keep the symbols that succeeded. A caller mistake
+        still raises; only a source problem becomes a status.
+        """
+        code = _tencent_code(symbol)
+        fetched_at = datetime.now(UTC)
+        params = {
+            "symbol": code,
+            "start_date": (start_date or _UNBOUNDED_START).strftime("%Y%m%d"),
+            "end_date": (end_date or _UNBOUNDED_END).strftime("%Y%m%d"),
+            "adjust": "",
+        }
+        try:
+            columns, source_rows = self._transport(BAR_ENDPOINT, params)
+            index = _require_columns(columns, set(BAR_COLUMN_MAP), BAR_ENDPOINT)
+        except _MissingExtra:
+            raise
+        except Exception as error:  # noqa: BLE001 — a source failure is a status
+            return RawDataset(
+                provider=self._provider,
+                dataset="daily_bars",
+                fetched_at=fetched_at,
+                provider_version=self._version,
+                status=DataStatus.SOURCE_ERROR,
+                row_count=0,
+                message=f"{BAR_ENDPOINT} failed for {symbol!r}: {error}",
+            )
+
+        if not source_rows:
+            return RawDataset(
+                provider=self._provider,
+                dataset="daily_bars",
+                fetched_at=fetched_at,
+                provider_version=self._version,
+                status=DataStatus.SOURCE_ERROR,
+                row_count=0,
+                message=f"{BAR_ENDPOINT} returned no rows for {code!r}",
+            )
+
+        rows: list[tuple[str, ...]] = []
+        for row in source_rows:
+            values = {source: row[position] for source, position in index.items()}
+            rows.append(
+                (
+                    symbol,
+                    values["date"],
+                    values["open"],
+                    values["high"],
+                    values["low"],
+                    values["close"],
+                    values["volume"],
+                    values["amount"],
+                    values["turnover"],
+                )
+            )
+        return RawDataset(
+            provider=self._provider,
+            dataset="daily_bars",
+            fetched_at=fetched_at,
+            provider_version=self._version,
+            status=DataStatus.VALUE,
+            row_count=len(rows),
+            trade_date=_single_date(rows, position=1),
+            payload=RawPayload(columns=BAR_EMIT_COLUMNS, rows=tuple(rows)),
+        )
+
     def _fetch_bars(
         self,
         request: FetchRequest,
@@ -264,36 +342,24 @@ class AkShareProvider:
         assert request.symbols is not None  # validated in `fetch`
         rows: list[tuple[str, ...]] = []
 
-        for canonical, code in zip(request.symbols, codes, strict=True):
-            params = {
-                "symbol": code,
-                "start_date": (request.start_date or _UNBOUNDED_START).strftime(
-                    "%Y%m%d"
-                ),
-                "end_date": (request.end_date or _UNBOUNDED_END).strftime("%Y%m%d"),
-                "adjust": "",
-            }
-            columns, source_rows = self._transport(BAR_ENDPOINT, params)
-            index = _require_columns(columns, set(BAR_COLUMN_MAP), BAR_ENDPOINT)
-
-            if not source_rows:
-                raise _SourceError(f"{BAR_ENDPOINT} returned no rows for {code!r}")
-
-            for row in source_rows:
-                values = {source: row[position] for source, position in index.items()}
-                rows.append(
-                    (
-                        canonical,
-                        values["date"],
-                        values["open"],
-                        values["high"],
-                        values["low"],
-                        values["close"],
-                        values["volume"],
-                        values["amount"],
-                        values["turnover"],
-                    )
+        for canonical in request.symbols:
+            dataset = self.fetch_symbol_bars(
+                canonical,
+                as_of=request.as_of,
+                start_date=request.start_date,
+                end_date=request.end_date,
+            )
+            payload = dataset.payload
+            if dataset.status is not DataStatus.VALUE or payload is None:
+                # The batch contract is unchanged: one bad symbol still fails
+                # the dataset. `fetch_symbol_bars` is where the single-symbol
+                # verdict lives, so the chunked bootstrap can call it directly
+                # and keep the other symbols' work.
+                raise _SourceError(
+                    dataset.message
+                    or f"{BAR_ENDPOINT} returned no rows for {canonical!r}"
                 )
+            rows.extend(payload.rows)
 
         trade_date = _single_date(rows, position=1)
         return RawDataset(

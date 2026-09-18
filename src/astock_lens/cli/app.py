@@ -23,20 +23,29 @@ from pydantic import BaseModel, ValidationError
 from astock_lens.calibration.candidate_report import generate_calibration_report
 from astock_lens.calibration.render import render_json, render_markdown
 from astock_lens.candidates.models import Candidate
-from astock_lens.data.bootstrap import liquidity_bootstrap_requirement
-from astock_lens.data.contracts import DataProvider
+from astock_lens.data.bootstrap import (
+    SymbolBarFetcher,
+    bootstrap_liquidity_history,
+    liquidity_bootstrap_requirement,
+)
+from astock_lens.data.contracts import DataProvider, FetchRequest
 from astock_lens.data.health import raw_datasets
+from astock_lens.data.normalize.csv_securities import CsvSecurityNormalizer
 from astock_lens.data.providers.akshare_provider import AkShareProvider
+from astock_lens.data.providers.local import LocalCsvProvider
 from astock_lens.data.providers.neodata import NeodataProvider
 from astock_lens.data.providers.westock import FINANCIAL_DATASETS, WestockCliProvider
 from astock_lens.data.snapshots.resolve import resolve_snapshot_store
 from astock_lens.data.snapshots.store import SnapshotStore
 from astock_lens.data.sync import (
+    DONE_STATUSES,
     DatasetLanding,
     SyncResult,
     land_financial_statements,
     land_neodata_blocks,
     land_raw,
+    land_securities_listing,
+    read_raw_rows,
     read_symbols,
 )
 from astock_lens.domain.enums import SnapshotKind, WatchlistState
@@ -71,6 +80,7 @@ from astock_lens.strategies.registry import (
 )
 from astock_lens.universe.config import load_universe_config
 from astock_lens.universe.models import UniverseSnapshot
+from astock_lens.universe.prefilter import prefilter_listing
 from astock_lens.watchlist.models import WatchlistEntry
 from astock_lens.watchlist.state_machine import (
     WatchlistTransitionError,
@@ -259,6 +269,23 @@ def _bulk_provider() -> DataProvider:
     touching the commands that use it.
     """
     return AkShareProvider()
+
+
+def _symbol_bar_provider(provider: DataProvider) -> SymbolBarFetcher:
+    """The bulk provider narrowed to the symbol-level contract.
+
+    Isolation between symbols is only possible when the provider answers for
+    one symbol at a time. Saying which provider cannot do that here keeps the
+    limitation visible, instead of failing somewhere deep in the flow.
+    """
+    if not isinstance(provider, SymbolBarFetcher):
+        typer.echo(
+            f"provider {provider.health().provider} cannot fetch one symbol at a "
+            "time, so a chunked bootstrap cannot isolate failures with it",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    return provider
 
 
 def _today_close() -> datetime:
@@ -883,6 +910,92 @@ def _land(day: datetime) -> SyncResult:
             f"provider {health.provider} is not usable: {health.message}"
         )
     return land_raw(provider=provider, root=_csv_root(), as_of=day)
+
+
+@app.command("sync-bootstrap")
+def sync_bootstrap(
+    as_of: Annotated[str, AS_OF_OPTION],
+    chunk_size: Annotated[
+        int,
+        typer.Option(
+            "--chunk-size",
+            help=(
+                "每块落地多少只标的。技术默认 50，可按源站限速调整；"
+                "它不是产品阈值，不写入 configs/。"
+            ),
+        ),
+    ] = 50,
+) -> None:
+    """Land the least price history a cold start needs, resumably.
+
+    The listing lands first, the listing-only prefilter decides which symbols
+    deserve history, and only those symbols are fetched. How much history is
+    enough comes from the configured liquidity factor's window and is measured
+    in valid bars, never in calendar days.
+
+    Every completed chunk is persisted before the next one starts, so an
+    interrupted run resumes at the missing coverage instead of from zero. A
+    symbol the source could not answer for is reported; no row is invented.
+    """
+    day = _as_of(as_of)
+    provider = _bulk_provider()
+    health = provider.health()
+    if not health.healthy:
+        typer.echo(
+            f"provider {health.provider} is not usable: {health.message}", err=True
+        )
+        raise typer.Exit(code=1)
+
+    root = _csv_root()
+    dataset = _securities_dataset()
+    landing = land_securities_listing(
+        provider=provider, root=root, as_of=day, dataset=dataset
+    )
+    typer.echo(
+        f"securities {landing.status.value}: {landing.rows_total} rows "
+        f"in {landing.path}"
+    )
+    if landing.status not in DONE_STATUSES:
+        typer.echo(
+            "the listing did not land, so a prefilter would be judging an "
+            f"incomplete market: {landing.note or landing.status.value}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    raw = LocalCsvProvider(root).fetch(
+        FetchRequest(dataset=dataset, as_of=day, symbols=None)
+    )
+    profiles = CsvSecurityNormalizer().normalize(raw, as_of=day).securities
+    universe_config = load_universe_config(_universe_config_path())
+    prefiltered = prefilter_listing(profiles, config=universe_config, as_of=day)
+    requirement = liquidity_bootstrap_requirement(_factor_configs())
+
+    typer.echo(f"listing: {len(profiles)} symbols")
+    typer.echo(f"prefilter: {len(prefiltered.included)} symbols pass listing rules")
+    typer.echo(
+        f"bootstrap: {requirement.required_valid_bars} valid bars of "
+        f"{requirement.factor_name} per symbol, window read from configs/factors"
+    )
+
+    result = bootstrap_liquidity_history(
+        provider=_symbol_bar_provider(provider),
+        root=root,
+        as_of=day,
+        symbols=prefiltered.included,
+        requirement=requirement,
+        end_date=day.date(),
+        chunk_size=chunk_size,
+    )
+
+    _, bar_rows = read_raw_rows(root / f"{_dataset()}.csv")
+    typer.echo(f"satisfied: {len(result.satisfied_symbols)}")
+    typer.echo(f"short of history: {len(result.short_symbols)}")
+    typer.echo(f"could not be fetched: {len(result.failed_symbols)}")
+    typer.echo(f"bars landed: {len(bar_rows)} rows")
+
+    if result.failed_symbols:
+        raise typer.Exit(code=1)
 
 
 @app.command()

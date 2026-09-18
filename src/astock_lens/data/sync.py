@@ -179,7 +179,7 @@ def land_financial_statements(
             )
             continue
 
-        written, total = _write_merged(path, payload, keys=FINANCIAL_KEYS)
+        written, total = write_merged(path, payload, keys=FINANCIAL_KEYS)
         landings.append(
             DatasetLanding(
                 dataset=dataset,
@@ -291,16 +291,8 @@ def land_raw(
     the request then come from the same source, so the scan cannot cover a
     different market than the one it says it covers.
     """
-    listing = _land_dataset(
-        provider=provider,
-        root=root,
-        as_of=as_of,
-        dataset=securities_dataset,
-        symbols=None,
-        # A listing holds one row per instrument, so the instrument is its key.
-        # Keying on every cell would append a second row whenever a field the
-        # source reformats (a name, a listing date) changes.
-        keys=(SYMBOL_COLUMN,),
+    listing = _land_listing(
+        provider=provider, root=root, as_of=as_of, dataset=securities_dataset
     )
     wanted = tuple(symbols) if symbols is not None else _listed_symbols(listing.payload)
 
@@ -312,6 +304,45 @@ def land_raw(
         symbols=wanted,
     )
     return SyncResult(as_of=as_of, landings=(listing.landing, bars.landing))
+
+
+def land_securities_listing(
+    *,
+    provider: DataProvider,
+    root: Path,
+    as_of: datetime,
+    dataset: str = DEFAULT_SECURITIES_DATASET,
+) -> DatasetLanding:
+    """Land the exchange listing alone, without fetching any per-symbol bars.
+
+    A cold start needs the listing before it can decide which symbols deserve
+    history, so the listing has to be landable on its own rather than only as
+    the first half of `land_raw`.
+    """
+    return _land_listing(
+        provider=provider, root=root, as_of=as_of, dataset=dataset
+    ).landing
+
+
+def _land_listing(
+    *,
+    provider: DataProvider,
+    root: Path,
+    as_of: datetime,
+    dataset: str,
+) -> "_Landed":
+    """The listing landing, together with the payload the caller may read."""
+    return _land_dataset(
+        provider=provider,
+        root=root,
+        as_of=as_of,
+        dataset=dataset,
+        symbols=None,
+        # A listing holds one row per instrument, so the instrument is its key.
+        # Keying on every cell would append a second row whenever a field the
+        # source reformats (a name, a listing date) changes.
+        keys=(SYMBOL_COLUMN,),
+    )
 
 
 class _Landed(DomainRecord):
@@ -371,7 +402,7 @@ def _land_dataset(
             payload=payload,
         )
 
-    written, total = _write_merged(path, payload, keys=keys)
+    written, total = write_merged(path, payload, keys=keys)
     return _Landed(
         landing=DatasetLanding(
             dataset=dataset,
@@ -385,7 +416,46 @@ def _land_dataset(
     )
 
 
-def _write_merged(
+def covered_symbols(
+    path: Path,
+    *,
+    start_date: date,
+    end_date: date,
+    symbol_column: str = SYMBOL_COLUMN,
+    date_column: str = TRADE_DATE_COLUMN,
+) -> frozenset[str]:
+    """Symbols whose landed rows already span the requested range.
+
+    Coverage is a question about the file, not about how the data got there: a
+    symbol counts as covered when it holds a row on or before `start_date` and
+    one on or after `end_date`. Asking for a wider window therefore makes every
+    symbol honest again, which is what lets a bootstrap extend backward without
+    re-fetching symbols that are already deep enough.
+    """
+    columns, rows = read_raw_rows(path)
+    if symbol_column not in columns or date_column not in columns:
+        return frozenset()
+    symbol_at = columns.index(symbol_column)
+    date_at = columns.index(date_column)
+
+    earliest: dict[str, str] = {}
+    latest: dict[str, str] = {}
+    for row in rows:
+        symbol, traded = row[symbol_at], row[date_at]
+        if not symbol or not traded:
+            continue
+        earliest[symbol] = min(earliest.get(symbol, traded), traded)
+        latest[symbol] = max(latest.get(symbol, traded), traded)
+
+    first, last = start_date.isoformat(), end_date.isoformat()
+    return frozenset(
+        symbol
+        for symbol in latest
+        if earliest[symbol] <= first and latest[symbol] >= last
+    )
+
+
+def write_merged(
     path: Path,
     payload: RawPayload,
     *,

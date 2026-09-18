@@ -10,7 +10,7 @@ touching any state.
 """
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -20,8 +20,14 @@ from astock_lens.cli.app import app
 from astock_lens.data.bootstrap import (
     BootstrapRequirement,
     BootstrapRequirementNotConfigured,
+    ChunkSyncResult,
+    land_bar_chunks,
     liquidity_bootstrap_requirement,
 )
+from astock_lens.data.contracts import FetchRequest, RawDataset, RawPayload
+from astock_lens.data.providers.akshare_provider import AkShareProvider
+from astock_lens.data.sync import read_raw_rows
+from astock_lens.domain.enums import DataStatus
 from astock_lens.factors.config import FactorConfig, load_factor_config
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -95,3 +101,160 @@ def test_the_cli_reports_the_derived_requirement_and_writes_nothing(
     assert list(snapshot_root.iterdir()) == []
     assert list(watchlist_root.iterdir()) == []
     assert list(job_root.iterdir()) == []
+
+
+def test_a_chunk_size_must_be_a_real_chunk_size(local_tmp: Path) -> None:
+    """A zero or negative chunk would loop forever or land nothing."""
+    with pytest.raises(ValueError, match="chunk_size"):
+        land_bar_chunks(
+            provider=_StubFetcher(),
+            root=local_tmp,
+            as_of=AS_OF,
+            symbols=("000001.SZ",),
+            start_date=date(2026, 9, 1),
+            end_date=date(2026, 9, 17),
+            chunk_size=0,
+        )
+
+
+class _StubFetcher:
+    """Never called: the guard must reject the chunk size first."""
+
+    def fetch_symbol_bars(self, symbol: str, **_: object):  # type: ignore[no-untyped-def]
+        raise AssertionError("the guard must run before any fetch")
+
+
+def _akshare_with(
+    rows_by_code: dict[str, tuple[tuple[str, ...], ...]],
+) -> AkShareProvider:
+    """A provider whose transport answers from a fixed table, per code."""
+    columns = (
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "amount",
+        "turnover",
+    )
+
+    def transport(endpoint: str, params: dict[str, str]):
+        assert endpoint == "stock_zh_a_hist_tx"
+        return columns, rows_by_code.get(params["symbol"], ())
+
+    return AkShareProvider(version="test", transport=transport)  # type: ignore[arg-type]
+
+
+def test_the_single_symbol_primitive_reports_a_failure_instead_of_raising() -> None:
+    """Isolation needs a verdict per symbol, not an exception for the batch."""
+    provider = _akshare_with(
+        {"sz000001": (("2026-09-17", "1", "1", "1", "1", "1", "1", "0.01"),)}
+    )
+
+    good = provider.fetch_symbol_bars(
+        "000001.SZ",
+        as_of=AS_OF,
+        start_date=date(2026, 9, 1),
+        end_date=date(2026, 9, 17),
+    )
+    missing = provider.fetch_symbol_bars(
+        "600519.SH",
+        as_of=AS_OF,
+        start_date=date(2026, 9, 1),
+        end_date=date(2026, 9, 17),
+    )
+
+    assert good.status is DataStatus.VALUE
+    assert good.row_count == 1
+    assert missing.status is DataStatus.SOURCE_ERROR
+    assert missing.row_count == 0
+    assert missing.payload is None
+
+
+def test_the_batch_contract_still_fails_as_a_whole() -> None:
+    """`fetch` keeps the answer it always gave: one bad symbol fails it all."""
+    provider = _akshare_with(
+        {"sz000001": (("2026-09-17", "1", "1", "1", "1", "1", "1", "0.01"),)}
+    )
+
+    dataset = provider.fetch(
+        FetchRequest(
+            dataset="daily_bars",
+            as_of=AS_OF,
+            symbols=("000001.SZ", "600519.SH"),
+            start_date=date(2026, 9, 1),
+            end_date=date(2026, 9, 17),
+        )
+    )
+
+    assert dataset.status is DataStatus.SOURCE_ERROR
+    assert dataset.row_count == 0
+
+
+def test_a_chunk_lands_every_symbol_it_could_fetch(local_tmp: Path) -> None:
+    provider = _StubFetcherWithRows()
+
+    result = land_bar_chunks(
+        provider=provider,
+        root=local_tmp,
+        as_of=AS_OF,
+        symbols=provider.table,
+        start_date=date(2026, 9, 1),
+        end_date=date(2026, 9, 17),
+        chunk_size=2,
+    )
+
+    assert isinstance(result, ChunkSyncResult)
+    assert result.failed_symbols == ("600519.SH",)
+    columns, rows = read_raw_rows(local_tmp / "daily_bars.csv")
+    assert columns[0] == "symbol"
+    assert {row[0] for row in rows} == {"000001.SZ", "300750.SZ"}
+
+
+class _StubFetcherWithRows:
+    """Two symbols answer, one fails — the shape a real cold start has."""
+
+    table = ("000001.SZ", "600519.SH", "300750.SZ")
+    columns = (
+        "symbol",
+        "trade_date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "amount",
+        "turnover_rate",
+    )
+
+    def fetch_symbol_bars(
+        self,
+        symbol: str,
+        *,
+        as_of: datetime,
+        start_date: date,
+        end_date: date,
+    ) -> RawDataset:
+        from datetime import UTC as _UTC
+
+        fetched_at = datetime.now(_UTC)
+        if symbol == "600519.SH":
+            return RawDataset(
+                provider="stub",
+                dataset="daily_bars",
+                fetched_at=fetched_at,
+                provider_version="test",
+                status=DataStatus.SOURCE_ERROR,
+                row_count=0,
+            )
+        row = (symbol, "2026-09-17", "1", "1", "1", "1", "1", "1", "0.01")
+        return RawDataset(
+            provider="stub",
+            dataset="daily_bars",
+            fetched_at=fetched_at,
+            provider_version="test",
+            status=DataStatus.VALUE,
+            row_count=1,
+            payload=RawPayload(columns=self.columns, rows=(row,)),
+        )
