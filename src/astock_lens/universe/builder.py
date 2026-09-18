@@ -11,7 +11,7 @@ The 20-day average turnover is a factor; recomputing it inside the Universe
 would create a second definition of the same quantity.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 
 from astock_lens.domain.enums import DataStatus
@@ -26,6 +26,96 @@ from astock_lens.universe.models import (
 )
 
 LIQUIDITY_FACTOR = "avg_amount_20d"
+
+# One rule's verdict on one profile: its exclusion, or `None` when it passes.
+# The signature is uniform so a caller can iterate a tuple of rules and get the
+# verdicts in a declared order instead of restating each rule's logic.
+RuleCheck = Callable[
+    [SecurityProfile, UniverseConfig, datetime], UniverseExclusion | None
+]
+
+
+def exchange_exclusion(
+    profile: SecurityProfile, config: UniverseConfig, as_of: datetime
+) -> UniverseExclusion | None:
+    """The rule that keeps the scan on the exchanges the config names."""
+    if profile.exchange not in config.exchanges:
+        return _exclusion(
+            profile.symbol,
+            UniverseRule.EXCHANGE,
+            f"exchange {profile.exchange!r} is not in {list(config.exchanges)}",
+        )
+    return None
+
+
+def st_exclusion(
+    profile: SecurityProfile, config: UniverseConfig, as_of: datetime
+) -> UniverseExclusion | None:
+    if config.exclude_st and profile.is_st:
+        return _exclusion(profile.symbol, UniverseRule.ST, "flagged ST")
+    return None
+
+
+def delisting_board_exclusion(
+    profile: SecurityProfile, config: UniverseConfig, as_of: datetime
+) -> UniverseExclusion | None:
+    if config.exclude_delisting_board and profile.is_delisting_board:
+        return _exclusion(
+            profile.symbol, UniverseRule.DELISTING_BOARD, "on the delisting board"
+        )
+    return None
+
+
+def long_suspension_exclusion(
+    profile: SecurityProfile, config: UniverseConfig, as_of: datetime
+) -> UniverseExclusion | None:
+    """Keep the suspension rule silent while its threshold is unreviewed.
+
+    `None` means the source reports no suspension count, so the rule has no
+    value to compare. Such a profile is not excluded here — giving this
+    threshold a number requires a source that reports the count first.
+
+    The prefilter deliberately does not apply this rule: it is not a listing
+    field the prefilter can judge without the reviewed day count.
+    """
+    if (
+        config.exclude_long_suspension
+        and config.long_suspension_days is not None
+        and profile.suspended_trading_days is not None
+        and profile.suspended_trading_days >= config.long_suspension_days
+    ):
+        return _exclusion(
+            profile.symbol,
+            UniverseRule.LONG_SUSPENSION,
+            f"suspended {profile.suspended_trading_days} days, "
+            f"threshold is {config.long_suspension_days}",
+        )
+    return None
+
+
+def short_listing_exclusion(
+    profile: SecurityProfile, config: UniverseConfig, as_of: datetime
+) -> UniverseExclusion | None:
+    listing_age = (as_of.date() - profile.list_date).days
+    if listing_age < config.min_listing_days:
+        return _exclusion(
+            profile.symbol,
+            UniverseRule.SHORT_LISTING,
+            f"listed {listing_age} days ago, minimum is {config.min_listing_days}",
+        )
+    return None
+
+
+# Every rule the builder applies, in the order a snapshot lists them. The
+# prefilter reuses the listing-only rules through `universe.prefilter`, which is
+# why each one is a named function here rather than a block inside `_evaluate`.
+BUILDER_RULE_CHECKS: tuple[RuleCheck, ...] = (
+    exchange_exclusion,
+    st_exclusion,
+    delisting_board_exclusion,
+    long_suspension_exclusion,
+    short_listing_exclusion,
+)
 
 
 class UniverseBuilder:
@@ -43,7 +133,7 @@ class UniverseBuilder:
         liquidity: Mapping[str, FactorResult],
     ) -> UniverseSnapshot:
         """Apply every rule to every profile and record the verdicts."""
-        _require_timezone(as_of)
+        require_timezone(as_of)
         digest = self._config.digest()
         snapshot_id = f"{as_of.date().isoformat()}:{digest[:12]}"
 
@@ -97,56 +187,13 @@ class UniverseBuilder:
         """Return every rule this profile failed, in declaration order."""
         config = self._config
         symbol = profile.symbol
-        found: list[UniverseExclusion] = []
-
-        if profile.exchange not in config.exchanges:
-            found.append(
-                _exclusion(
-                    symbol,
-                    UniverseRule.EXCHANGE,
-                    f"exchange {profile.exchange!r} is not in {list(config.exchanges)}",
-                )
+        found: list[UniverseExclusion] = [
+            exclusion
+            for exclusion in (
+                check(profile, config, as_of) for check in BUILDER_RULE_CHECKS
             )
-
-        if config.exclude_st and profile.is_st:
-            found.append(_exclusion(symbol, UniverseRule.ST, "flagged ST"))
-
-        if config.exclude_delisting_board and profile.is_delisting_board:
-            found.append(
-                _exclusion(
-                    symbol, UniverseRule.DELISTING_BOARD, "on the delisting board"
-                )
-            )
-
-        # `None` means the source reports no suspension count, so the rule has
-        # no value to compare. Such a profile is not excluded here — giving
-        # this threshold a number requires a source that reports the count
-        # first, which is recorded as a pending dependency in the slice ledger.
-        if (
-            config.exclude_long_suspension
-            and config.long_suspension_days is not None
-            and profile.suspended_trading_days is not None
-            and profile.suspended_trading_days >= config.long_suspension_days
-        ):
-            found.append(
-                _exclusion(
-                    symbol,
-                    UniverseRule.LONG_SUSPENSION,
-                    f"suspended {profile.suspended_trading_days} days, "
-                    f"threshold is {config.long_suspension_days}",
-                )
-            )
-
-        listing_age = (as_of.date() - profile.list_date).days
-        if listing_age < config.min_listing_days:
-            found.append(
-                _exclusion(
-                    symbol,
-                    UniverseRule.SHORT_LISTING,
-                    f"listed {listing_age} days ago, minimum is "
-                    f"{config.min_listing_days}",
-                )
-            )
+            if exclusion is not None
+        ]
 
         if config.require_valid_market_data and symbol not in traded:
             found.append(
@@ -207,7 +254,7 @@ def _exclusion(symbol: str, rule: UniverseRule, detail: str) -> UniverseExclusio
     return UniverseExclusion(symbol=symbol, rule=rule, detail=detail)
 
 
-def _require_timezone(as_of: datetime) -> None:
+def require_timezone(as_of: datetime) -> None:
     """Reject a naive `as_of` rather than guessing what it meant."""
     if as_of.tzinfo is None or as_of.utcoffset() is None:
         raise ValueError(
