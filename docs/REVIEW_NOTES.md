@@ -616,3 +616,42 @@ ASTOCK_CSV_ROOT=<临时根> astock sync-bootstrap --as-of 2026-09-17 --limit-sym
   上市列表与预筛），这是 Task 12/13 的基线。
 - 三个 Gate 的顺序不变：Task 10（已 PASS）→ 100 只（本节 PASS）→ 500 只 → 全市场。全市场在
   500 只 Gate 记录 PASS 之前不得运行。
+
+## 十六、真实 500 只门禁（2026-09-18，Task 12）
+
+同一命令路径、同一临时根隔离，规模放大到 500：
+
+```bash
+ASTOCK_CSV_ROOT=<临时根> astock sync-bootstrap --as-of 2026-09-17 --limit-symbols 500 --workers 6
+```
+
+| 指标 | 实测 |
+|---|---|
+| symbols | 500（5,301 只预筛结果里等距抽样） |
+| batch requests | 0（`batch_source=None`，无批量来源） |
+| fallback requests | 500（清单 attempts 全为 1：没有一只被请求两次） |
+| timeouts | 0 |
+| source errors | 0（本次抽样未命中北交所标的） |
+| satisfied | 500（全部达标，`short of history: 0`） |
+| elapsed | 整命令 **90s**，其中 bootstrap 段约 77s |
+| throughput | **6.5 sym/s**（与 100 只门禁的 6.9 sym/s 一致，规模放大没有掉速） |
+| peak active worker 进程 | **7**（`--workers 6`，+1 为回收空档的瞬时重叠） |
+| staging size | `bootstrap/` **2.0 MB**（500 份分片 = 1.16 MB + 清单）；整个根 3.4 MB |
+| compaction duration | **0.22s**（对同一运行再压实一次；结果字节不变 ⇒ 幂等） |
+| max RSS | **343 MB**（峰值，整棵进程树：CLI + 最多 7 个 worker） |
+| 命令退出后残留 worker | **0**（`pgrep` 为空） |
+| canonical | 1,110,370 字节 / 14,497 行（500 × ~29 根 bar） |
+| exit code | 0 |
+
+**门禁判定**：
+
+- 无超过心跳周期的无法解释停顿：心跳在 45s / 60s / 75s / 77s 各一行，间隔约 15s；整命令开始到
+  第一条输出的静默约 13s（上市列表 5,565 行落地 + 预筛阶段），仍小于心跳周期，未触发 STOP。
+  已知可改进项：若要压掉这 13 秒静默，可在 landing 之前先打一行"开始取上市列表"。
+- 终态之后没有仍在跑的远程工作：命令退出后 worker 进程计数为 0，无残留子进程。
+- 请求数在界内：500 次 fallback = 500 只标的，零重试、零超时、零来源错误。
+
+**PASS**。至此三道前置门禁（Task 10 假源 5,300、100 只真实、500 只真实）全部通过，
+计划的 `LIVE FULL-MARKET GATE` 前置条件全部满足；全市场执行（Task 13）仍需所有者显式授权，
+本文件不作自动放行。按 500 只实测速率（6.5 sym/s）估算，全市场约 **13–14 分钟**
+（不含上市列表落地与预筛）。
