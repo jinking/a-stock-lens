@@ -22,6 +22,10 @@ data/raw/**
 !data/raw/.gitkeep
 data/watchlist/
 var/jobs/
+# 全市场冷启动的实测产物：基准 JSON、子集数据根与运行日志都属运行时，不入库。
+var/bench-*/
+var/benchmarks/
+var/*.log
 # WeStock CLI 是外部二进制（8.6MB，可从腾讯官方发布地址复现获取），
 # `README.md` 明确它不随仓库分发；默认路径由 provider 定为 tools/bin/westock。
 # 只留目录占位，二进制本身不入库。
