@@ -331,6 +331,27 @@ def universe_stage(
     )
 
 
+class FactorResultIndex:
+    """Answer "this symbol's factor results" without rescanning the list.
+
+    The strategy stage asks that question once per (scanner, symbol) pair.
+    Answering it with a linear scan of every factor result turns a run into
+    O(scanners × symbols × factor results); building the map once makes the
+    lookups free. The mapping keeps the input order inside each symbol, so a
+    cross-section sees exactly the sequence it saw before.
+    """
+
+    def __init__(self, results: Sequence[FactorResult]) -> None:
+        grouped: dict[str, list[FactorResult]] = {}
+        for result in results:
+            grouped.setdefault(result.symbol, []).append(result)
+        self._by_symbol = {symbol: tuple(items) for symbol, items in grouped.items()}
+
+    def for_symbol(self, symbol: str) -> tuple[FactorResult, ...]:
+        """Every factor result for one symbol; empty when the symbol has none."""
+        return self._by_symbol.get(symbol, ())
+
+
 def strategy_stage(
     *,
     scanners: Sequence[RegisteredStrategy],
@@ -344,13 +365,18 @@ def strategy_stage(
     Universe says the scan considers, no more and no less, so an excluded
     symbol can never be scored behind its back.
     """
+    # One pass over the factor results for the whole stage. Every scanner sees
+    # the same cross-section, so the lookup table is built once and reused
+    # instead of rescanned for each (scanner, symbol) pair.
+    index = FactorResultIndex(factor_results)
+
     results: list[StrategyResult] = []
     for scanner in scanners:
         contexts = [
             StrategyContext(
                 symbol=symbol,
                 as_of=as_of,
-                factors=results_for(factor_results, symbol),
+                factors=index.for_symbol(symbol),
             )
             for symbol in universe.included
         ]
@@ -493,13 +519,6 @@ def liquidity_by_symbol(
         for result in factor_results
         if result.factor == LIQUIDITY_FACTOR
     }
-
-
-def results_for(
-    factor_results: Sequence[FactorResult], symbol: str
-) -> tuple[FactorResult, ...]:
-    """Every factor result for one symbol."""
-    return tuple(result for result in factor_results if result.symbol == symbol)
 
 
 def symbols_of(dataset: NormalizedDataset) -> tuple[str, ...]:
