@@ -655,3 +655,61 @@ ASTOCK_CSV_ROOT=<临时根> astock sync-bootstrap --as-of 2026-09-17 --limit-sym
 计划的 `LIVE FULL-MARKET GATE` 前置条件全部满足；全市场执行（Task 13）仍需所有者显式授权，
 本文件不作自动放行。按 500 只实测速率（6.5 sym/s）估算，全市场约 **13–14 分钟**
 （不含上市列表落地与预筛）。
+
+## 十七、全市场冷启动执行（2026-09-18，Task 13）
+
+**授权条件**：Task 10 + Task 11 + Task 12 均有显式 PASS 证据（第 15、16 节），所有者以"继续"放行。
+
+### 17.1 预检
+
+`git rev-parse HEAD` = `2346b87`（main），工作树干净（一处采样脚本移入已忽略的 `var/bench-500-task12/`），
+`astock doctor` 全绿：Python 3.14.3、24 个因子配置、7 个策略、local-csv `data/raw` 已有 103,940 行、
+akshare 1.18.94 可导入。
+
+### 17.2 执行
+
+```bash
+astock sync-bootstrap --as-of 2026-09-17 --workers 6     # 已批准的 6 路并发，无 --limit-symbols
+```
+
+一次跑完，未中断；中途心跳每 15 秒一行（`processed/satisfied/failed/pending/inflight/sym/s/elapsed`），
+无需 `ps/lsof` 推断是否在动。
+
+| 指标 | 实测 |
+|---|---|
+| broad symbols（预筛） | 5,301 |
+| 其中已在上一轮达标、**未重抓** | 455 |
+| 本轮实际取数标的 | 4,846 |
+| satisfied | **5,008**（全部有 20+ 根带成交额 bar） |
+| short | 293 |
+| timeout | 0 |
+| source_error | **293，全部是 `920xxx.BJ`**（腾讯日线不支持北交所） |
+| batch calls | 0（无批量来源） |
+| fallback calls | **5,436**（= attempts 之和：首轮 4,846 + 两轮对仍缺标的的重试） |
+| elapsed | bootstrap 段 **16m06s**（整命令约 16m20s，含上市列表落地与预筛） |
+| throughput | 5.5 sym/s（累计口径，含 455 只复用；纯抓取速率与 100/500 门禁的 6.5–6.9 sym/s 一致） |
+| compaction duration | **3.69s**（对同一运行再压实一次；字节不变 ⇒ 幂等） |
+| staging size | `data/raw/bootstrap/2026-09-17/` **19 MB**（4,553 份分片 + 清单） |
+| canonical rows | **167,751 行 / 12.9 MB**（跑前 103,940 行 / 8.0 MB） |
+| **Research Universe（按 avg_amount_20d 之后）** | **4,935 只**（跑前 453 只） |
+| exit code | 1（293 只显式 source_error，命令按设计报非零） |
+
+### 17.3 关键结论
+
+- 研究池从 **453 只涨到 4,935 只**：原先 5,110 只被 `NO_LIQUIDITY_MEASURE` 排除是因为历史只有
+  ~15 根 bar（2026-09-18 的窗口口径缺陷），现在只剩 557 只（293 只北交所 + 少数无行情）。
+- 达标标的**没有被重复请求**：455 只预筛后即判满足、第一轮就跳过；清单 attempts 分布
+  `{1: 4549, 2: 4, 3: 293}`——只有始终失败（北交所）与被判缺的标的被重试。
+- 规模放大后没有掉速：100 只 6.9 sym/s、500 只 6.5 sym/s、5,300 只 5.5 sym/s（累计口径含复用标的）。
+
+### 17.4 仍未解决 / 未执行
+
+- **北交所（293 只 `920xxx.BJ`）**：腾讯日线接口不支持。设计禁止无证据新增 provider，因此本轮
+  只把它们**显式记为 source_error** 并排除出研究池，需要所有者决定是否换端点。
+- **策略打分仍只有 5 只有分**：流动性窗口（20 根）已补齐，但 `proximity_52w_high` 等策略因子需要
+  252 根历史，宽基的"策略长度历史"（`astock sync-research`）尚未对本轮研究池执行；基本面策略
+  还依赖三大表（目前仅 5 只有数据）。**要得到全市场的排序列表，下一步是跑 `sync-research`
+  （策略长度历史，约 4,935 只、预计 13 分钟左右）**。
+- 研究池 4,935 只高于设计文档的"观察性目标 2,000–3,000"：命令自身打印的说明是"target size is
+  observational, not a quota"，本轮不擅自调整任何阈值（产品规则不在本次授权范围内）。
+- 全程未使用 `--limit-symbols`（该开关只用于 100/500 门禁），未手工裁剪任何 CSV。

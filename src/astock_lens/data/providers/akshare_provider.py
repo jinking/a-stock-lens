@@ -157,7 +157,12 @@ def _live_transport(endpoint: str, params: Mapping[str, str]) -> "Frame":
     ``AKSHARE_FALLBACK_REQUIRES_PROCESS_ISOLATION`` 声明。
     """
     try:
-        import akshare  # type: ignore[import-not-found]
+        # 用动态导入而不是 `import akshare` + ignore：本机装了 akshare、轻量环境没装，
+        # 静态 ignore 在其中一个环境里必然被判 "unused ignore"，两种环境不能共用一条注释。
+        # ModuleNotFoundError 是 ImportError 的子类，缺失 extra 的报错路径不变。
+        import importlib
+
+        akshare = importlib.import_module("akshare")
     except ImportError as error:
         raise _MissingExtra(_MISSING_EXTRA) from error
     frame = getattr(akshare, endpoint)(**dict(params))
@@ -216,7 +221,9 @@ class AkShareProvider:
         """Report importability. Network liveness is only proven by a fetch."""
         checked_at = datetime.now(UTC)
         try:
-            import akshare
+            import importlib
+
+            akshare = importlib.import_module("akshare")
         except ImportError:
             return ProviderHealth(
                 provider=self._provider,
@@ -231,8 +238,8 @@ class AkShareProvider:
             status=DataStatus.VALUE,
             checked_at=checked_at,
             message=(
-                f"akshare {akshare.__version__} importable; liveness is only "
-                "proven by a fetch"
+                f"akshare {getattr(akshare, '__version__', 'unknown')} importable; "
+                "liveness is only proven by a fetch"
             ),
         )
 
