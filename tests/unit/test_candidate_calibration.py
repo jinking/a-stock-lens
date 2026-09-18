@@ -93,7 +93,7 @@ def test_calibration_report_statistics_and_warning() -> None:
     assert strat.strategy_id == "value"
     assert strat.evaluable_count == 4
     assert strat.ranked_count == 4
-    assert strat.percentile_boundary_90 == 0.91
+    assert strat.boundary_rank_percentile == 0.91
     assert "600001.SH" in strat.top_symbols
     assert "600002.SH" in strat.boundary_above_symbols
     assert "600003.SH" in strat.boundary_below_symbols

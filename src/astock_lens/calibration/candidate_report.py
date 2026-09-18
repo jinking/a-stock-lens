@@ -5,12 +5,25 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 
+from astock_lens.calibration.factor_distribution import (
+    BoundarySample,
+    CalibrationPopulation,
+    FactorDistribution,
+    boundary_samples,
+    factor_distributions,
+)
 from astock_lens.domain.models import DomainRecord
 from astock_lens.factors.contracts import FactorResult
 from astock_lens.strategies.contracts import StrategyResult
 
 CALIBRATION_WARNING = "CALIBRATION ONLY — NOT APPROVED PRODUCT RULE"
 CALIBRATION_PERCENTILES: tuple[float, ...] = (0.80, 0.85, 0.90, 0.95)
+
+
+class IndustryCoverageUnavailable(RuntimeError):
+    """决策级报告缺少行业覆盖：少一整项证据就不该被当成可批复的材料。"""
+
+
 TRACKED_ANOMALY_FACTORS: tuple[str, ...] = (
     "net_profit_parent_yoy",
     "dividend_payout_ttm",
@@ -24,7 +37,10 @@ class StrategyCalibration(DomainRecord):
     strategy_id: str
     evaluable_count: int
     ranked_count: int
-    percentile_boundary_90: float | None
+    # 0.90 线是两个不同的量，曾经被一个字段名混在一起：线本身的**分位值**，
+    # 与恰好站在线内最后一个标的的**策略分数**。它们必须分开报。
+    boundary_rank_percentile: float | None
+    boundary_strategy_score: float | None
     top_symbols: tuple[str, ...]
     boundary_above_symbols: tuple[str, ...]
     boundary_below_symbols: tuple[str, ...]
@@ -32,6 +48,7 @@ class StrategyCalibration(DomainRecord):
     overlap_counts: tuple[tuple[str, int], ...]
     sensitivity_counts: tuple[tuple[float, int], ...] = ()
     score_quantiles: tuple[tuple[str, float], ...] = ()
+    samples: tuple[BoundarySample, ...] = ()
 
 
 class CandidateCalibrationReport(DomainRecord):
@@ -44,6 +61,8 @@ class CandidateCalibrationReport(DomainRecord):
     unknown_industry_count: int
     factor_anomalies: tuple[tuple[str, str], ...] = ()
     data_status_counts: tuple[tuple[str, int], ...] = ()
+    factor_distributions: tuple[FactorDistribution, ...] = ()
+    population: CalibrationPopulation | None = None
 
 
 def _compute_quantiles(scores: list[float]) -> tuple[tuple[str, float], ...]:
@@ -66,10 +85,14 @@ def generate_calibration_report(
     strategy_results: Sequence[StrategyResult],
     factor_results: Sequence[FactorResult],
     industry_map: Mapping[str, str],
+    population: CalibrationPopulation | None = None,
+    require_full_industry_coverage: bool = False,
 ) -> CandidateCalibrationReport:
     """Generate a deterministic calibration evidence report.
 
-    Raises ValueError if industry_map is empty.
+    Raises ValueError if industry_map is empty, and `IndustryCoverageUnavailable`
+    when full coverage is required but some symbols have no industry: a report
+    missing the industry evidence must not read as a decision-grade one.
     """
     if not industry_map:
         raise ValueError("industry_map cannot be empty")
@@ -81,6 +104,13 @@ def generate_calibration_report(
         s for s in all_symbols if s in industry_map and industry_map[s].strip()
     ]
     unknown_industry_count = len(all_symbols) - len(known_symbols)
+    if require_full_industry_coverage and unknown_industry_count:
+        raise IndustryCoverageUnavailable(
+            "decision-grade calibration requires canonical industry coverage for "
+            f"every symbol, but {unknown_industry_count} of {len(all_symbols)} "
+            "have no industry membership; run `astock sync-industry` or pass an "
+            "explicit --industry-map and label the report as externally mapped"
+        )
     industry_coverage_ratio = (
         len(known_symbols) / len(all_symbols) if all_symbols else 0.0
     )
@@ -132,9 +162,11 @@ def generate_calibration_report(
         # Boundary items
         below_pool = [r for r in ranked if r.rank_percentile < 0.90]  # type: ignore[operator]
         boundary_90 = top10_items[-1].rank_percentile if top10_items else None
+        boundary_score = top10_items[-1].score if top10_items else None
 
         boundary_above_symbols = tuple(r.symbol for r in top10_items[-5:])
         boundary_below_symbols = tuple(r.symbol for r in below_pool[:5])
+        samples = boundary_samples(res_list, strategy_id=sid)
 
         # Industry distribution among Top 10%
         ind_counts = Counter(
@@ -171,7 +203,8 @@ def generate_calibration_report(
                 strategy_id=sid,
                 evaluable_count=len(evaluable),
                 ranked_count=len(ranked),
-                percentile_boundary_90=boundary_90,
+                boundary_rank_percentile=boundary_90,
+                boundary_strategy_score=boundary_score,
                 top_symbols=top_symbols,
                 boundary_above_symbols=boundary_above_symbols,
                 boundary_below_symbols=boundary_below_symbols,
@@ -179,6 +212,7 @@ def generate_calibration_report(
                 overlap_counts=tuple(overlap_list),
                 sensitivity_counts=tuple(sensitivities),
                 score_quantiles=quantiles,
+                samples=samples,
             )
         )
 
@@ -217,4 +251,6 @@ def generate_calibration_report(
         unknown_industry_count=unknown_industry_count,
         factor_anomalies=tuple(anomalies),
         data_status_counts=sorted_status,
+        factor_distributions=factor_distributions(factor_results),
+        population=population,
     )
