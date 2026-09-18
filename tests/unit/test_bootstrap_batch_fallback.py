@@ -9,6 +9,8 @@ from astock_lens.data.bootstrap_sources import (
     BatchMarketBarSource,
     BootstrapBatchRequest,
     SymbolBarFallbackSource,
+    validate_bootstrap_batch_result,
+    validate_bootstrap_source_dataset,
 )
 from astock_lens.data.contracts import RawDataset, RawPayload
 from astock_lens.domain.enums import DataStatus
@@ -122,4 +124,34 @@ def test_batch_result_rejects_empty_value_dataset() -> None:
             datasets=(_dataset("000001.SZ", status=DataStatus.VALUE, empty=True),),
             missing_symbols=(),
             source_name="batch-test",
+        )
+
+
+def test_fallback_validation_rejects_naive_as_of() -> None:
+    with pytest.raises(ValueError, match="timezone-aware"):
+        validate_bootstrap_source_dataset(
+            _dataset("000001.SZ"),
+            as_of=datetime.fromisoformat("2026-09-18T15:00:00"),
+        )
+
+
+def test_fallback_validation_rejects_empty_value_dataset() -> None:
+    with pytest.raises(ValueError, match="empty VALUE"):
+        validate_bootstrap_source_dataset(
+            _dataset("000001.SZ", empty=True),
+            as_of=AS_OF,
+        )
+
+
+def test_batch_validation_rejects_naive_as_of() -> None:
+    result = BatchFetchResult(
+        datasets=(_dataset("000001.SZ"),),
+        missing_symbols=(),
+        source_name="batch-test",
+    )
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        validate_bootstrap_batch_result(
+            result,
+            as_of=datetime.fromisoformat("2026-09-18T15:00:00"),
         )
