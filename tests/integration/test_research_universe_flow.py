@@ -430,7 +430,7 @@ def _write_bars(root: Path, symbols: tuple[str, ...], *, days: int) -> None:
     for symbol in symbols:
         for offset in range(days):
             day = date(2026, 9, 17) - timedelta(days=offset)
-            rows.append(f"{symbol},{day.isoformat()},10,11,9,10.5,1000,30000000,0.01")
+            rows.append(f"{symbol},{day.isoformat()},10,11,9,10.5,1000,200000000,0.01")
     (root / "daily_bars.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
 
 

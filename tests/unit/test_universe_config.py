@@ -24,13 +24,18 @@ def _load() -> UniverseConfig:
 def test_repository_config_loads() -> None:
     config = _load()
 
-    assert config.exchanges == ("SSE", "SZSE", "BSE")
+    # 所有者 2026-09-18 决定：暂时只纳入沪深两市（北交所日线在现用接口上取不到）。
+    assert config.exchanges == ("SSE", "SZSE")
     assert config.min_listing_days == 120
 
 
 def test_liquidity_floor_carries_the_owner_supplied_value() -> None:
-    """20,000,000 CNY is a human decision, recorded in the config, not in code."""
-    assert _load().min_average_turnover_20d == 20_000_000.0
+    """门槛是人的决定，记在配置里、不在代码里。
+
+    2026-09-16 由所有者给定 20,000,000；2026-09-18 同一位所有者要求研究池约 2,000–3,000 只，
+    实测 100M → 2,961、150M → 2,303、200M → 1,853，取中段 150,000,000。
+    """
+    assert _load().min_average_turnover_20d == 150_000_000.0
 
 
 def test_long_suspension_is_deferred_not_defaulted() -> None:

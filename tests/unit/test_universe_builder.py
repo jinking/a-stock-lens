@@ -42,7 +42,9 @@ MEASURED = (
 
 LOW_LIQUIDITY_SYMBOL = "000005.SZ"
 LOW_LIQUIDITY_VALUE = 5_000_000.0
-HEALTHY_LIQUIDITY_VALUE = 80_000_000.0
+# 健康样本必须站在这条门槛之上：门槛由所有者决定（2026-09-18 起 1.5 亿），
+# 测试不钉门槛的具体数值，只保证"明显高于它"，这样门槛调整不会把规则测试一起打翻。
+HEALTHY_LIQUIDITY_VALUE = 200_000_000.0
 
 
 def _config() -> UniverseConfig:
@@ -107,7 +109,6 @@ def test_clean_symbols_survive_the_filters() -> None:
         "300750.SZ",
         "600000.SH",
         "600519.SH",
-        "830799.BJ",
         "900948.SH",
     )
 
@@ -138,7 +139,9 @@ def test_low_liquidity_is_excluded_with_the_measured_value() -> None:
     exclusion = exclusions[LOW_LIQUIDITY_SYMBOL]
     assert exclusion.rule is UniverseRule.LOW_LIQUIDITY
     assert "5000000.0" in exclusion.detail
-    assert "20000000.0" in exclusion.detail
+    assert str(float(_config().min_average_turnover_20d)) in exclusion.detail, (
+        "排除理由要写清实际门槛值，而门槛来自配置"
+    )
 
 
 def test_a_symbol_with_no_bar_on_the_as_of_date_is_excluded() -> None:

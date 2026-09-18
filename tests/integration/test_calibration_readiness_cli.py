@@ -49,7 +49,7 @@ def _write_fixture(root: Path) -> tuple[str, ...]:
             price = 10 + step * 0.05 + offset * 0.001
             bars.append(
                 f"{symbol},{day.isoformat()},{price:.4f},{price + 0.1:.4f},"
-                f"{price - 0.1:.4f},{price:.4f},1000,30000000,0.01"
+                f"{price - 0.1:.4f},{price:.4f},1000,200000000,0.01"
             )
     (root / "daily_bars.csv").write_text("\n".join(bars) + "\n", encoding="utf-8")
     return tuple(surviving)

@@ -751,3 +751,47 @@ astock sync-research --as-of 2026-09-17 --workers 6
 - **基本面策略仍只有个位数标的**：三大表目前只有 5 只（Task 13 前的历史遗留），需要单独一轮
   财务数据落地（westock 三大表 + 行业映射）才能对全市场做股息/质量/成长/价值筛选。
 - 口径提醒：这些是**研究排序**（因子百分位加权），不是买卖建议；产品边界未变。
+
+## 十九、研究池范围与门槛（所有者决定，2026-09-18）
+
+### 19.1 三个决定
+
+| 决定 | 落点 | 结果 |
+|---|---|---|
+| 暂不纳入北交所，只要沪深两市 | `configs/universe.yaml` 的 `exchanges` 去掉 `BSE` | 预筛里 344 只北交所标的被 `EXCHANGE` 明确排除，不再以 `source_error` 混在研究池边界里 |
+| 研究池保持在 2,000–3,000 | 同文件的 `min_average_turnover_20d` 由 20,000,000 上调 | 实测：100M → 2,961、150M → **2,303**（取中段）、200M → 1,853 |
+| 财务数据用现成接口取 | westock-cli 批量（100 只/次） | 2,303 只研究池 × 三大表全部落地（各 ~18,400 行 / 14–15 MB） |
+
+`data/raw` 的行情仍是 **AkShare**（逐标的腾讯日线 + 上市列表），财务是 **WeStock CLI**；
+**neodata（估值/语义）本轮仍未启用**：它的批量覆盖极低，需要先有行业映射，CLI 明确打印
+`valuation enrichment: BLOCKED_PENDING_INDUSTRY_PATH`（行业映射走 westock `sync-industry`，尚未跑）。
+
+### 19.2 实测
+
+```bash
+astock sync-research --as-of 2026-09-17 --workers 6 --financials
+```
+
+- 研究池 2,303 只；价格历史 252 根/只：satisfied 2,281、short 22（新上市）。
+- 财务：`financial_balance 18,418 行 / financial_cashflow 18,423 行 / financial_income 18,423 行`，
+  覆盖 2,303 只标的。
+- `astock scan --as-of 2026-09-17`（3 分 30 秒，只打印不落盘）可打分只数：
+
+| 策略 | 可打分 | 说明 |
+|---|---|---|
+| growth | 2,302 | 三大表到位后全池可算 |
+| momentum | 2,281 | 价格类 |
+| quality | 1,697 | 部分标的缺所需科目 |
+| dividend | 1,612 | 同上 |
+| garp | 1 | 需要 PEG → 依赖估值数据（neodata 未启用） |
+| value | 2 | 需要 PE/PB → 同上 |
+| industry_trend | 0 | 需要行业映射（未跑 `sync-industry`） |
+
+榜单前 100 分别导出到 `var/scan-<strategy>-top100.csv`（运行产物，不入库）；口播口径仍是
+**研究排序**，不是买卖建议。
+
+### 19.3 测试跟随
+
+门槛属于产品规则，测试里原先写死的旧值随之更新（fixture 的"健康流动性"样本从 8,000 万
+抬到 2 亿；北交所样本从"应当纳入"改为"应当被 EXCHANGE 排除"；横截面百分位随样本数从 7→6
+变化）。全量 `uv run pytest` **837 passed**；ruff、format、mypy、`git diff --check` 全过。

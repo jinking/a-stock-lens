@@ -4,16 +4,21 @@
 # project owner. A threshold nobody has decided stays `null`, and the builder
 # reports the rule as DEFERRED rather than guessing a number.
 
+# 所有者决定（2026-09-18）：暂时只纳入上交所（SSE）与深交所（SZSE）。
+# 北交所（BSE）日线在现有 AkShare 接口上取不到（腾讯 `stock_zh_a_hist_tx` 直接报错），
+# 与其让它们以 source_error 混在研究池边界里，不如显式排除；接口具备条件后再加回 BSE。
 exchanges:
   - SSE
   - SZSE
-  - BSE
 exclude_st: true
 exclude_delisting_board: true
 exclude_long_suspension: true
-# Supplied by the project owner on 2026-09-16. This is a product decision, not a
-# value found in a design document; there is no code default for it.
-min_average_turnover_20d: 20000000
+# Supplied by the project owner on 2026-09-16 (20,000,000). Raised on 2026-09-18 by the
+# same owner, who asked for a research pool of roughly 2,000–3,000 symbols: with the full
+# SH+SZ history landed, 20M admitted 4,924 symbols. Measured pool size at candidate floors:
+# 100M → 2,961, 150M → 2,303, 200M → 1,853. 150M is the mid-band choice.
+# This is a product decision, not a value found in a design document; there is no code default.
+min_average_turnover_20d: 150000000
 # "Short listing-age exclusion (default around 120 days)" — design spec §6.
 min_listing_days: 120
 require_valid_market_data: true

@@ -31,11 +31,17 @@ from astock_lens.data.providers.akshare_provider import AkShareProvider
 from astock_lens.data.sync import read_raw_rows
 from astock_lens.domain.enums import DataStatus
 from astock_lens.factors.config import FactorConfig, load_factor_config
+from astock_lens.universe.config import load_universe_config
 
 ROOT = Path(__file__).resolve().parents[2]
 FACTOR_DIR = ROOT / "configs" / "factors"
 LIQUIDITY_FACTOR = "avg_amount_20d"
 AS_OF = datetime(2026, 9, 17, 15, 0, tzinfo=UTC)
+
+
+def _universe_config() -> object:
+    """仓库里的 Universe 配置：门槛是所有者决定的，测试只跟随、不改。"""
+    return load_universe_config(ROOT / "configs" / "universe.yaml")
 
 
 def _checkpoint(root: Path) -> BootstrapCheckpoint:
@@ -148,7 +154,8 @@ def test_the_cli_reports_the_derived_requirement_and_writes_nothing(
     payload = json.loads(result.stdout)
     assert payload["factor_name"] == LIQUIDITY_FACTOR
     assert payload["required_valid_bars"] == 20
-    assert payload["min_average_turnover_20d"] == 20_000_000
+    # 门槛在 configs/universe.yaml 里（所有者 2026-09-18 上调至 1.5 亿），命令只如实上报。
+    assert payload["min_average_turnover_20d"] == _universe_config().min_average_turnover_20d  # type: ignore[attr-defined]
     assert payload["min_listing_days"] == 120
     assert list(snapshot_root.iterdir()) == []
     assert list(watchlist_root.iterdir()) == []

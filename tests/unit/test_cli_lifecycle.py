@@ -340,7 +340,7 @@ def test_strategy_run_prints_one_ranking_for_the_named_scanner(
     assert "300750.SZ" in result.stdout
     assert "momentum" in result.stdout
     ranked = [line for line in result.stdout.splitlines() if line.startswith("  ")]
-    assert len(ranked) == 7
+    assert len(ranked) == 6
 
 
 def test_strategy_run_refuses_a_scanner_that_has_no_implementation(

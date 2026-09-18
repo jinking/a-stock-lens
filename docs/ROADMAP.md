@@ -144,3 +144,10 @@ ResearchRequest → DeepResearchAdapter` 逐项对照：
 - 目标：Industry Trend → Market Regime → Market Validation → Signal → Candidate →
   Watchlist → Deep Research → API → React 六页面。
 - 前提：第一节里 Market Regime / Market Validation / Signal 的阈值全部获批。
+
+- [x] **研究池范围与门槛（2026-09-18，所有者决定）**：`exchanges` 只保留 SSE/SZSE（北交所日线
+  在现用接口上取不到），`min_average_turnover_20d` 由 2,000 万上调至 **1.5 亿**，研究池落在
+  **2,303 只**（目标 2,000–3,000）。财务三大表已用 westock 批量落地覆盖全池；见
+  `docs/REVIEW_NOTES.md` 第十九节。
+- [ ] **估值数据（neodata）**：`value` / `garp` 仍只有个位数标的可打分，因为估值批量路径依赖行业映射；
+  需要先跑 `sync-industry`（westock 行业目录与成员）再按板块迭代估值。

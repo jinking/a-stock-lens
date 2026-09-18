@@ -127,8 +127,8 @@ def test_the_implemented_stages_succeed_and_count_their_rows(local_tmp: Path) ->
     configured = len(list((CONFIGS / "factors").glob("*.yaml")))
     assert factors.rows_in == 11
     assert factors.rows_out == 11 * configured
-    assert by_stage[JobStage.BUILD_UNIVERSE].rows_out == 7
-    assert by_stage[JobStage.RUN_STRATEGIES].rows_in == 7
+    assert by_stage[JobStage.BUILD_UNIVERSE].rows_out == 6
+    assert by_stage[JobStage.RUN_STRATEGIES].rows_in == 6
 
 
 def test_the_candidate_stage_is_blocked_while_its_layers_are_missing(
@@ -319,13 +319,13 @@ def test_the_pipeline_reports_the_scan_it_produced(local_tmp: Path) -> None:
     result = _run(local_tmp)
 
     assert result.universe is not None
-    assert len(result.universe.included) == 7
+    assert len(result.universe.included) == 6
     # One result per admitted symbol per scanner that ran. The fixture has no
     # landed statements, so the fundamental scanners report ineligible — a
     # verdict, not a missing row.
     scanners = len(load_scanners(CONFIGS / "strategies"))
     assert scanners >= 2
-    assert len(result.strategy_results) == 7 * scanners
+    assert len(result.strategy_results) == 6 * scanners
     # 候选资格没有批准的规则，所以这里一个候选都不该出现。
     assert result.candidates == ()
 
@@ -340,7 +340,7 @@ def test_the_fundamental_scanners_report_ineligibility_with_a_reason(
         item for item in result.strategy_results if item.strategy_id == "quality"
     ]
 
-    assert len(quality) == 7
+    assert len(quality) == 6
     assert all(item.eligible is False for item in quality)
     assert all(item.score is None for item in quality)
     assert all(item.risks for item in quality)

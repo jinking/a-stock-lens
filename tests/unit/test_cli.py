@@ -71,13 +71,17 @@ def test_factors_compute_prints_one_document_per_symbol_and_factor(
 
 
 def test_scan_reports_a_ranking_and_writes_no_snapshot(local_tmp: Path) -> None:
-    """`scan` 是预览：7 只通过 Universe 的标的全部被打分，但不落盘。"""
+    """`scan` 是预览：6 只通过 Universe 的标的全部被打分，但不落盘。
+
+    2026-09-18 起北交所不在 Universe 的交易所清单里，所以样本从 7 只变 6 只，
+    横截面排名的百分位随之改变（第一名的分数也因此从 95.24 变成 94.44）。
+    """
     result = _invoke(local_tmp, "scan", "--as-of", DAY, dataset=LONG_DATASET)
 
     assert result.exit_code == 0
-    assert "universe: 7 symbols considered" in result.stdout
+    assert "universe: 6 symbols considered" in result.stdout
     # 排名第一：涨得最快的标的，有分数、资格成立。
-    assert "300750.SZ score 95.24 (eligible)" in result.stdout
+    assert "300750.SZ score 94.44 (eligible)" in result.stdout
     assert list(local_tmp.rglob("*.json")) == []
 
 
@@ -103,7 +107,7 @@ def test_universe_build_reports_the_verdicts_without_writing(
     )
 
     assert result.exit_code == 0
-    assert "included: 7" in result.stdout
+    assert "included: 6" in result.stdout
     assert "ST: 1" in result.stdout
     assert "LONG_SUSPENSION" in result.stdout
     assert list(local_tmp.rglob("*.json")) == []
