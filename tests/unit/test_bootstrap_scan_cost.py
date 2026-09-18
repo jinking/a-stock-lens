@@ -231,3 +231,44 @@ def test_one_hung_symbol_must_not_block_the_whole_chunk(local_tmp: Path) -> None
     assert {row[columns.index("symbol")] for row in rows} == set(symbols) - {
         "000003.SZ"
     }, "the symbols that answered must be persisted before the round ends"
+
+
+def test_a_symbol_that_already_has_enough_bars_is_not_fetched_again(
+    local_tmp: Path,
+) -> None:
+    """判定"要不要抓"必须看实测 bar 数，而不是窗口边界。
+
+    2026-09-18 实测：窗口 start 取到 2026-08-08（周六），而标的第一根 bar 在
+    08-10，`covered_symbols` 要求 `最早行 <= start`，于是**永远判缺**——那 400 只
+    早已够 20 根的标的被反复重抓，抓回来的东西文件里本来就有：CPU 91%、文件 mtime
+    一直更新、行数一根不涨。这条测试钉住正确语义：够数的标的一次都不该再被请求。
+    """
+    symbol = "000001.SZ"
+    # 25 根，全部 <= as_of（时点规则：晚于 as_of 的 bar 不算数）
+    rows = [
+        "symbol,trade_date,open,high,low,close,volume,amount,turnover_rate",
+        *[
+            f"{symbol},{(END_DATE - __import__('datetime').timedelta(days=offset)).isoformat()},"
+            "1,1,1,1,1,1000,0.01"
+            for offset in range(25)
+        ],
+    ]
+    (local_tmp / "daily_bars.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+    provider = RecordingFetcher()
+    bootstrap_liquidity_history(
+        provider=provider,
+        root=local_tmp,
+        as_of=AS_OF,
+        symbols=(symbol,),
+        requirement=BootstrapRequirement(
+            factor_name="avg_amount_20d", required_valid_bars=20
+        ),
+        end_date=END_DATE,
+        chunk_size=5,
+    )
+
+    assert provider.requests == [], (
+        "a symbol that already carries the required bars must not be fetched; "
+        f"requests were {provider.requests}"
+    )

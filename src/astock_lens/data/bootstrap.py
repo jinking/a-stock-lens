@@ -444,6 +444,7 @@ def _extend_history(
     chunk_size: int,
     column: str,
     max_workers: int = 1,
+    symbol_timeout_seconds: float = SYMBOL_TIMEOUT_SECONDS,
 ) -> BootstrapSyncResult:
     """Fetch a range, then widen it for whatever is still short.
 
@@ -461,9 +462,15 @@ def _extend_history(
     path = root / f"{BAR_DATASET}.csv"
     start_date = end_date - step
 
-    short = list(dict.fromkeys(symbols))
+    # "要不要抓"看的是**实测 bar 数**，不是窗口边界。按窗口边界判会让一只标的
+    # 永远判缺：窗口起点可能落在非交易日（例如周六），而标的的第一根 bar 只能是
+    # 之后的第一个交易日，`earliest <= start` 于是永远不成立——实测中 400 只早已
+    # 够数的标的因此被反复重抓，抓回来的数据文件里本来就有。
+    counts = _bar_counts(path, end_date=end_date, column=column)
+    short = [
+        symbol for symbol in dict.fromkeys(symbols) if counts.get(symbol, 0) < windows
+    ]
     failed: list[str] = []
-    counted: dict[str, int] = {}
 
     while short:
         result = land_bar_chunks(
@@ -475,27 +482,24 @@ def _extend_history(
             end_date=end_date,
             chunk_size=chunk_size,
             max_workers=max_workers,
+            symbol_timeout_seconds=symbol_timeout_seconds,
         )
         failed.extend(item for item in result.failed_symbols if item not in failed)
 
+        previous = {symbol: counts.get(symbol, 0) for symbol in short}
         counts = _bar_counts(path, end_date=end_date, column=column)
         measured = {symbol: counts.get(symbol, 0) for symbol in short}
-        if measured == counted:
-            break
-        counted = measured
-
         still_short = [symbol for symbol, count in measured.items() if count < windows]
-        if not still_short:
+        if not still_short or measured == previous:
             break
         short = still_short
         start_date -= step
 
-    final_counts = _bar_counts(path, end_date=end_date, column=column)
     coverage = tuple(
         BootstrapSymbolCoverage(
             symbol=symbol,
-            valid_bars=final_counts.get(symbol, 0),
-            satisfied=final_counts.get(symbol, 0) >= windows,
+            valid_bars=counts.get(symbol, 0),
+            satisfied=counts.get(symbol, 0) >= windows,
         )
         for symbol in dict.fromkeys(symbols)
     )
