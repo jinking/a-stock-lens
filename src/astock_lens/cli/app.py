@@ -21,6 +21,7 @@ import typer
 from pydantic import BaseModel, ValidationError
 
 from astock_lens.calibration.candidate_report import generate_calibration_report
+from astock_lens.calibration.factor_distribution import CalibrationPopulation
 from astock_lens.calibration.render import render_json, render_markdown
 from astock_lens.candidates.models import Candidate
 from astock_lens.data.bootstrap import (
@@ -69,6 +70,7 @@ from astock_lens.pipelines.analysis import (
     compute_factor_state,
     compute_research_universe,
     run_analysis,
+    run_research_analysis,
 )
 from astock_lens.pipelines.daily import DailyRunResult, run_daily
 from astock_lens.research.adapters.cli import (
@@ -1494,13 +1496,6 @@ def calibrate_candidates(
             help="Trade date, YYYY-MM-DD.",
         ),
     ],
-    industry_map: Annotated[
-        Path,
-        typer.Option(
-            "--industry-map",
-            help="Path to CSV file with symbol,industry columns.",
-        ),
-    ],
     output_dir: Annotated[
         Path,
         typer.Option(
@@ -1508,19 +1503,82 @@ def calibrate_candidates(
             help="Directory where calibration reports will be written.",
         ),
     ],
+    industry_map: Annotated[
+        Path | None,
+        typer.Option(
+            "--industry-map",
+            help=(
+                "显式指定 symbol,industry 的 CSV；不给就自动加载 canonical 行业映射"
+                "（astock sync-industry 落地的结果）。给出时报告按“外部映射证据”呈现。"
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Generate cross-sectional candidate calibration report without mutating state."""
-    mapping = _load_industry_map(industry_map)
-    state = _preview_state(as_of)
+    day = _as_of(as_of)
+    factor_configs = _factor_configs()
+    universe_config = load_universe_config(_universe_config_path())
+    scanners = load_scanners(_strategy_dir())
+    population_state, analysis = run_research_analysis(
+        csv_root=_csv_root(),
+        as_of=day,
+        universe_config=universe_config,
+        factor_configs=factor_configs,
+        scanners=scanners,
+        dataset=_dataset(),
+        securities_dataset=_securities_dataset(),
+    )
+
+    if industry_map is not None:
+        mapping = _load_industry_map(industry_map)
+        requires_full_coverage = False
+    else:
+        canonical = read_industry_memberships(
+            _csv_root() / INDUSTRY_ROOT / f"{day.date().isoformat()}.csv"
+        )
+        if not canonical:
+            typer.echo(
+                "no canonical industry mapping for this date: run "
+                "`astock sync-industry --as-of "
+                f"{day.date().isoformat()}` or pass --industry-map for "
+                "externally mapped evidence",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        mapping = build_industry_map(canonical, as_of=day)
+        requires_full_coverage = True
+
     report = generate_calibration_report(
-        strategy_results=state.strategy_results,
-        factor_results=state.factor_results,
+        strategy_results=analysis.strategy_results,
+        factor_results=analysis.factor_results,
         industry_map=mapping,
-        as_of=state.as_of,
+        as_of=analysis.as_of,
+        population=CalibrationPopulation(
+            broad_listing_count=len(analysis.outcome.securities),
+            prefilter_count=len(population_state.listing_prefilter_symbols),
+            research_count=len(population_state.research_symbols),
+            research_ratio=round(
+                len(population_state.research_symbols)
+                / len(analysis.outcome.securities),
+                4,
+            )
+            if analysis.outcome.securities
+            else 0.0,
+            universe_config_digest=universe_config.digest()[:12],
+            min_average_turnover_20d=universe_config.min_average_turnover_20d,
+            min_listing_days=universe_config.min_listing_days,
+            factor_versions=tuple(
+                (config.name, config.version) for config in factor_configs
+            ),
+            strategy_versions=tuple(
+                (scanner.config.id, scanner.config.version) for scanner in scanners
+            ),
+        ),
+        require_full_industry_coverage=requires_full_coverage,
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    date_str = state.as_of.strftime("%Y-%m-%d")
+    date_str = analysis.as_of.strftime("%Y-%m-%d")
     json_path = output_dir / f"{date_str}-candidate-calibration.json"
     md_path = output_dir / f"{date_str}-candidate-calibration.md"
 

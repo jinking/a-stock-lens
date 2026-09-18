@@ -169,6 +169,81 @@ def compute_factor_state(
     )
 
 
+def run_research_analysis(
+    *,
+    csv_root: Path,
+    as_of: datetime,
+    universe_config: UniverseConfig,
+    factor_configs: Sequence[FactorConfig],
+    scanners: Sequence[RegisteredStrategy],
+    dataset: str = DEFAULT_DATASET,
+    securities_dataset: str = DEFAULT_SECURITIES_DATASET,
+) -> tuple[ResearchUniverseState, AnalysisState]:
+    """Run the canonical chain on the Research Universe, and only on it.
+
+    Same stages as `run_analysis` — nothing is reimplemented — but the expensive
+    part is narrowed in the one place it matters: the 24 factors are computed
+    for the research population, not for every symbol that happens to have a
+    bar. Calibration and the production scan must rank the same population, so
+    they must also be able to *compute* on the same population.
+
+    Returns both the population decision and the analysis it produced, because
+    a calibration report has to show the population it was computed on.
+    """
+    state = compute_research_universe(
+        csv_root=csv_root,
+        as_of=as_of,
+        universe_config=universe_config,
+        factor_configs=factor_configs,
+        dataset=dataset,
+        securities_dataset=securities_dataset,
+    )
+    outcome = normalize_stage(
+        csv_root=csv_root,
+        as_of=as_of,
+        dataset=dataset,
+        securities_dataset=securities_dataset,
+    )
+    research = set(state.research_symbols)
+    narrowed = outcome.bars.model_copy(
+        update={
+            "daily_bars": tuple(
+                bar for bar in outcome.bars.daily_bars if bar.symbol in research
+            ),
+            "observations": tuple(
+                row for row in outcome.bars.observations if row.symbol in research
+            ),
+            "valuations": tuple(
+                row for row in outcome.bars.valuations if row.symbol in research
+            ),
+        }
+    )
+    narrowed_outcome = outcome.model_copy(update={"bars": narrowed, "securities": ()})
+
+    factor_results = factor_stage(
+        outcome=narrowed_outcome, factor_configs=factor_configs, as_of=as_of
+    )
+    universe = universe_stage(
+        outcome=outcome,
+        factor_results=factor_results,
+        config=universe_config,
+        as_of=as_of,
+    )
+    strategy_results = strategy_stage(
+        scanners=scanners,
+        universe=universe,
+        factor_results=factor_results,
+        as_of=as_of,
+    )
+    return state, AnalysisState(
+        as_of=as_of,
+        outcome=outcome,
+        universe=universe,
+        factor_results=factor_results,
+        strategy_results=strategy_results,
+    )
+
+
 def run_analysis(
     *,
     csv_root: Path,
