@@ -23,6 +23,7 @@ from astock_lens.data.bootstrap import (
     ChunkSyncResult,
     land_bar_chunks,
     liquidity_bootstrap_requirement,
+    strategy_history_requirement,
 )
 from astock_lens.data.contracts import FetchRequest, RawDataset, RawPayload
 from astock_lens.data.providers.akshare_provider import AkShareProvider
@@ -76,6 +77,51 @@ def test_a_different_window_changes_the_requirement() -> None:
     requirement = liquidity_bootstrap_requirement((_liquidity_config(window=61),))
 
     assert requirement.required_valid_bars == 61
+
+
+def _price_config(name: str, window: int) -> FactorConfig:
+    """A price-history factor config, built from a real one of the same shape."""
+    base = next(item for item in _configs() if "window" in item.params)
+    return base.model_copy(update={"name": name, "params": {"window": window}})
+
+
+def test_the_strategy_history_requirement_comes_from_the_longest_window() -> None:
+    """Enrichment must cover the longest trailing window any factor needs.
+
+    The longest window in the shipped configuration is `proximity_52w_high`
+    (252 bars), and a return factor needs one extra bar for its starting point.
+    """
+    requirement = strategy_history_requirement(_configs())
+
+    windows = [
+        config.params["window"]
+        for config in _configs()
+        if config.params.get("window") is not None
+    ]
+    assert requirement == max(windows)
+
+
+def test_a_return_factor_needs_one_more_bar_than_its_window() -> None:
+    """`ret_` factors compare two ends, so they need window + 1 observations."""
+    just_a_return = (_price_config("ret_500d", 500),)
+
+    assert strategy_history_requirement(just_a_return) == 501
+
+
+def test_the_strategy_history_requirement_is_not_hard_coded() -> None:
+    """A longer configured window must move the requirement, not be capped."""
+    longer = (_price_config("proximity_1000d", 1000),)
+
+    assert strategy_history_requirement(longer) == 1000
+
+
+def test_a_windowed_factor_without_a_reviewed_window_fails_loudly() -> None:
+    broken = (
+        _price_config("ret_20d", 20).model_copy(update={"params": {"window": None}}),
+    )
+
+    with pytest.raises(BootstrapRequirementNotConfigured, match="window"):
+        strategy_history_requirement(broken)
 
 
 def test_the_cli_reports_the_derived_requirement_and_writes_nothing(

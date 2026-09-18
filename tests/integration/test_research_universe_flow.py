@@ -23,7 +23,12 @@ from astock_lens.data.bootstrap import (
     bootstrap_liquidity_history,
     land_bar_chunks,
 )
-from astock_lens.data.contracts import FetchRequest, RawDataset, RawPayload
+from astock_lens.data.contracts import (
+    FetchRequest,
+    ProviderHealth,
+    RawDataset,
+    RawPayload,
+)
 from astock_lens.data.sync import read_raw_rows
 from astock_lens.domain.enums import DataStatus
 from astock_lens.factors.config import FactorConfig, load_factor_config
@@ -352,3 +357,110 @@ def test_the_research_command_reports_an_observational_target_and_writes_nothing
     assert list(snapshot_root.iterdir()) == []
     assert list(watchlist_root.iterdir()) == []
     assert list(job_root.iterdir()) == []
+
+
+SECURITIES_COLUMNS = [
+    "symbol",
+    "name",
+    "exchange",
+    "list_date",
+    "is_st",
+    "is_delisting_board",
+    "suspended_trading_days",
+]
+
+
+def _write_listing(root: Path, *, broad: int, research: int) -> tuple[str, ...]:
+    """Write a listing where only `research` symbols survive the prefilter.
+
+    The other 60 are ST or too young, which is the cheapest way to build a
+    broad/production-shaped split without inventing a business rule: those two
+    exclusions already exist in `configs/universe.yaml`.
+    """
+    rows = [
+        "symbol,name,exchange,list_date,is_st,is_delisting_board,suspended_trading_days"
+    ]
+    surviving: list[str] = []
+    for index in range(broad):
+        symbol = f"{index:06d}.SZ"
+        if index < research:
+            surviving.append(symbol)
+            rows.append(f"{symbol},name{index},SZSE,2015-01-05,False,False,")
+        elif index % 2 == 0:
+            rows.append(f"{symbol},name{index},SZSE,2015-01-05,True,False,")
+        else:
+            rows.append(f"{symbol},name{index},SZSE,2026-09-10,False,False,")
+    (root / "securities.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return tuple(surviving)
+
+
+def _write_bars(root: Path, symbols: tuple[str, ...], *, days: int) -> None:
+    rows = ["symbol,trade_date,open,high,low,close,volume,amount,turnover_rate"]
+    for symbol in symbols:
+        for offset in range(days):
+            day = date(2026, 9, 17) - timedelta(days=offset)
+            rows.append(f"{symbol},{day.isoformat()},10,11,9,10.5,1000,30000000,0.01")
+    (root / "daily_bars.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+
+class RecordingProvider:
+    """Narrow provider that records every symbol it was asked to enrich."""
+
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    def health(self) -> ProviderHealth:
+        return ProviderHealth(
+            provider="recording",
+            healthy=True,
+            status=DataStatus.VALUE,
+            checked_at=datetime.now(UTC),
+        )
+
+    def fetch_symbol_bars(
+        self,
+        symbol: str,
+        *,
+        as_of: datetime,
+        start_date: date,
+        end_date: date,
+    ) -> RawDataset:
+        self.asked.append(symbol)
+        row = (symbol, end_date.isoformat(), "10", "11", "9", "10.5", "1", "1", "0.01")
+        return RawDataset(
+            provider="recording",
+            dataset="daily_bars",
+            fetched_at=datetime.now(UTC),
+            provider_version="test",
+            status=DataStatus.VALUE,
+            row_count=1,
+            payload=RawPayload(columns=BAR_COLUMNS, rows=(row,)),
+        )
+
+
+def test_only_the_research_universe_is_asked_for_expensive_history(
+    local_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """100 broad symbols / 40 research symbols: 40 requests, not 100."""
+    csv_root = local_tmp / "csv"
+    csv_root.mkdir()
+    surviving = _write_listing(csv_root, broad=100, research=40)
+    _write_bars(csv_root, surviving, days=30)
+
+    provider = RecordingProvider()
+    monkeypatch.setattr("astock_lens.cli.app._bulk_provider", lambda: provider)
+    monkeypatch.setenv("ASTOCK_CSV_ROOT", str(csv_root))
+
+    result = CliRunner().invoke(app, ["sync-research", "--as-of", "2026-09-17"])
+
+    assert result.exit_code == 0, result.output
+    # The set is the claim, not the call count: a symbol short of history is
+    # asked again with a wider window, and that retry is the resumable flow
+    # working. What may never happen is a request for a symbol outside the
+    # research population.
+    assert set(provider.asked) == set(surviving), (
+        "only the research population may be enriched; asked for "
+        f"{sorted(set(provider.asked) - set(surviving))}"
+    )
+    assert len(set(provider.asked)) == 40
+    assert "valuation enrichment: BLOCKED_PENDING_INDUSTRY_PATH" in result.stdout

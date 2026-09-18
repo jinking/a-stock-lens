@@ -33,6 +33,7 @@ from astock_lens.data.sync import (
 )
 from astock_lens.domain.enums import DataStatus
 from astock_lens.domain.models import DomainRecord
+from astock_lens.factors.builtin import RETURN_FACTOR_PREFIX
 from astock_lens.factors.config import FactorConfig
 
 # The Universe owns the name of the factor its liquidity rule consumes. It is
@@ -43,6 +44,10 @@ from astock_lens.universe.builder import LIQUIDITY_FACTOR
 # The dataset name the Universe's liquidity factor is bootstrapped from; bars
 # land in the same file the rest of the pipeline reads.
 BAR_DATASET = DEFAULT_BAR_DATASET
+
+# What the strategy enrichment is called in its own result record. It is not a
+# factor name: the requirement comes from the longest window across factors.
+PRICE_HISTORY_LABEL = "strategy_price_history"
 
 
 class BootstrapRequirementNotConfigured(RuntimeError):
@@ -111,9 +116,77 @@ class BootstrapSyncResult(DomainRecord):
         return tuple(item.symbol for item in self.coverage if not item.satisfied)
 
 
+class EnrichmentRequirement(DomainRecord):
+    """The expensive enrichment a set of symbols still owes the strategy layer.
+
+    Kept together with its symbol list so a caller cannot widen the population
+    by accident: the requirement is about *these* symbols, and a run that
+    enriches more than the Research Universe has stopped being the flow the
+    approved semantics describe.
+    """
+
+    required_price_bars: int
+    symbols: tuple[str, ...]
+
+
+def strategy_history_requirement(factor_configs: Sequence[FactorConfig]) -> int:
+    """Bars of history the *strategy* layer needs, from the configured windows.
+
+    The answer is the longest trailing window any configured factor declares,
+    with the extra bar a return factor needs for its starting point. Nothing
+    here is a literal: adding a factor with a longer window raises the
+    requirement the next time it is asked for.
+    """
+    required = 0
+    for config in factor_configs:
+        if "window" not in config.params:
+            continue
+        window = config.params["window"]
+        if window is None:
+            raise BootstrapRequirementNotConfigured(
+                f"{config.name} declares no window (its 'window' parameter is "
+                "null): the enrichment length cannot be derived and must not "
+                "be guessed"
+            )
+        if window <= 0:
+            raise BootstrapRequirementNotConfigured(
+                f"{config.name} declares window {window}, which cannot describe "
+                "a trailing window of bars"
+            )
+        needed = window + 1 if config.name.startswith(RETURN_FACTOR_PREFIX) else window
+        required = max(required, needed)
+
+    if required == 0:
+        raise BootstrapRequirementNotConfigured(
+            "no configured factor declares a price window, so there is no "
+            "history requirement to satisfy"
+        )
+    return required
+
+
 def _chunks(items: Sequence[str], size: int) -> Iterator[tuple[str, ...]]:
     for start in range(0, len(items), size):
         yield tuple(items[start : start + size])
+
+
+def _count_bars(path: Path, symbol: str, *, end_date: date, column: str) -> int:
+    """Count the symbol's landed bars carrying `column`, up to `end_date`."""
+    columns, rows = read_raw_rows(path)
+    needed = (SYMBOL_COLUMN, TRADE_DATE_COLUMN, column)
+    if not all(column in columns for column in needed):
+        return 0
+    symbol_at = columns.index(SYMBOL_COLUMN)
+    date_at = columns.index(TRADE_DATE_COLUMN)
+    value_at = columns.index(column)
+    limit = end_date.isoformat()
+
+    return sum(
+        1
+        for row in rows
+        if row[symbol_at] == symbol
+        and row[date_at] <= limit
+        and row[value_at].strip() != ""
+    )
 
 
 def valid_amount_bars(path: Path, symbol: str, *, end_date: date) -> int:
@@ -123,22 +196,7 @@ def valid_amount_bars(path: Path, symbol: str, *, end_date: date) -> int:
     contribute to the average. This is the count the bootstrap measures itself
     against — a calendar window never decides success.
     """
-    columns, rows = read_raw_rows(path)
-    needed = (SYMBOL_COLUMN, TRADE_DATE_COLUMN, "amount")
-    if not all(column in columns for column in needed):
-        return 0
-    symbol_at = columns.index(SYMBOL_COLUMN)
-    date_at = columns.index(TRADE_DATE_COLUMN)
-    amount_at = columns.index("amount")
-    limit = end_date.isoformat()
-
-    return sum(
-        1
-        for row in rows
-        if row[symbol_at] == symbol
-        and row[date_at] <= limit
-        and row[amount_at].strip() != ""
-    )
+    return _count_bars(path, symbol, end_date=end_date, column="amount")
 
 
 def land_bar_chunks(
@@ -214,7 +272,62 @@ def bootstrap_liquidity_history(
     end_date: date,
     chunk_size: int,
 ) -> BootstrapSyncResult:
-    """Fetch the least history that lets the liquidity factor be measured.
+    """Fetch the least history that lets the liquidity factor be measured."""
+    return _extend_history(
+        provider=provider,
+        root=root,
+        as_of=as_of,
+        symbols=symbols,
+        requirement=requirement,
+        end_date=end_date,
+        chunk_size=chunk_size,
+        column="amount",
+    )
+
+
+def bootstrap_strategy_history(
+    *,
+    provider: SymbolBarFetcher,
+    root: Path,
+    as_of: datetime,
+    symbols: Sequence[str],
+    required_price_bars: int,
+    end_date: date,
+    chunk_size: int,
+) -> BootstrapSyncResult:
+    """Fetch the price history the strategy layer needs, for these symbols only.
+
+    Same resumable machinery as the liquidity bootstrap, counting bars that
+    carry a close instead of an amount. Called with the Research Universe,
+    which is what keeps expensive history off symbols that were never going to
+    be researched.
+    """
+    return _extend_history(
+        provider=provider,
+        root=root,
+        as_of=as_of,
+        symbols=symbols,
+        requirement=BootstrapRequirement(
+            factor_name=PRICE_HISTORY_LABEL, required_valid_bars=required_price_bars
+        ),
+        end_date=end_date,
+        chunk_size=chunk_size,
+        column="close",
+    )
+
+
+def _extend_history(
+    *,
+    provider: SymbolBarFetcher,
+    root: Path,
+    as_of: datetime,
+    symbols: Sequence[str],
+    requirement: BootstrapRequirement,
+    end_date: date,
+    chunk_size: int,
+    column: str,
+) -> BootstrapSyncResult:
+    """Fetch a range, then widen it for whatever is still short.
 
     The first request is deliberately narrow — one calendar day per required
     bar — and the loop widens it for whichever symbols still fall short. The
@@ -246,7 +359,7 @@ def bootstrap_liquidity_history(
         failed.extend(item for item in result.failed_symbols if item not in failed)
 
         measured = {
-            symbol: valid_amount_bars(path, symbol, end_date=end_date)
+            symbol: _count_bars(path, symbol, end_date=end_date, column=column)
             for symbol in short
         }
         if measured == counted:
@@ -266,7 +379,7 @@ def bootstrap_liquidity_history(
             satisfied=count >= windows,
         )
         for symbol, count in (
-            (symbol, valid_amount_bars(path, symbol, end_date=end_date))
+            (symbol, _count_bars(path, symbol, end_date=end_date, column=column))
             for symbol in dict.fromkeys(symbols)
         )
     )

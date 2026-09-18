@@ -26,7 +26,9 @@ from astock_lens.candidates.models import Candidate
 from astock_lens.data.bootstrap import (
     SymbolBarFetcher,
     bootstrap_liquidity_history,
+    bootstrap_strategy_history,
     liquidity_bootstrap_requirement,
+    strategy_history_requirement,
 )
 from astock_lens.data.contracts import DataProvider, FetchRequest
 from astock_lens.data.health import raw_datasets
@@ -938,6 +940,89 @@ def _land(day: datetime) -> SyncResult:
             f"provider {health.provider} is not usable: {health.message}"
         )
     return land_raw(provider=provider, root=_csv_root(), as_of=day)
+
+
+@app.command("sync-research")
+def sync_research(
+    as_of: Annotated[str, AS_OF_OPTION],
+    financials: Annotated[
+        bool,
+        typer.Option(
+            "--financials",
+            help="只为研究股票池刷新 WeStock 三大表。",
+        ),
+    ] = False,
+    chunk_size: Annotated[
+        int,
+        typer.Option(
+            "--chunk-size",
+            help="每块落地多少只标的；技术默认 100，不是产品阈值。",
+        ),
+    ] = 100,
+) -> None:
+    """Enrich the Research Universe only, with resumable chunking.
+
+    The expensive layer — strategy-length price history, and optionally the
+    financial statements — is fetched for the research population and nobody
+    else. Valuation stays blocked: this command will not issue ~2,500
+    single-symbol neodata calls, and reports the block instead.
+    """
+    day = _as_of(as_of)
+    provider = _bulk_provider()
+    health = provider.health()
+    if not health.healthy:
+        typer.echo(
+            f"provider {health.provider} is not usable: {health.message}", err=True
+        )
+        raise typer.Exit(code=1)
+
+    factor_configs = _factor_configs()
+    state = compute_research_universe(
+        csv_root=_csv_root(),
+        as_of=day,
+        universe_config=load_universe_config(_universe_config_path()),
+        factor_configs=factor_configs,
+        dataset=_dataset(),
+        securities_dataset=_securities_dataset(),
+    )
+    required_bars = strategy_history_requirement(factor_configs)
+
+    typer.echo(f"listing: {len(state.excluded) + len(state.research_symbols)} counted")
+    typer.echo(f"listing prefilter: {len(state.listing_prefilter_symbols)} symbols")
+    typer.echo(f"research universe: {len(state.research_symbols)} symbols")
+    typer.echo(f"price history required: {required_bars} bars per symbol")
+
+    result = bootstrap_strategy_history(
+        provider=_symbol_bar_provider(provider),
+        root=_csv_root(),
+        as_of=day,
+        symbols=state.research_symbols,
+        required_price_bars=required_bars,
+        end_date=day.date(),
+        chunk_size=chunk_size,
+    )
+    typer.echo(f"price history satisfied: {len(result.satisfied_symbols)}")
+    typer.echo(f"price history short: {len(result.short_symbols)}")
+    typer.echo(f"could not be fetched: {len(result.failed_symbols)}")
+
+    if financials:
+        statements = land_financial_statements(
+            provider=_financial_provider(),
+            root=_csv_root(),
+            as_of=day,
+            symbols=state.research_symbols,
+            datasets=tuple(sorted(FINANCIAL_DATASETS)),
+        )
+        for landing in statements.landings:
+            typer.echo(
+                f"{landing.dataset} {landing.status.value}: "
+                f"{landing.rows_written} rows written"
+            )
+
+    typer.echo("valuation enrichment: BLOCKED_PENDING_INDUSTRY_PATH")
+
+    if result.failed_symbols:
+        raise typer.Exit(code=1)
 
 
 @app.command("sync-bootstrap")
