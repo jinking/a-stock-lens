@@ -304,3 +304,59 @@ class _StubFetcherWithRows:
             row_count=1,
             payload=RawPayload(columns=self.columns, rows=(row,)),
         )
+
+
+def test_concurrency_changes_the_speed_and_nothing_else(local_tmp: Path) -> None:
+    """6 路并发必须与串行产出完全相同的落盘结果。
+
+    并发的批准理由是速度（所有者 2026-09-18 明确同意 6 路）。它不允许改变语义：
+    成功/失败集合、写入行数、行顺序都必须与串行一致，否则"快"就变成了"结果不同"。
+    """
+    symbols = tuple(f"{index:06d}.SZ" for index in range(12))
+
+    serial_root = local_tmp / "serial"
+    serial_root.mkdir()
+    serial = land_bar_chunks(
+        provider=_StubFetcherWithRows(),
+        root=serial_root,
+        as_of=AS_OF,
+        symbols=symbols,
+        start_date=date(2026, 9, 1),
+        end_date=date(2026, 9, 17),
+        chunk_size=5,
+        max_workers=1,
+    )
+
+    parallel_root = local_tmp / "parallel"
+    parallel_root.mkdir()
+    parallel = land_bar_chunks(
+        provider=_StubFetcherWithRows(),
+        root=parallel_root,
+        as_of=AS_OF,
+        symbols=symbols,
+        start_date=date(2026, 9, 1),
+        end_date=date(2026, 9, 17),
+        chunk_size=5,
+        max_workers=6,
+    )
+
+    assert parallel.completed_symbols == serial.completed_symbols
+    assert parallel.failed_symbols == serial.failed_symbols
+    assert parallel.rows_written == serial.rows_written
+    assert read_raw_rows(parallel_root / "daily_bars.csv") == read_raw_rows(
+        serial_root / "daily_bars.csv"
+    )
+
+
+def test_a_zero_worker_count_is_refused(local_tmp: Path) -> None:
+    with pytest.raises(ValueError, match="max_workers"):
+        land_bar_chunks(
+            provider=_StubFetcherWithRows(),
+            root=local_tmp,
+            as_of=AS_OF,
+            symbols=("000001.SZ",),
+            start_date=date(2026, 9, 1),
+            end_date=date(2026, 9, 17),
+            chunk_size=5,
+            max_workers=0,
+        )

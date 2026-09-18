@@ -1026,6 +1026,13 @@ def sync_research(
             help="每块落地多少只标的；技术默认 100，不是产品阈值。",
         ),
     ] = 100,
+    workers: Annotated[
+        int,
+        typer.Option(
+            "--workers",
+            help="并发取数的线程数；默认 1（串行），并发需所有者批准后显式传入。",
+        ),
+    ] = 1,
 ) -> None:
     """Enrich the Research Universe only, with resumable chunking.
 
@@ -1067,6 +1074,7 @@ def sync_research(
         required_price_bars=required_bars,
         end_date=day.date(),
         chunk_size=chunk_size,
+        max_workers=workers,
     )
     typer.echo(f"price history satisfied: {len(result.satisfied_symbols)}")
     typer.echo(f"price history short: {len(result.short_symbols)}")
@@ -1105,6 +1113,16 @@ def sync_bootstrap(
             ),
         ),
     ] = 50,
+    workers: Annotated[
+        int,
+        typer.Option(
+            "--workers",
+            help=(
+                "并发取数的线程数。默认 1（串行）——设计文档把限速与并发策略列为 "
+                "Deferred，因此并发必须由资源所有者显式批准后传入，不是默认行为。"
+            ),
+        ),
+    ] = 1,
 ) -> None:
     """Land the least price history a cold start needs, resumably.
 
@@ -1166,6 +1184,7 @@ def sync_bootstrap(
         requirement=requirement,
         end_date=day.date(),
         chunk_size=chunk_size,
+        max_workers=workers,
     )
 
     _, bar_rows = read_raw_rows(root / f"{_dataset()}.csv")

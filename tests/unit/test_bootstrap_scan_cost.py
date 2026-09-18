@@ -105,3 +105,71 @@ def test_the_flow_reads_the_landed_file_a_constant_number_of_times(
         "the landed file must be read a constant number of times per run, not "
         f"once per symbol; read {calls['count']} times for {len(SYMBOLS)} symbols"
     )
+
+
+class RecordingFetcher:
+    """只在工作日有 bar（真实市场的形状），并记录每次请求。"""
+
+    def __init__(self) -> None:
+        self.requests: list[tuple[str, date, date]] = []
+
+    def fetch_symbol_bars(
+        self,
+        symbol: str,
+        *,
+        as_of: datetime,
+        start_date: date,
+        end_date: date,
+    ) -> RawDataset:
+        self.requests.append((symbol, start_date, end_date))
+        days = (end_date - start_date).days
+        trading = [
+            end_date - __import__("datetime").timedelta(days=offset)
+            for offset in range(days + 1)
+        ]
+        rows = tuple(
+            (symbol, day.isoformat(), "1", "1", "1", "1", "1", "1000", "0.01")
+            for day in trading
+            if day.weekday() < 5
+        )
+        return RawDataset(
+            provider="recording",
+            dataset="daily_bars",
+            fetched_at=datetime.now(UTC),
+            provider_version="test",
+            status=DataStatus.VALUE,
+            row_count=len(rows),
+            payload=RawPayload(columns=BAR_COLUMNS, rows=rows),
+        )
+
+
+def test_the_first_window_is_wide_enough_to_finish_in_one_round(
+    local_tmp: Path,
+) -> None:
+    """20 根 bar 不能被翻译成 20 个自然日。
+
+    2026-09-18 全池实测：初始窗口按"所需 bar 数 = 自然日数"取，20 个自然日只含
+    约 15 个交易日，于是 5,301 只标的里 92% 被判不足、全市场白跑第二遍。这里用
+    每日都有数据的标的把"一遍就够"钉住：每只标的只应被请求一次。
+    """
+    provider = RecordingFetcher()
+
+    bootstrap_liquidity_history(
+        provider=provider,
+        root=local_tmp,
+        as_of=AS_OF,
+        symbols=SYMBOLS[:5],
+        requirement=BootstrapRequirement(
+            factor_name="avg_amount_20d", required_valid_bars=20
+        ),
+        end_date=END_DATE,
+        chunk_size=5,
+    )
+
+    per_symbol = {symbol: 0 for symbol in SYMBOLS[:5]}
+    for symbol, _, _ in provider.requests:
+        per_symbol[symbol] += 1
+    assert set(per_symbol.values()) == {1}, (
+        "a daily-history symbol must be satisfied by the first window; rounds per "
+        f"symbol were {per_symbol}"
+    )

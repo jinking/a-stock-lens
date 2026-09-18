@@ -18,7 +18,8 @@ implementation detail.
 """
 
 from collections.abc import Iterator, Sequence
-from datetime import date, datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -48,6 +49,16 @@ BAR_DATASET = DEFAULT_BAR_DATASET
 # What the strategy enrichment is called in its own result record. It is not a
 # factor name: the requirement comes from the longest window across factors.
 PRICE_HISTORY_LABEL = "strategy_price_history"
+
+# How many calendar days to ask for per required bar. A calendar window of the
+# same length as the requirement cannot hold that many *trading* days — a week
+# brings 5 of them, holidays fewer — so an initial window of `required` calendar
+# days makes nearly every symbol come back short and forces a second full pass
+# over the market (measured 2026-09-18: 4,584 of 5,008 symbols landed at ~15
+# bars when 20 were required). Two calendar days per bar leaves room for
+# weekends and holidays; the extension loop below still covers genuinely sparse
+# instruments. This is a technical multiplier, not a product threshold.
+CALENDAR_DAYS_PER_REQUIRED_BAR = 2
 
 
 class BootstrapRequirementNotConfigured(RuntimeError):
@@ -220,6 +231,7 @@ def land_bar_chunks(
     start_date: date,
     end_date: date,
     chunk_size: int,
+    max_workers: int = 1,
 ) -> ChunkSyncResult:
     """Land one range of bars for many symbols, one chunk at a time.
 
@@ -227,9 +239,18 @@ def land_bar_chunks(
     chunk in flight. A symbol the source could not answer for is named in
     `failed_symbols` and lands nothing: a failure never becomes an empty row,
     and it never discards the symbols that already succeeded.
+
+    `max_workers` fetches a chunk's symbols concurrently. It defaults to 1 —
+    serial — because the source's rate-limit policy is `Deferred` in the design:
+    turning concurrency on is an explicit, reviewed decision, not a default this
+    function may take on its own. Concurrency changes only how fast a chunk is
+    fetched; each symbol still has to answer for itself, and failures are still
+    recorded per symbol.
     """
     if chunk_size <= 0:
         raise ValueError(f"chunk_size must be positive, got {chunk_size}")
+    if max_workers <= 0:
+        raise ValueError(f"max_workers must be positive, got {max_workers}")
 
     path = root / f"{BAR_DATASET}.csv"
     requested = tuple(dict.fromkeys(symbols))
@@ -243,10 +264,15 @@ def land_bar_chunks(
     for chunk in _chunks(pending, chunk_size):
         columns: tuple[str, ...] = ()
         rows: list[tuple[str, ...]] = []
-        for symbol in chunk:
-            dataset = provider.fetch_symbol_bars(
-                symbol, as_of=as_of, start_date=start_date, end_date=end_date
-            )
+        fetched = _fetch_chunk(
+            provider=provider,
+            chunk=chunk,
+            as_of=as_of,
+            start_date=start_date,
+            end_date=end_date,
+            max_workers=max_workers,
+        )
+        for symbol, dataset in fetched:
             payload = dataset.payload
             if (
                 dataset.status is not DataStatus.VALUE
@@ -274,6 +300,65 @@ def land_bar_chunks(
     )
 
 
+def _fetch_chunk(
+    *,
+    provider: SymbolBarFetcher,
+    chunk: Sequence[str],
+    as_of: datetime,
+    start_date: date,
+    end_date: date,
+    max_workers: int,
+) -> tuple[tuple[str, RawDataset], ...]:
+    """Fetch one chunk, in the chunk's own symbol order.
+
+    The order is what keeps the landed file stable: the same inputs produce the
+    same rows in the same sequence whether the chunk was fetched serially or
+    concurrently.
+    """
+    if max_workers == 1:
+        return tuple(
+            (
+                symbol,
+                provider.fetch_symbol_bars(
+                    symbol, as_of=as_of, start_date=start_date, end_date=end_date
+                ),
+            )
+            for symbol in chunk
+        )
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            symbol: pool.submit(
+                provider.fetch_symbol_bars,
+                symbol,
+                as_of=as_of,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            for symbol in chunk
+        }
+        results: list[tuple[str, RawDataset]] = []
+        for symbol in chunk:
+            try:
+                results.append((symbol, futures[symbol].result()))
+            except Exception as error:  # noqa: BLE001 — one symbol's failure
+                results.append(
+                    (
+                        symbol,
+                        RawDataset(
+                            provider="unknown",
+                            dataset=BAR_DATASET,
+                            fetched_at=datetime.now(UTC),
+                            provider_version="unknown",
+                            status=DataStatus.SOURCE_ERROR,
+                            row_count=0,
+                            message=f"{symbol} raised while fetching: {error}",
+                        ),
+                    )
+                )
+        return tuple(results)
+
+
 def bootstrap_liquidity_history(
     *,
     provider: SymbolBarFetcher,
@@ -283,6 +368,7 @@ def bootstrap_liquidity_history(
     requirement: BootstrapRequirement,
     end_date: date,
     chunk_size: int,
+    max_workers: int = 1,
 ) -> BootstrapSyncResult:
     """Fetch the least history that lets the liquidity factor be measured."""
     return _extend_history(
@@ -294,6 +380,7 @@ def bootstrap_liquidity_history(
         end_date=end_date,
         chunk_size=chunk_size,
         column="amount",
+        max_workers=max_workers,
     )
 
 
@@ -306,6 +393,7 @@ def bootstrap_strategy_history(
     required_price_bars: int,
     end_date: date,
     chunk_size: int,
+    max_workers: int = 1,
 ) -> BootstrapSyncResult:
     """Fetch the price history the strategy layer needs, for these symbols only.
 
@@ -325,6 +413,7 @@ def bootstrap_strategy_history(
         end_date=end_date,
         chunk_size=chunk_size,
         column="close",
+        max_workers=max_workers,
     )
 
 
@@ -338,6 +427,7 @@ def _extend_history(
     end_date: date,
     chunk_size: int,
     column: str,
+    max_workers: int = 1,
 ) -> BootstrapSyncResult:
     """Fetch a range, then widen it for whatever is still short.
 
@@ -351,8 +441,9 @@ def _extend_history(
     history to give, and the symbol is reported short rather than padded.
     """
     windows = requirement.required_valid_bars
+    step = timedelta(days=windows * CALENDAR_DAYS_PER_REQUIRED_BAR)
     path = root / f"{BAR_DATASET}.csv"
-    start_date = end_date - timedelta(days=windows)
+    start_date = end_date - step
 
     short = list(dict.fromkeys(symbols))
     failed: list[str] = []
@@ -367,6 +458,7 @@ def _extend_history(
             start_date=start_date,
             end_date=end_date,
             chunk_size=chunk_size,
+            max_workers=max_workers,
         )
         failed.extend(item for item in result.failed_symbols if item not in failed)
 
@@ -380,7 +472,7 @@ def _extend_history(
         if not still_short:
             break
         short = still_short
-        start_date -= timedelta(days=windows)
+        start_date -= step
 
     final_counts = _bar_counts(path, end_date=end_date, column=column)
     coverage = tuple(
