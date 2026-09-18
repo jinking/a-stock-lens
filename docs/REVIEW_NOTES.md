@@ -795,3 +795,18 @@ astock sync-research --as-of 2026-09-17 --workers 6 --financials
 门槛属于产品规则，测试里原先写死的旧值随之更新（fixture 的"健康流动性"样本从 8,000 万
 抬到 2 亿；北交所样本从"应当纳入"改为"应当被 EXCHANGE 排除"；横截面百分位随样本数从 7→6
 变化）。全量 `uv run pytest` **837 passed**；ruff、format、mypy、`git diff --check` 全过。
+
+## 二十、行业映射落地与三个待决策点（2026-09-18）
+
+- `astock sync-industry --as-of 2026-09-18`：落地 **5,542 只 × 124 个申万二级板块**
+  （`data/raw/westock/industry/2026-09-18.csv`），并导出 `symbol,industry` 映射
+  （`var/industry-map-2026-09-18.csv`）。命令只在结束时打印，无中途进度。
+- 行业映射的消费方是**校准命令**（`calibrate candidates`），不是打分器。它坚持零容忍：
+  研究池 2,303 只里有 9 只没有行业归属（行情里共 18 只不在行业图中），于是
+  `IndustryCoverageUnavailable` 直接拒绝出报告——宁可拒绝也不给残报告，这个行为是对的。
+- `industry_trend` 打分为 0 与数据无关：`configs/strategies/industry_trend.yaml` 只有描述性
+  `dimensions`，**没有任何因子权重**，属于未批准的产品规则，本次不擅自填写。
+- `value` / `garp` 仍只有个位数标的：需要 neodata 估值。行业目录到位后"按板块迭代取估值"
+  这条路解锁，但需要新切片（板块批量 provider + 落地 + 因子接线 + 测试），且历史上 neodata
+  批量覆盖很差（10 只一批只回 1–2 只），因此先做只读探针再决定。
+- 本节结论与三条岔路整理成给所有者的阅读文档：`docs/OWNER-BRIEF-2026-09-18.md`。
