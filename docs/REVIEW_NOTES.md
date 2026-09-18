@@ -713,3 +713,41 @@ astock sync-bootstrap --as-of 2026-09-17 --workers 6     # 已批准的 6 路并
 - 研究池 4,935 只高于设计文档的"观察性目标 2,000–3,000"：命令自身打印的说明是"target size is
   observational, not a quota"，本轮不擅自调整任何阈值（产品规则不在本次授权范围内）。
 - 全程未使用 `--limit-symbols`（该开关只用于 100/500 门禁），未手工裁剪任何 CSV。
+
+## 十八、研究池的策略长度历史与全市场打分（2026-09-18，Task 13 延伸）
+
+流动性窗口（20 根）补齐后，全市场仍只有 5 只能被策略打分：`proximity_52w_high` 等因子需要
+252 根历史。按所有者"继续"补跑同一套加固路径：
+
+```bash
+astock sync-research --as-of 2026-09-17 --workers 6
+```
+
+| 指标 | 实测 |
+|---|---|
+| research universe | 4,935 只 |
+| price history required | 252 根/只 |
+| satisfied | **4,864** |
+| short | 71（上市时间不足等） |
+| could not be fetched | 1 |
+| elapsed | **50m31s**（1.6–2.4 sym/s：每次请求要带回 252 根 bar，比补流动性时慢） |
+| timeout | 0 |
+| canonical | 167,751 → **1,675,723 行**（128.6 MB） |
+
+随后 `astock scan --as-of 2026-09-17`（1 分 42 秒，只打印不落盘）：
+
+| 策略 | 可打分只数 |
+|---|---|
+| momentum | **4,864**（全市场） |
+| dividend / growth | 5 |
+| quality | 3 |
+| value | 2 |
+| garp | 1 |
+| industry_trend | 0（缺行业映射，`BLOCKED_PENDING_INDUSTRY_PATH`） |
+
+- 动量榜前 10：300741.SZ 99.88、688004.SH 99.81、688137.SH 99.80、000993.SZ 99.68、
+  601579.SH 99.64、600371.SH 99.44、688209.SH 99.42、301390.SZ 99.40、001326.SZ 99.26、
+  300939.SZ 99.20；完整前 100 见运行产物 `var/scan-momentum-top100.csv`（不随仓库提交）。
+- **基本面策略仍只有个位数标的**：三大表目前只有 5 只（Task 13 前的历史遗留），需要单独一轮
+  财务数据落地（westock 三大表 + 行业映射）才能对全市场做股息/质量/成长/价值筛选。
+- 口径提醒：这些是**研究排序**（因子百分位加权），不是买卖建议；产品边界未变。
