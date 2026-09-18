@@ -23,6 +23,7 @@ from pydantic import BaseModel, ValidationError
 from astock_lens.calibration.candidate_report import generate_calibration_report
 from astock_lens.calibration.render import render_json, render_markdown
 from astock_lens.candidates.models import Candidate
+from astock_lens.data.bootstrap import liquidity_bootstrap_requirement
 from astock_lens.data.contracts import DataProvider
 from astock_lens.data.health import raw_datasets
 from astock_lens.data.providers.akshare_provider import AkShareProvider
@@ -412,6 +413,31 @@ def factors_compute(as_of: Annotated[str, AS_OF_OPTION]) -> None:
     report = measured.outcome.quality_report
     typer.echo(f"quality: {report.accepted}/{report.checked} bars accepted", err=True)
     typer.echo("snapshot: none (a computation does not write)", err=True)
+
+
+@universe_app.command("bootstrap-requirement")
+def universe_bootstrap_requirement() -> None:
+    """Report how much price history the liquidity rule needs before it can run.
+
+    A cold start has to fetch bars before `avg_amount_20d` can be measured, and
+    how many bars that takes comes from the configured factor's window — not
+    from this command. Read-only: it prints the derived requirement plus the two
+    approved Universe thresholds and writes nothing anywhere.
+    """
+    requirement = liquidity_bootstrap_requirement(_factor_configs())
+    config = load_universe_config(_universe_config_path())
+
+    typer.echo(
+        json.dumps(
+            {
+                "factor_name": requirement.factor_name,
+                "required_valid_bars": requirement.required_valid_bars,
+                "min_average_turnover_20d": config.min_average_turnover_20d,
+                "min_listing_days": config.min_listing_days,
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
 @universe_app.command("build")
