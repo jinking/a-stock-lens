@@ -892,3 +892,104 @@ astock sync-research --as-of 2026-09-17 --workers 6 --financials
 三个业务后端的默认值仍是 `json`，Job 状态尚无 DuckDB 实现类；
 `Normalized` 层目前只装**过了质量门**的记录，被拒记录的明细在 `quality_findings.json` 里
 （不是 Parquet 表），v2 的证据表（`financial_evidence` / `diagnostics` / `headers`）尚未实现。
+
+## 二十二、迁移前的研究基线：输入清单（2026-09-18/19，第一步任务 1.1）
+
+任务 1.1 的目标不是"跑通一个脚本"，而是**在把数据从 CSV 搬到 Parquet + DuckDB 之前，
+先把迁移前的样子固定成一份可逐字节比对的证据**。没有它，迁移之后只能证明"这次跑出来的
+东西看起来还行"，无法证明"结果没变"。
+
+### 22.1 产物与命令
+
+```bash
+uv run python scripts/audit_research_baseline.py --root . \
+  --output var/acceptance/baseline-20260918/input-inventory.json
+```
+
+退出码 0。清单里 **5,058 个文件 / 300,127,558 字节**，五类白名单根逐个点名：
+
+| 白名单根 | 形态 | 文件数 | 字节 | 目录存在 |
+| --- | --- | --- | --- | --- |
+| `data/raw` | `*.csv` | 5,009 | 293,987,928 | 是 |
+| `data/snapshots` | `*.json` | 9 | 5,764,589 | 是 |
+| `data/watchlist` | `*.json` | 0 | 0 | **否** |
+| `var/jobs` | `*.json` | 3 | 14,745 | 是 |
+| `configs` | `*.yaml` | 35 | 25,562 | 是 |
+| `pyproject.toml`、`uv.lock` | 单文件 | 2 | — | 是 |
+
+清单路径（以下产物按 `.gitignore` 的 `var/acceptance/` **不入库**）：
+`var/acceptance/baseline-20260918/input-inventory.json`。
+
+五类数据文件的摘要按相对路径稳定排序，逐条记 `bytes` 与 `sha256`；CSV 再记解析出的
+`rows` 与 `columns`，JSON 再记 `shape`、`records` 与外壳声明的 `declared_as_of`。
+旧快照与全池数据各自成条，不会被合并成一个数字：`data/snapshots/FACTOR/2026-09-04.json`
+（264 条）与 `.../2026-09-17.json`（120 条）是两条独立证据。
+
+### 22.2 `data/watchlist` 不存在，这不是错误
+
+`data/watchlist/` 在本机**没有这个目录**：还没有 tracked 标的，目录本身也不入库。
+把它当成错误会逼着脚本要么伪造一个空目录、要么拒绝出清单，两者都让基线失真。因此
+清单用 `scanned_roots` 记录"声明过、本次为空"（`present=false, files=0`），而不是让
+这一项从清单里消失。反向的规则同样明确：**扫描的根目录本身不存在**是显式失败，
+不会返回空清单冒充"没有文件"。
+
+### 22.3 三条实现红线与它们对应的测试
+
+1. **CSV 用解析器计数，不数换行。** neodata 的单元格里带真实换行，按 `\n` 数会把一条
+   记录算成两条。`test_multiline_cell_is_one_record` 钉住：`'code,content\n1,"甲\n乙"\n'`
+   必须是 1 行；`test_csv_columns_and_rows_are_the_real_parse` 用单元格内含两处换行的
+   数据钉住 3 行 2 列。
+2. **损坏不是空。** 非法 JSON、缺少外壳字段、CSV 无表头，一律显式抛出并点名路径，
+   绝不在清单里退化成 `rows=0` / `records=0`。对应四条单测。外壳约定直接照抄仓库里
+   三种 Store 各自的读契约（`records` 列表 / `runs` 列表 / 映射），**没有另发明一套
+   更松或更严的规矩**。
+3. **输入必须冻结。** 每个文件读前读后各取一次 `(size, mtime_ns)`；不一致即中止并提示
+   "固定输入后重试"。`test_a_file_rewritten_during_the_scan_aborts_with_the_freeze_hint`
+   通过注入"签名漂移"制造并发写入，并断言该接缝确实被询问了两次——否则用例会因为
+   "根本没检查"而假绿。
+
+### 22.4 反向验证（红→绿，实跑）
+
+在副本 `var/acceptance/baseline-20260918/reverse-1.1/`（含真实快照 9 份、Job 3 份、
+configs 35 份与 3 个真实 CSV，共 52 个被盘点文件）上：
+
+| 步骤 | 操作 | 退出码 | 输出 |
+| --- | --- | --- | --- |
+| 绿 | 原样扫描 | 0 | `total: 52 files, 7369384 bytes` |
+| 红 A | 把 `UNIVERSE/2026-09-17.json` 截成 `{broken` | 1 | `invalid JSON (...); a broken file is not an empty one`，点名该文件 |
+| 红 B | 把 `STRATEGY/2026-09-17.json` 的 `records` 改成标量 `0` | 1 | `snapshot envelope carries no records list, it has ['as_of', 'kind', 'records']` |
+| 绿 | 两个文件按原样还原 | 0 | 清单与首次绿色运行**逐字段一致**（除 `generated_at`） |
+
+两个红色运行都**没有落任何产物**（`reverse-1.1-red-*.json` 不存在）：失败就是失败，
+不会留下一份看起来成功的半成品。副本里 `data/snapshots` 的 9 个文件 sha256
+与源仓库逐一相同，证明脚本确实只读。
+
+### 22.5 两处偏离计划原文（都是工程事实，不是放宽）
+
+1. **测试夹具用 `local_tmp`，不是计划示例里的 `tmp_path`。** 本机 `tmp_path` 落在系统
+   临时根下，被运行环境以 `PermissionError` 拒绝（`tests/conftest.py` 早已写明这条），
+   实测确认不可用。行为断言逐条保留，只换了存放位置。
+2. **`scanned_roots` 这一节是新增的。** 计划要求"清单含 `data/raw`、`data/snapshots`、
+   `data/watchlist`、`var/jobs`、`configs`"，而 `data/watchlist` 在本机没有文件，
+   它不可能以文件条目出现。让"空根也被点名"必须有一个位置放它，于是清单头部有了
+   `scanned_roots`。`inventory()` 的返回签名不变，仍是计划规定的
+   `tuple[dict[str, object], ...]`。
+
+### 22.6 工程前置（计划已点名，实测确认）
+
+- `scripts/` 原本不是包、`sys.path` 上也没有仓库根，计划里的
+  `from scripts.audit_research_baseline import inventory` 必然 `ModuleNotFoundError`。
+  已新建空 `scripts/__init__.py`，并在 `[tool.pytest.ini_options]` 加 `pythonpath = ["."]`。
+  RED 证据分两段保留：先 `No module named 'scripts'`，补包后再
+  `cannot import name 'audit_research_baseline' from 'scripts'`——两段都只差实现。
+- `var/acceptance/` 之前没被忽略，`.gitignore` 已加一行（既有规则一律未动）。
+
+### 22.7 基线时点
+
+- 提交前地基 `HEAD`：`08d597cc251cad971695cf6e25d1c2edc08162cc`
+- 工作区差异摘要：`M .gitignore`、`M pyproject.toml`、
+  `?? scripts/__init__.py`、`?? scripts/audit_research_baseline.py`、
+  `?? tests/unit/test_research_baseline_audit.py`，外加一个与本任务无关的
+  既有未跟踪文件 `var/industry-map-2026-09-18.csv`（保留未动、不入库）。
+- 本任务的提交只包含上面 5 个文件（外加本节所在的 `docs/REVIEW_NOTES.md`），
+  没有 `git add -A`，没有触碰 `configs/**` 与 lint/mypy 配置。

@@ -43,6 +43,10 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# 仓库根必须在导入路径上：`scripts/` 下的审计与基线脚本要被测试直接 import
+# （`from scripts.audit_research_baseline import inventory`）。pytest 的默认
+# `prepend` 导入模式只会把测试文件所在目录塞进 sys.path，碰不到仓库根。
+pythonpath = ["."]
 
 [tool.ruff]
 target-version = "py312"

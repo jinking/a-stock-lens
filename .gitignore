@@ -26,6 +26,9 @@ data/raw/**
 !data/raw/.gitkeep
 data/watchlist/
 var/jobs/
+# 迁移前基线的验收产物（输入清单、六个分析产物、命令日志）是本地证据，
+# 按 `docs/DEVELOPMENT.md` 的口径与 `data/`、`var/` 一样不入库。
+var/acceptance/
 # 全市场冷启动的实测产物：基准 JSON、子集数据根与运行日志都属运行时，不入库。
 var/bench-*/
 var/benchmarks/
