@@ -1434,3 +1434,70 @@ uv run python scripts/capture_research_baseline.py \
    - 落地设计规格：`docs/superpowers/specs/2026-09-19-stock-discovery-mvp-design.md`；
    - 落地实施计划：`docs/superpowers/plans/2026-09-19-stock-discovery-mvp-implementation-plan.md`。
 
+## 二十九、只读策略选股与研究画像验收实测（Task 7，2026-09-19）
+
+本节记录股票发现 MVP 只读验收检查（Task 7）的实测证据。本轮运行严格遵守**零外部 Provider 抓取**边界，仅读取本地已落地数据与快照。
+
+### 29.1 正式 STRATEGY 快照状态确认（Step 1）
+
+- 检查 `data/snapshots/STRATEGY/2026-09-17.json`：文件存在（624,388 字节，mtime 2026-09-17 22:47:34），存储格式为标准 JSON 快照，包含 30 条 `StrategyResult` 评估记录（覆盖 5 只标的 × 6 个策略）。
+- 检查 DuckDB 快照存储（`var/astock.duckdb` 之 `snapshots` 表）：`kind='STRATEGY', as_of='2026-09-17'` 条目同样存在且内容一致。
+- 依据规约，快照已存在且内容完备，无需也不得执行重新计算（避免触发 `SnapshotConflictError`，且杜绝静默网络访问）。
+
+### 29.2 CLI 策略选股实测（Step 2 & Step 3）
+
+命令运行实测数据（各命令前置 `time uv run astock screen <strategy> --as-of 2026-09-17 --top 20`）：
+
+| 策略 (`strategy_id`) | total | eligible | scored | ranked | returned | 覆盖告警 (Coverage Warning) | 墙钟耗时 | 榜首标的 (Top 1) |
+|---|---|---|---|---|---|---|---|---|
+| `growth` | 5 | 5 | 5 | 5 | 5 | 无（全覆盖） | 0.623s | `300750.SZ` (score=90.00, pctl=0.9000) |
+| `momentum` | 5 | 5 | 5 | 5 | 5 | 无（全覆盖） | 0.606s | `000001.SZ` (score=93.33, pctl=1.0000) |
+| `quality` | 5 | 3 | 3 | 3 | 3 | `only 3/5 stored results have a score; ranking reflects available data` | 0.478s | `600519.SH` (score=83.33, pctl=1.0000) |
+| `dividend` | 5 | 5 | 5 | 5 | 5 | 无（全覆盖） | 0.611s | `000001.SZ` (score=80.00, pctl=1.0000) |
+| `value` | 5 | 2 | 2 | 2 | 2 | `only 2/5 stored results have a score; ranking reflects available data` | 0.605s | `000001.SZ` (score=83.33, pctl=1.0000) |
+| `garp` | 5 | 1 | 1 | 0 | 1 | `only 1/5 stored results have a score; ranking reflects available data` | 0.605s | `600519.SH` (score=100.00, pctl=None) |
+
+- **行为特征核实**：
+  1. `growth` / `momentum` / `dividend` 无告警，全部标的参与打分与分位数排名；
+  2. `quality` 准确剔除非实体经营（如银行缺毛利率）标的，仅 3 只合格打分并触发覆盖告警；
+  3. `value` 与 `garp` 严格受限于 neodata 估值覆盖（仅有落地数据的标的可计算），准确触发覆盖告警；
+  4. `garp` 榜首仅 1 只标的，`rank_percentile` 准确呈现为 `None`（单样本不满足分位数计算），绝不静默兜底为 0.0。
+
+### 29.3 全量 2,303 只研究池基线筛选压测（Committed Baseline Query Benchmark）
+
+基于已提交固化的全量研究分析产物（`var/acceptance/baseline-20260918/analysis/strategies.jsonl`，共 13,818 行记录），调用 `screen_strategy` 进行真实内存排序与筛选性能压测：
+
+| 策略 | 研究池总数 | eligible | scored | ranked | top 20 返回 | 纯查询/排序耗时 | 覆盖告警说明 | 榜首标的 |
+|---|---|---|---|---|---|---|---|---|
+| `growth` | 2,303 | 2,302 | 2,302 | 2,302 | 20 | 15.01ms | `only 2302/2303 scored` | `001309.SZ` (score=99.60, pctl=1.0) |
+| `momentum` | 2,303 | 2,281 | 2,281 | 2,281 | 20 | 30.95ms | `only 2281/2303 scored` | `300741.SZ` (score=99.76, pctl=1.0) |
+| `quality` | 2,303 | 1,697 | 1,697 | 1,697 | 20 | 13.14ms | `only 1697/2303 scored` | `600519.SH` (score=85.56, pctl=1.0) |
+| `dividend` | 2,303 | 1,612 | 1,612 | 1,612 | 20 | 14.71ms | `only 1612/2303 scored` | `002271.SZ` (score=99.35, pctl=1.0) |
+| `value` | 2,303 | 2 | 2 | 2 | 2 | 12.16ms | `only 2/2303 scored` | `000001.SZ` (score=83.33, pctl=1.0) |
+| `garp` | 2,303 | 1 | 1 | 0 | 1 | 12.21ms | `only 1/2303 scored` | `600519.SH` (score=100.00, pctl=None) |
+
+- **压测结论**：在 2,303 规模横截面上，`screen_strategy` 查询与全排序操作耗时均在 12–31ms 之间，排序稳定且确定性满足亚秒响应要求。
+
+### 29.4 API 冒烟实测与契约验证（Step 4 & Step 5）
+
+使用 `FastAPI TestClient` 进行只读端点调用，实测结果：
+
+1. **`GET /strategies?as_of=2026-09-17`**：
+   - 状态码：`200 OK`
+   - 返回结构：6 个策略的 `StrategyCoverage` 对象数组，包含每个策略的 `total_count`、`eligible_count`、`scored_count`、`ranked_count`。
+2. **`GET /strategies/growth/results?as_of=2026-09-17&limit=20`**：
+   - 状态码：`200 OK`
+   - 返回结构：包含 `strategy_id="growth"`、`coverage` 摘要以及 5 条排序结果项（Top 1: `300750.SZ`）。
+3. **`GET /stocks/300750.SZ?as_of=2026-09-17`**：
+   - 状态码：`200 OK`
+   - 返回结构：
+     - `symbol="300750.SZ"`, `as_of="2026-09-17"`
+     - `universe={"included": True, "exclusion_rules": []}`
+     - `factors`: 24 个因子结果已落地
+     - `strategies`: 6 个策略评估已落地
+     - `candidate_status="not_published"`（严格遵守安全发布边界，由于候选阶段未批准/阻断，绝不伪造入选状态）
+     - `candidate=None`
+4. **`GET /candidates?as_of=2026-09-17`**：
+   - 状态码：`404 Not Found`
+   - 返回详情：`{"detail": "no CANDIDATE snapshot for 2026-09-17"}`。
+   - 验证结论：由于 Candidate 阶段因绝对质量门槛与 Market Validation 依赖而安全阻断，未写出快照，查询端点严格返回 404，不静默返回空列表或假成功。
