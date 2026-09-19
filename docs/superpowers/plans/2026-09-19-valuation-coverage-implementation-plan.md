@@ -119,18 +119,28 @@ def valuation_coverage(
 **前置门禁：** neodata 凭证 12 小时有效。本轮实测 `saved_at=2026-09-18 20:07`，
 已过期，因此**不发起真实全量请求**，只记录 blocked 证据。
 
-- [ ] 记录 `load_token()` 状态与时间证据到 `docs/REVIEW_NOTES.md`。
-- [ ] 所有者刷新凭证后执行（本计划给出命令，不在本轮执行）：
+- [x] 记录 `load_token()` 状态与时间证据到 `docs/REVIEW_NOTES.md`（§31.4）。
+- [x] 所有者刷新凭证后执行（2026-09-19 当晚完成，实际用的命令见下；
+      注意 `--as-of` 必须用取数当天，写进 09-17 会把今天的数据混进冻结基线）：
 
 ```bash
-uv run astock sync-valuation --as-of 2026-09-17 \
+uv run astock sync-valuation --as-of 2026-09-19 \
   --universe var/acceptance/baseline-20260918/analysis/research-universe.json \
-  --limit 100 --max-rounds 2 --output var/acceptance/valuation-probe/missing.json
+  --batch-size 5 --max-rounds 8 \
+  --output var/acceptance/valuation-backfill-20260919/missing.json
 ```
 
-- [ ] 订正 `docs/REMAINING_PRODUCT_BLOCKERS.md` 两处事实：落地是"请求 5 只、回 2 只"，
+结果：8 轮约 77 分钟，落地 2,241 / 2,303（97.3%），缺口 62 只；
+覆盖核对 **Value 2 → 1,578、GARP 1 → 850**。详见 `docs/REVIEW_NOTES.md` §32。
+
+- [x] 订正 `docs/REMAINING_PRODUCT_BLOCKERS.md` 两处事实：落地是"请求 5 只、回 2 只"，
   不是"抓了 5 只"；缺失状态是 `NOT_APPLICABLE`，不是 `SOURCE_ERROR`；
   并注明 90% 阈值待所有者签发。
+- 新增发现（超出原计划）：源的批量响应被截到 1–2 块，原吞吐估算不成立 →
+  `sync-valuation` 增加 `--batch-size`；报告命令两处 O(N×M) 退化已修（251s → 10s）。
+
+**本任务之后仍待所有者决定**：是否重算正式因子与策略快照；是否把新 Raw 重新归一化
+进 Parquet / DuckDB（`scripts/migrate_storage.py`，会重写 `data/normalized/**`）。
 
 ## 任务 5：本阶段明确不做
 

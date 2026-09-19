@@ -95,9 +95,6 @@ def valuation_coverage(
             "算成 100%，那不是研究池的覆盖率"
         )
 
-    dataset = NormalizedDataset(
-        dataset="valuation", as_of=as_of, valuations=tuple(observations)
-    )
     known = set(symbols)
     available = tuple(
         item
@@ -107,7 +104,10 @@ def valuation_coverage(
 
     metrics = _metric_coverage(available, symbols=symbols)
     factors, factor_values = _factor_coverage(
-        dataset=dataset, as_of=as_of, symbols=symbols, factor_configs=factor_configs
+        observations=tuple(observations),
+        as_of=as_of,
+        symbols=symbols,
+        factor_configs=factor_configs,
     )
     strategies = _strategy_coverage(
         symbols=symbols,
@@ -116,18 +116,18 @@ def valuation_coverage(
         declared_factors={config.name for config in factor_configs},
     )
 
-    covered = tuple(
-        symbol
-        for symbol in symbols
-        if any(item.value is not None and item.symbol == symbol for item in available)
+    # 先收成集合再按研究池顺序取：写成 `any(... for item in available)` 会让每个
+    # symbol 都扫一遍全池观测，2,303 只 × 25.7 万条实测要 70 秒。
+    with_any_value = frozenset(
+        item.symbol for item in available if item.value is not None
     )
-    covered_set = set(covered)
+    covered = tuple(symbol for symbol in symbols if symbol in with_any_value)
     return ValuationCoverageReport(
         as_of=as_of,
         universe_size=len(symbols),
         covered_symbols=covered,
         uncovered_symbols=tuple(
-            symbol for symbol in symbols if symbol not in covered_set
+            symbol for symbol in symbols if symbol not in with_any_value
         ),
         metrics=metrics,
         factors=factors,
@@ -146,52 +146,73 @@ def _metric_coverage(
         bucket = by_metric.setdefault(item.metric, [])
         if item.symbol not in bucket:
             bucket.append(item.symbol)
-    return tuple(
-        MetricCoverage(
-            metric=metric,
-            symbols_with_value=tuple(
-                symbol for symbol in symbols if symbol in set(with_value)
-            ),
-            ratio=len(with_value) / len(symbols),
+
+    coverage: list[MetricCoverage] = []
+    for metric, with_value in sorted(by_metric.items()):
+        # 集合在循环外建一次：写在推导式里会让每个 symbol 都重建一遍，
+        # 2,241 只 × 15 个字段实测要多花 30 秒以上。
+        members = set(with_value)
+        ordered = tuple(symbol for symbol in symbols if symbol in members)
+        coverage.append(
+            MetricCoverage(
+                metric=metric,
+                symbols_with_value=ordered,
+                ratio=len(ordered) / len(symbols),
+            )
         )
-        for metric, with_value in sorted(by_metric.items())
-    )
+    return tuple(coverage)
 
 
 def _factor_coverage(
     *,
-    dataset: NormalizedDataset,
+    observations: Sequence[ValuationObservation],
     as_of: datetime,
     symbols: Sequence[str],
     factor_configs: Sequence[FactorConfig],
 ) -> tuple[tuple[ValuationFactorCoverage, ...], Mapping[str, Mapping[str, DataStatus]]]:
-    """因子层覆盖：把每个估值因子在全池跑一遍，记录真实状态。"""
+    """因子层覆盖：把每个估值因子在全池跑一遍，记录真实状态。
+
+    每个标的只喂它自己的观测。`ValuationFactor.compute` 是在整个数据集里按 symbol
+    线性过滤的，把全池数据集交给每一次调用会让这件事变成 O(标的数 × 观测数)：
+    2,241 只 × 7 因子 × 74 万条观测量级下，报告会跑到分钟级以上还出不来。
+    因子只读属于该 symbol 的那些行，所以按 symbol 分组喂进去与喂整份数据在语义上
+    完全等价——包含"从没有过这个指标 → `NOT_APPLICABLE`"与"有观测但晚于 as_of →
+    `NULL`"这两种区分，因为它们都只取决于该标的自己的行。
+    """
     implemented = {
         config.name: ValuationFactor(config)
         for config in factor_configs
         if config.name in VALUATION_FACTORS
     }
-    statuses: dict[str, dict[str, DataStatus]] = {}
-    coverage: list[ValuationFactorCoverage] = []
-    for name, factor in sorted(implemented.items()):
-        per_symbol: dict[str, DataStatus] = {}
-        with_value: list[str] = []
-        for symbol in symbols:
+    by_symbol: dict[str, list[ValuationObservation]] = {}
+    for item in observations:
+        by_symbol.setdefault(item.symbol, []).append(item)
+
+    statuses: dict[str, dict[str, DataStatus]] = {name: {} for name in implemented}
+    with_value: dict[str, list[str]] = {name: [] for name in implemented}
+    for symbol in symbols:
+        dataset = NormalizedDataset(
+            dataset="valuation",
+            as_of=as_of,
+            valuations=tuple(by_symbol.get(symbol, ())),
+        )
+        for name, factor in implemented.items():
             result = factor.compute(
                 FactorContext(symbol=symbol, as_of=as_of, dataset=dataset)
             )
-            per_symbol[symbol] = result.status
+            statuses[name][symbol] = result.status
             if result.status is DataStatus.VALUE:
-                with_value.append(symbol)
-        statuses[name] = per_symbol
-        coverage.append(
-            ValuationFactorCoverage(
-                factor=name,
-                symbols_with_value=tuple(with_value),
-                ratio=len(with_value) / len(symbols),
-            )
+                with_value[name].append(symbol)
+
+    coverage = tuple(
+        ValuationFactorCoverage(
+            factor=name,
+            symbols_with_value=tuple(with_value[name]),
+            ratio=len(with_value[name]) / len(symbols),
         )
-    return tuple(coverage), statuses
+        for name in sorted(implemented)
+    )
+    return coverage, statuses
 
 
 def _strategy_coverage(

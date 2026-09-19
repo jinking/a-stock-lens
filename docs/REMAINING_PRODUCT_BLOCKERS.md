@@ -102,6 +102,15 @@ flowchart TD
    2026-09-19 实测本机凭证已过期（`saved_at=2026-09-18 20:07`），因此当日未发起真实请求；
 5. 覆盖补齐后再重新生成正式因子与策略快照，使 Value 与 GARP 具备完整的全横截面排序能力。
 
+**2026-09-19 实跑结果（凭证刷新后）：** 全池补抓 8 轮、约 77 分钟、约 1,900 次调用，
+落地 2,241 / 2,303 只（97.3%），缺口 62 只留在
+`var/acceptance/valuation-backfill-20260919/missing.json`。
+覆盖核对结果：**Value 估值侧可打分 1,578 只（补抓前 2 只）、GARP 850 只（补抓前 1 只）**。
+注意两级口径不同：`peg` 字段有值 1,872 只，但因子层只有 957 只（非正 PEG 判
+`NOT_APPLICABLE`），这正是"字段覆盖率"不能替代"可打分比例"的实例。
+截至本次仍未做：重算正式因子与策略快照（需所有者决定），以及把新的 Raw 重新归一化进
+Parquet / DuckDB（`uv run python scripts/migrate_storage.py`，会重写 `data/normalized/**`）。
+
 ---
 
 ## 3. 阻塞项 2：Six Absolute Qualification Rules（六策略绝对质量门槛）
