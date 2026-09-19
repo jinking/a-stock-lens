@@ -9,11 +9,19 @@ from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 
 from astock_lens.data.snapshots.resolve import resolve_snapshot_store
 from astock_lens.data.storage.paths import StoragePaths, resolve_storage_paths
+from astock_lens.discovery import (
+    StrategyCoverage,
+    StrategyScreenQuery,
+    StrategyScreenResult,
+    screen_strategy,
+    summarize_strategies,
+)
 from astock_lens.domain.enums import SnapshotKind
+from astock_lens.strategies.contracts import StrategyResult
 from astock_lens.watchlist.store import resolve_watchlist_store
 
 SERVICE_NAME = "A-Stock Lens"
@@ -108,6 +116,42 @@ def create_app(
             if entry is not None:
                 entries.append(entry.model_dump(mode="json"))
         return {"symbols": list(store.symbols()), "entries": entries}
+
+    @application.get("/strategies")
+    def strategies(as_of: str) -> tuple[StrategyCoverage, ...]:
+        """Read strategy coverage summaries for one date."""
+        records = _read(
+            root(), SnapshotKind.STRATEGY, as_of, database=snapshot_database()
+        )
+        strategy_results = [StrategyResult.model_validate(r) for r in records]
+        return summarize_strategies(strategy_results)
+
+    @application.get("/strategies/{strategy_id}/results")
+    def strategy_results(
+        strategy_id: str,
+        as_of: str,
+        limit: int = Query(default=20, gt=0, le=500),
+        eligible_only: bool = True,
+        min_percentile: float | None = Query(default=None, ge=0.0, le=1.0),
+    ) -> StrategyScreenResult:
+        """Screen and rank strategy results for one strategy on one date."""
+        records = _read(
+            root(), SnapshotKind.STRATEGY, as_of, database=snapshot_database()
+        )
+        strategy_results = [StrategyResult.model_validate(r) for r in records]
+        query = StrategyScreenQuery(
+            strategy_id=strategy_id,
+            limit=limit,
+            eligible_only=eligible_only,
+            min_percentile=min_percentile,
+        )
+        screened = screen_strategy(strategy_results, query)
+        if screened.coverage.total_count == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"strategy '{strategy_id}' has no stored results for {as_of}",
+            )
+        return screened
 
     return application
 
