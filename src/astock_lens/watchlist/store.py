@@ -88,13 +88,17 @@ class JsonWatchlistStore:
 
 
 def resolve_watchlist_store(
-    root: Path, *, backend: str | None = None
+    root: Path, *, backend: str | None = None, database: Path | None = None
 ) -> WatchlistStore:
     """Return the store the configured backend names.
 
     A typo fails loudly rather than silently falling back to JSON: a run that
     wrote to a different store than the operator expects is worse than a run
     that did not start.
+
+    `database` 是 `astock_lens.data.storage.paths` 解析出的统一库：显式传入时
+    DuckDB 后端用它，CLI 与 API 因此读同一个文件。不传时保持原行为——库文件
+    放在 `root` 下面，自己解析 root 的调用方不受影响。
     """
     configured = backend if backend is not None else os.getenv(BACKEND_ENV)
     chosen = (configured or DEFAULT_BACKEND).strip().lower()
@@ -102,7 +106,9 @@ def resolve_watchlist_store(
     if chosen == JSON:
         return JsonWatchlistStore(root)
     if chosen == DUCKDB:
-        return DuckDBWatchlistStore(root / DUCKDB_FILENAME)
+        return DuckDBWatchlistStore(
+            database if database is not None else root / DUCKDB_FILENAME
+        )
     raise ValueError(
         f"unknown watchlist backend {chosen!r}; expected {JSON!r} or {DUCKDB!r}"
     )

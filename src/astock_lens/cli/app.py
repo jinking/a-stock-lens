@@ -49,6 +49,7 @@ from astock_lens.data.providers.neodata import NeodataProvider
 from astock_lens.data.providers.westock import FINANCIAL_DATASETS, WestockCliProvider
 from astock_lens.data.snapshots.resolve import resolve_snapshot_store
 from astock_lens.data.snapshots.store import SnapshotStore
+from astock_lens.data.storage.paths import StoragePaths, resolve_storage_paths
 from astock_lens.data.sync import (
     DONE_STATUSES,
     INDUSTRY_ROOT,
@@ -85,7 +86,7 @@ from astock_lens.research.adapters.cli import (
     resolve_adapter,
 )
 from astock_lens.research.models import ResearchRequest
-from astock_lens.settings import load_app_config
+from astock_lens.settings import load_app_config, resolve_config_path
 from astock_lens.strategies.config import StrategyConfig, load_strategy_config
 from astock_lens.strategies.contracts import StrategyResult
 from astock_lens.strategies.registry import (
@@ -109,19 +110,13 @@ from astock_lens.watchlist.store import WatchlistStore, resolve_watchlist_store
 MINIMUM_PYTHON = (3, 12)
 
 CSV_ROOT_ENV = "ASTOCK_CSV_ROOT"
-SNAPSHOT_ROOT_ENV = "ASTOCK_SNAPSHOT_ROOT"
-WATCHLIST_ROOT_ENV = "ASTOCK_WATCHLIST_ROOT"
 WATCHLIST_BACKEND_ENV = "ASTOCK_WATCHLIST_BACKEND"
-JOB_ROOT_ENV = "ASTOCK_JOB_ROOT"
 DATASET_ENV = "ASTOCK_DATASET"
 SECURITIES_DATASET_ENV = "ASTOCK_SECURITIES_DATASET"
 FACTOR_CONFIG_DIR_ENV = "ASTOCK_FACTOR_CONFIG_DIR"
 UNIVERSE_CONFIG_ENV = "ASTOCK_UNIVERSE_CONFIG"
 STRATEGY_CONFIG_DIR_ENV = "ASTOCK_STRATEGY_CONFIG_DIR"
 DEFAULT_CSV_ROOT = Path("data/raw")
-DEFAULT_SNAPSHOT_ROOT = Path("data/snapshots")
-DEFAULT_WATCHLIST_ROOT = Path("data/watchlist")
-DEFAULT_JOB_ROOT = Path("var/jobs")
 DEFAULT_DATASET = "daily_bars"
 DEFAULT_SECURITIES_DATASET = "securities"
 DEFAULT_FACTOR_CONFIG_DIR = Path("configs/factors")
@@ -169,7 +164,7 @@ def main() -> None:
 
 def _configured_config_path() -> Path:
     """Return the configuration path the loader would use."""
-    return Path(os.getenv("ASTOCK_CONFIG", "configs/app.yaml"))
+    return resolve_config_path()
 
 
 def _as_of(value: str) -> datetime:
@@ -236,10 +231,18 @@ def _securities_dataset() -> str:
     return os.getenv(SECURITIES_DATASET_ENV, DEFAULT_SECURITIES_DATASET)
 
 
+def _storage_paths() -> StoragePaths:
+    """本次运行生效的存储路径。
+
+    CLI 的每个入口都从这里取路径，不再各自 `os.getenv` 拼默认值——否则同一个
+    进程里两个命令可以指到不同的库而无人发现。
+    """
+    return resolve_storage_paths()
+
+
 def _store() -> SnapshotStore:
-    return resolve_snapshot_store(
-        Path(os.getenv(SNAPSHOT_ROOT_ENV, str(DEFAULT_SNAPSHOT_ROOT)))
-    )
+    paths = _storage_paths()
+    return resolve_snapshot_store(paths.snapshot_root, database=paths.database)
 
 
 def _universe_state(as_of_value: str) -> AnalysisState:
@@ -261,12 +264,12 @@ def _strategy_dir() -> Path:
 
 
 def _watchlist_store() -> WatchlistStore:
-    root = Path(os.getenv(WATCHLIST_ROOT_ENV, str(DEFAULT_WATCHLIST_ROOT)))
-    return resolve_watchlist_store(root)
+    paths = _storage_paths()
+    return resolve_watchlist_store(paths.watchlist_root, database=paths.database)
 
 
 def _job_store() -> JsonJobStore:
-    return JsonJobStore(Path(os.getenv(JOB_ROOT_ENV, str(DEFAULT_JOB_ROOT))))
+    return JsonJobStore(_storage_paths().job_root)
 
 
 def _financial_provider() -> WestockCliProvider:
@@ -378,6 +381,7 @@ def doctor() -> None:
     config_path = _configured_config_path()
     try:
         config = load_app_config(config_path)
+        paths = resolve_storage_paths(config_path=config_path)
     except (OSError, ValueError, ValidationError) as error:
         typer.echo(f"config {config_path} [failed]", err=True)
         typer.echo(f"  {error}", err=True)
@@ -386,12 +390,18 @@ def doctor() -> None:
         typer.echo(f"config {config_path} [ok]")
         typer.echo(f"app.name: {config.app.name}")
         # Missing paths are reported, not created: bootstrap must not write.
+        # 来源（env / config / default）与路径一起打印：一个"生效了但没人知道
+        # 它从哪来"的路径，等于没有生效。
         for label, path in (
-            ("storage.database", config.storage.database),
-            ("storage.parquet_root", config.storage.parquet_root),
+            ("storage.database", paths.database),
+            ("storage.normalized_root", paths.normalized_root),
+            ("storage.snapshot_root", paths.snapshot_root),
+            ("storage.watchlist_root", paths.watchlist_root),
+            ("storage.job_root", paths.job_root),
         ):
             presence = "present" if path.exists() else "absent"
-            typer.echo(f"{label}: {path} [{presence}]")
+            origin = paths.sources[label.removeprefix("storage.")]
+            typer.echo(f"{label}: {path} [{presence}] ({origin})")
 
     try:
         configured = _factor_configs()

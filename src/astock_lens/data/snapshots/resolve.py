@@ -20,12 +20,20 @@ JSON = "json"
 DUCKDB = "duckdb"
 
 
-def resolve_snapshot_store(root: Path, *, backend: str | None = None) -> SnapshotStore:
+def resolve_snapshot_store(
+    root: Path, *, backend: str | None = None, database: Path | None = None
+) -> SnapshotStore:
     """Return the store the configured backend names.
 
     The DuckDB database lives inside the snapshot root, so both backends keep
     their files under one directory and switching backends never scatters
     state.
+
+    `database` is the unified database resolved by
+    `astock_lens.data.storage.paths` — the CLI and the API pass it so both
+    ends of the same run point at one file. Omitting it keeps the original
+    behaviour (the database sits under `root`), so callers that resolve their
+    own root are unaffected.
     """
     configured = backend if backend is not None else os.getenv(BACKEND_ENV)
     chosen = (configured or DEFAULT_BACKEND).strip().lower()
@@ -33,7 +41,9 @@ def resolve_snapshot_store(root: Path, *, backend: str | None = None) -> Snapsho
     if chosen == JSON:
         return JsonSnapshotStore(root)
     if chosen == DUCKDB:
-        return DuckDBSnapshotStore(root / DUCKDB_FILENAME)
+        return DuckDBSnapshotStore(
+            database if database is not None else root / DUCKDB_FILENAME
+        )
     raise ValueError(
         f"unknown snapshot backend {chosen!r}; expected {JSON!r} or {DUCKDB!r}"
     )
