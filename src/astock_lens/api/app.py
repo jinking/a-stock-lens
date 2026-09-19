@@ -7,6 +7,7 @@ so this module imports the storage boundary and nothing else from the pipeline.
 
 from datetime import date, datetime
 from pathlib import Path
+from typing import cast
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query
@@ -153,6 +154,90 @@ def create_app(
             )
         return screened
 
+    @application.get("/stocks/{symbol}")
+    def stock_profile(symbol: str, as_of: str) -> dict[str, object]:
+        """Read full research profile for one symbol on one date."""
+        universe_records = _read(
+            root(), SnapshotKind.UNIVERSE, as_of, database=snapshot_database()
+        )
+        universe_snapshot = universe_records[0] if universe_records else {}
+        raw_included = universe_snapshot.get("included")
+        included_symbols = (
+            raw_included if isinstance(raw_included, (list, tuple, set)) else ()
+        )
+        raw_exclusions = universe_snapshot.get("exclusions")
+        exclusions_list = (
+            raw_exclusions if isinstance(raw_exclusions, (list, tuple)) else ()
+        )
+
+        included = symbol in included_symbols
+        exclusion_rules: list[str] = [
+            str(exc["rule"])
+            for exc in exclusions_list
+            if isinstance(exc, dict)
+            and exc.get("symbol") == symbol
+            and exc.get("rule") is not None
+        ]
+
+        factor_records = (
+            _read_optional(
+                root(),
+                SnapshotKind.FACTOR,
+                as_of,
+                database=snapshot_database(),
+            )
+            or ()
+        )
+        symbol_factors = [r for r in factor_records if r.get("symbol") == symbol]
+        symbol_factors.sort(key=lambda r: str(r.get("factor", "")))
+
+        strategy_records = (
+            _read_optional(
+                root(),
+                SnapshotKind.STRATEGY,
+                as_of,
+                database=snapshot_database(),
+            )
+            or ()
+        )
+        symbol_strategies = [r for r in strategy_records if r.get("symbol") == symbol]
+        symbol_strategies.sort(key=lambda r: str(r.get("strategy_id", "")))
+
+        candidate_records = _read_optional(
+            root(),
+            SnapshotKind.CANDIDATE,
+            as_of,
+            database=snapshot_database(),
+        )
+        candidate: dict[str, object] | None = None
+        if candidate_records is None:
+            candidate_status = "not_published"
+        else:
+            matching = [r for r in candidate_records if r.get("symbol") == symbol]
+            if matching:
+                candidate_status = "published"
+                candidate = matching[0]
+            else:
+                candidate_status = "not_selected"
+
+        store = resolve_watchlist_store(watchlist(), database=watchlist_database())
+        entry = store.read(symbol)
+        watchlist_data = entry.model_dump(mode="json") if entry is not None else None
+
+        return {
+            "as_of": as_of,
+            "symbol": symbol,
+            "universe": {
+                "included": included,
+                "exclusion_rules": exclusion_rules,
+            },
+            "factors": symbol_factors,
+            "strategies": symbol_strategies,
+            "candidate_status": candidate_status,
+            "candidate": candidate,
+            "watchlist": watchlist_data,
+        }
+
     return application
 
 
@@ -179,4 +264,37 @@ def _read(
         raise HTTPException(
             status_code=404, detail=f"no {kind.value} snapshot for {as_of}"
         )
+    return records
+
+
+def _read_optional(
+    root: Path,
+    kind: SnapshotKind,
+    as_of: str,
+    *,
+    database: Path | None = None,
+) -> tuple[dict[str, object], ...] | None:
+    """Read one snapshot if it exists; return None when absent.
+
+    Unlike _read, this function distinguishes between an absent snapshot
+    (not written for this date) and an empty snapshot. When no snapshot
+    exists for the date, it returns None.
+    """
+    try:
+        day = date.fromisoformat(as_of)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422, detail=f"as_of must be YYYY-MM-DD, got {as_of!r}"
+        ) from error
+
+    store = resolve_snapshot_store(root, database=database)
+    dates_fn = getattr(store, "dates", None)
+    if callable(dates_fn):
+        stored_dates = cast("tuple[str, ...]", dates_fn(kind))
+        if as_of not in stored_dates:
+            return None
+    records = store.read(
+        kind,
+        datetime(day.year, day.month, day.day, CLOSE_HOUR, tzinfo=SHANGHAI),
+    )
     return records

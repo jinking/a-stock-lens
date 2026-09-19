@@ -421,3 +421,296 @@ def test_strategy_results_missing_snapshot_returns_404(local_tmp: Path) -> None:
 
     assert response.status_code == 404
     assert DAY in response.json()["detail"]
+
+
+def _seed_profile_base(root: Path) -> None:
+    """Seed universe, factor, and strategy snapshots without candidates."""
+    store = JsonSnapshotStore(root)
+    universe = UniverseSnapshot(
+        as_of=AS_OF,
+        snapshot_id="2026-09-04:abc123",
+        config_digest="abc123",
+        lineage=SnapshotLineage(universe_snapshot="2026-09-04:abc123"),
+        included=("600000.SH", "600001.SH"),
+        exclusions=(
+            UniverseExclusion(
+                symbol="000002.SZ", rule=UniverseRule.ST, detail="flagged"
+            ),
+        ),
+        deferred_rules=(),
+    )
+    store.write(SnapshotKind.UNIVERSE, AS_OF, [universe])
+    store.write(
+        SnapshotKind.FACTOR,
+        AS_OF,
+        [
+            FactorResult(
+                symbol="600000.SH",
+                factor="avg_amount_20d",
+                as_of=AS_OF,
+                status=DataStatus.VALUE,
+                factor_version="v1",
+                lineage=SnapshotLineage(factor_version="v1"),
+                raw_value=1_014_500.0,
+            )
+        ],
+    )
+    store.write(
+        SnapshotKind.STRATEGY,
+        AS_OF,
+        [
+            StrategyResult(
+                symbol="600000.SH",
+                strategy_id="growth",
+                strategy_version="v1",
+                as_of=AS_OF,
+                eligible=True,
+                lineage=SnapshotLineage(strategy_version="v1"),
+                score=90.0,
+                rank_percentile=0.98,
+                confidence=1.0,
+                reasons=("strong_growth",),
+            )
+        ],
+    )
+
+
+def test_stock_profile_no_candidate_snapshot_returns_not_published(
+    local_tmp: Path,
+) -> None:
+    _seed_profile_base(local_tmp)
+    client = TestClient(create_app(snapshot_root=local_tmp))
+
+    response = client.get("/stocks/600000.SH", params={"as_of": DAY})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["as_of"] == DAY
+    assert payload["symbol"] == "600000.SH"
+    assert payload["candidate_status"] == "not_published"
+    assert payload["candidate"] is None
+    assert payload["universe"] == {"included": True, "exclusion_rules": []}
+    assert len(payload["factors"]) == 1
+    assert payload["factors"][0]["factor"] == "avg_amount_20d"
+    assert len(payload["strategies"]) == 1
+    assert payload["strategies"][0]["strategy_id"] == "growth"
+    assert payload["watchlist"] is None
+
+
+def test_stock_profile_candidate_not_selected(local_tmp: Path) -> None:
+    _seed_profile_base(local_tmp)
+    store = JsonSnapshotStore(local_tmp)
+    store.write(
+        SnapshotKind.CANDIDATE,
+        AS_OF,
+        [
+            Candidate(
+                symbol="600001.SH",
+                as_of=AS_OF,
+                next_action=NextAction.DEEP_RESEARCH,
+                lineage=SnapshotLineage(factor_version="v1", strategy_version="v1"),
+            )
+        ],
+    )
+    client = TestClient(create_app(snapshot_root=local_tmp))
+
+    response = client.get("/stocks/600000.SH", params={"as_of": DAY})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["candidate_status"] == "not_selected"
+    assert payload["candidate"] is None
+
+
+def test_stock_profile_candidate_published(local_tmp: Path) -> None:
+    _seed_profile_base(local_tmp)
+    store = JsonSnapshotStore(local_tmp)
+    store.write(
+        SnapshotKind.CANDIDATE,
+        AS_OF,
+        [
+            Candidate(
+                symbol="600000.SH",
+                as_of=AS_OF,
+                next_action=NextAction.DEEP_RESEARCH,
+                lineage=SnapshotLineage(factor_version="v1", strategy_version="v1"),
+            )
+        ],
+    )
+    client = TestClient(create_app(snapshot_root=local_tmp))
+
+    response = client.get("/stocks/600000.SH", params={"as_of": DAY})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["candidate_status"] == "published"
+    assert payload["candidate"] is not None
+    assert payload["candidate"]["symbol"] == "600000.SH"
+    assert payload["candidate"]["next_action"] == "DEEP_RESEARCH"
+
+
+def test_stock_profile_excluded_universe(local_tmp: Path) -> None:
+    _seed_profile_base(local_tmp)
+    client = TestClient(create_app(snapshot_root=local_tmp))
+
+    response = client.get("/stocks/000002.SZ", params={"as_of": DAY})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "000002.SZ"
+    assert payload["universe"] == {"included": False, "exclusion_rules": ["ST"]}
+
+
+def test_stock_profile_watchlist_present_and_absent(local_tmp: Path) -> None:
+    _seed_profile_base(local_tmp)
+    watchlist_dir = local_tmp / "watchlist"
+    JsonWatchlistStore(watchlist_dir).write(
+        open_entry("600000.SH", at=AS_OF, thesis="growth leader")
+    )
+    client = TestClient(
+        create_app(snapshot_root=local_tmp, watchlist_root=watchlist_dir)
+    )
+
+    resp_present = client.get("/stocks/600000.SH", params={"as_of": DAY})
+    assert resp_present.status_code == 200
+    wl = resp_present.json()["watchlist"]
+    assert wl is not None
+    assert wl["symbol"] == "600000.SH"
+    assert wl["state"] == "DISCOVERED"
+    assert wl["thesis"] == "growth leader"
+
+    resp_absent = client.get("/stocks/600001.SH", params={"as_of": DAY})
+    assert resp_absent.status_code == 200
+    assert resp_absent.json()["watchlist"] is None
+
+
+def test_stock_profile_factors_and_strategies_deterministic_sorting(
+    local_tmp: Path,
+) -> None:
+    store = JsonSnapshotStore(local_tmp)
+    universe = UniverseSnapshot(
+        as_of=AS_OF,
+        snapshot_id="2026-09-04:abc123",
+        config_digest="abc123",
+        lineage=SnapshotLineage(universe_snapshot="2026-09-04:abc123"),
+        included=("600000.SH",),
+        exclusions=(),
+        deferred_rules=(),
+    )
+    store.write(SnapshotKind.UNIVERSE, AS_OF, [universe])
+    store.write(
+        SnapshotKind.FACTOR,
+        AS_OF,
+        [
+            FactorResult(
+                symbol="600000.SH",
+                factor="roe",
+                as_of=AS_OF,
+                status=DataStatus.VALUE,
+                factor_version="v1",
+                lineage=SnapshotLineage(factor_version="v1"),
+                raw_value=0.15,
+            ),
+            FactorResult(
+                symbol="600000.SH",
+                factor="avg_amount_20d",
+                as_of=AS_OF,
+                status=DataStatus.VALUE,
+                factor_version="v1",
+                lineage=SnapshotLineage(factor_version="v1"),
+                raw_value=1_014_500.0,
+            ),
+            FactorResult(
+                symbol="600000.SH",
+                factor="pe_ttm",
+                as_of=AS_OF,
+                status=DataStatus.VALUE,
+                factor_version="v1",
+                lineage=SnapshotLineage(factor_version="v1"),
+                raw_value=8.5,
+            ),
+        ],
+    )
+    store.write(
+        SnapshotKind.STRATEGY,
+        AS_OF,
+        [
+            StrategyResult(
+                symbol="600000.SH",
+                strategy_id="value",
+                strategy_version="v1",
+                as_of=AS_OF,
+                eligible=True,
+                lineage=SnapshotLineage(strategy_version="v1"),
+                score=80.0,
+            ),
+            StrategyResult(
+                symbol="600000.SH",
+                strategy_id="growth",
+                strategy_version="v1",
+                as_of=AS_OF,
+                eligible=True,
+                lineage=SnapshotLineage(strategy_version="v1"),
+                score=90.0,
+            ),
+            StrategyResult(
+                symbol="600000.SH",
+                strategy_id="dividend",
+                strategy_version="v1",
+                as_of=AS_OF,
+                eligible=True,
+                lineage=SnapshotLineage(strategy_version="v1"),
+                score=75.0,
+            ),
+        ],
+    )
+    client = TestClient(create_app(snapshot_root=local_tmp))
+
+    response = client.get("/stocks/600000.SH", params={"as_of": DAY})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [f["factor"] for f in payload["factors"]] == [
+        "avg_amount_20d",
+        "pe_ttm",
+        "roe",
+    ]
+    assert [s["strategy_id"] for s in payload["strategies"]] == [
+        "dividend",
+        "growth",
+        "value",
+    ]
+
+
+def test_stock_profile_missing_universe_snapshot_returns_404(
+    local_tmp: Path,
+) -> None:
+    client = TestClient(create_app(snapshot_root=local_tmp))
+
+    response = client.get("/stocks/600000.SH", params={"as_of": DAY})
+
+    assert response.status_code == 404
+    assert DAY in response.json()["detail"]
+
+
+def test_stock_profile_invalid_as_of_returns_422(local_tmp: Path) -> None:
+    client = TestClient(create_app(snapshot_root=local_tmp))
+
+    response = client.get("/stocks/600000.SH", params={"as_of": "not-a-date"})
+
+    assert response.status_code == 422
+
+
+def test_stock_profile_unknown_symbol_not_in_universe(local_tmp: Path) -> None:
+    _seed_profile_base(local_tmp)
+    client = TestClient(create_app(snapshot_root=local_tmp))
+
+    response = client.get("/stocks/999999.SH", params={"as_of": DAY})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "999999.SH"
+    assert payload["universe"] == {"included": False, "exclusion_rules": []}
+    assert payload["factors"] == []
+    assert payload["strategies"] == []
+    assert payload["candidate_status"] == "not_published"
