@@ -1321,3 +1321,12 @@ uv run python scripts/capture_research_baseline.py \
 - 防作弊抽查：两条提交范围均落在计划点名文件内（`6a824fe` 8 个文件、`cee456f` 14 个文件）；`tests/**` 无新增跳过，唯一被删的一行断言来自本次验收方自己的格式修复（`fbeba36`）；`data/` 层未 import `pipelines/`（且有测试守这条）。
 - 如实记录的偏差：计划片段里的 `assert actual == expected` 按字面不可成立（`RawDataset.fetched_at` 是取数墙钟，两次调用必然不同）。执行方改为只摘 `fetched_at` 一个字段、其余逐项比对，并在测试与评审记录里写明——本次验收确认它只摘了这一个字段，比较强度未被放宽。
 - 待所有者裁决（本轮未动）：① 是否把"全量测试的沙箱模式差异"写进 `README.md`/`Makefile`（本次验收在普通模式下 917 passed/5m18s，未见执行方报告的删除守卫拖慢，说明是执行环境特有）；② 是否恢复沙箱下不可用的 `tmp_path` 夹具（现用 `local_tmp`）。
+
+## 二十三、安装 PyArrow（2026-09-19，第二阶段 2.3 前置）
+
+所有者指示"装 pyarrow"。实测与处理：
+
+- `uv sync --extra data --extra providers` 在本机网络下**卡在 `polars-runtime-32`（46.1MiB）轮子**：直连 PyPI 约 200–230KB/s 且多次重试、清华与阿里云镜像同样超时（分别 125s 超时 / 长时间停在同一下载）。已中止，未污染依赖树（`uv.lock` 未改）。
+- 改用 `uv pip install "pyarrow>=17.0"` → **装成 `pyarrow==25.0.1`**（本地缓存命中，127ms）。`duckdb 1.5.5`、`akshare 1.18.94` 原有环境保留。
+- **`polars` 仍未安装**，且当前代码库**没有任何模块 import polars**（`rg 'import polars|from polars' src/ scripts/ tests/` 为空）；第二阶段 2.3–2.6 只需要 PyArrow。若后续确有需要，请在网络条件好时补跑 `uv sync --extra data --extra providers`（它不会移除已装的 pyarrow）。
+- 环境验证：`uv run mypy`（112 源文件）无问题；`ruff check .` 全绿；全量 `uv run pytest -q` = **917 passed / 0 skipped**（5m10s），与装之前一致。
