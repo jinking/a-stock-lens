@@ -114,7 +114,12 @@ def _invoke(
     source: object,
     *args: str,
 ) -> object:
-    monkeypatch.setattr(app_module, "_neodata_provider", lambda: source)  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        app_module,
+        "_neodata_provider",
+        # 签名要与被替换的 `_neodata_provider(batch_size=…)` 对齐。
+        lambda batch_size=None: source,
+    )  # type: ignore[attr-defined]
     return CliRunner().invoke(
         app,
         list(args),
@@ -236,6 +241,28 @@ def test_a_missing_universe_file_is_an_error_not_an_empty_run(
 
     assert result.exit_code == 1
     assert "研究池名单不存在" in result.output
+
+
+def test_a_non_positive_batch_size_is_refused(
+    local_tmp: Path, monkeypatch: object
+) -> None:
+    universe = _write_universe(local_tmp, ("600519.SH",))
+
+    result = _invoke(
+        local_tmp,
+        monkeypatch,
+        CompleteSource(),
+        "sync-valuation",
+        "--as-of",
+        DAY,
+        "--universe",
+        str(universe),
+        "--batch-size",
+        "0",
+    )
+
+    assert result.exit_code == 2
+    assert "batch-size" in result.output
 
 
 def test_the_coverage_command_reports_the_universe_as_the_denominator(

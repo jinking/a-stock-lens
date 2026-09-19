@@ -284,9 +284,16 @@ def _financial_provider() -> WestockCliProvider:
     return WestockCliProvider()
 
 
-def _neodata_provider() -> NeodataProvider:
-    """语义与估值数据源（规格 §24 补遗）。"""
-    return NeodataProvider()
+def _neodata_provider(batch_size: int | None = None) -> NeodataProvider:
+    """语义与估值数据源（规格 §24 补遗）。
+
+    `batch_size` 只在补抓命令里显式传入：实测源端的"批量"是名义上的，
+    一次请求无论带几只标的，响应都被截到 1–2 个内容块，因此每批带几只
+    直接决定单位标的的调用次数（见 `sync-valuation` 的说明）。
+    """
+    if batch_size is None:
+        return NeodataProvider()
+    return NeodataProvider(batch_size=batch_size)
 
 
 def _bulk_provider() -> DataProvider:
@@ -1256,6 +1263,16 @@ def sync_valuation(
             help="最多补抓几轮；每轮只请求仍然缺的标的。技术上限，不是产品阈值。",
         ),
     ] = 2,
+    batch_size: Annotated[
+        int,
+        typer.Option(
+            "--batch-size",
+            help=(
+                "一次请求最多带几只标的。实测源的响应被截到 1–2 个内容块，"
+                "因此带多带少不改变每次回几块；默认 5（实测每次命中最高）。"
+            ),
+        ),
+    ] = 5,
     limit: Annotated[
         int | None,
         typer.Option("--limit", help="只处理名单前 N 只，用于小规模探针。"),
@@ -1276,6 +1293,8 @@ def sync_valuation(
     day = _as_of(as_of)
     if max_rounds <= 0:
         raise typer.BadParameter("--max-rounds 必须为正")
+    if batch_size <= 0:
+        raise typer.BadParameter("--batch-size 必须为正")
     if limit is not None and limit <= 0:
         raise typer.BadParameter("--limit 必须为正")
 
@@ -1287,7 +1306,7 @@ def sync_valuation(
     if limit is not None:
         wanted = wanted[:limit]
 
-    provider = _neodata_provider()
+    provider = _neodata_provider(batch_size=batch_size)
     health = provider.health()
     if not health.healthy:
         typer.echo(
