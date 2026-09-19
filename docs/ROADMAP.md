@@ -147,6 +147,8 @@ ResearchRequest → DeepResearchAdapter` 逐项对照：
 
 ## 八、下一阶段入口（严格分阶段推进）
 
+> 详细的技术阻断机理、涉及源码位置、解除流程与第一性原理，参见 [docs/REMAINING_PRODUCT_BLOCKERS.md](file:///Users/huangjinjin/Documents/ChatGPT/a-stock-lens/docs/REMAINING_PRODUCT_BLOCKERS.md)。
+
 股票发现 MVP 已完成，策略选股与研究画像已可用于日常分析。
 **正式候选发布（Candidate Publishing）依然被既定产品门禁安全阻断**。
 后续工作必须严格按以下 P1–P5 独立阶段依次推进，严禁提前跨越：
