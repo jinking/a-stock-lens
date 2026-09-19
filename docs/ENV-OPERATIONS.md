@@ -11,7 +11,7 @@
 
 本项目把依赖分在 extras 里（见 `pyproject.toml`）：
 
-- `data` = `duckdb` / `polars` / `pyarrow`
+- `data` = `duckdb` / `pyarrow`（`polars` 已于 2026-09-19 由所有者决定移除，见第四节）
 - `providers` = `akshare`
 
 **默认集合里没有这些包**，所以任何一次不带 `--extra` 的 `uv run` 都会把它们当作"不该在的包"清掉。
@@ -45,13 +45,34 @@ uv run --no-sync <命令>
 
 ## 三、当前环境状态（2026-09-19）
 
-- 已恢复：`duckdb 1.5.5`、`pyarrow 25.0.1`、`akshare 1.18.96`；全量 `uv run --no-sync pytest -q`
-  = **917 passed / 0 skipped / EXIT=0**（2m20s）。
-- **`polars` 未安装**：它的 `polars-runtime-32`（46.1MiB）在本机网络上反复超时/断流。当前代码库
-  0 处 `import polars`（`rg 'import polars|from polars' src/ scripts/ tests/` 为空），第二阶段
-  2.3–2.6 只需要 PyArrow。网络条件好时用上面那条 `uv sync` 补齐即可。
+- 环境已与锁文件**账实相符**：`uv sync --locked --extra data --extra providers --dry-run` 输出
+  `Would make no changes`；`duckdb 1.5.5`、`pyarrow 25.0.1`、`akshare 1.18.94`、
+  `pytest 9.1.1`、`fastapi 0.141.1`；裸 `uv run pytest -q` = **917 passed / 0 skipped / EXIT=0**（2m34s）。
 - `uv.lock` 与 `pyproject.toml` 已还原到 HEAD（误改原件备份在
   `var/benchmarks/restore-20260919/`）。
+
+## 四、`polars` 的移除（2026-09-19，所有者决定 A）
+
+**问题**：`data` extra 里声明了 `polars`，但它的 `polars-runtime-32`（46.1MiB）在本机网络上
+反复超时/断流（直连 PyPI 约 200KB/s、清华/中科大/阿里云镜像同样失败），导致 `uv sync` 无法收敛，
+环境长期处于"半成品"。
+
+**事实核对**（决定了移除是安全的）：
+
+- 全仓库 **0 处 `import polars`**（`rg 'import polars|from polars' src/ scripts/ tests/`），
+  `pandas` 只是 `akshare` 的传递依赖（`uv pip show pandas` → `Required-by: akshare`）；
+- `docs/ARCHITECTURE.md`、`docs/DATA_MODEL.md`、`docs/STORAGE.md` 的口径都只要求
+  **Parquet（PyArrow）+ DuckDB**，没有任何规格要求 polars；
+- 第二阶段 2.3–2.6 只需要 PyArrow。
+
+**处理**：`uv remove --optional data polars` → `pyproject.toml` 的 `data` extra 变成
+`duckdb>=1.0` + `pyarrow>=17.0`，`uv.lock` 中 polars 条目归零；随后
+`uv sync --locked --extra data --extra providers` 使环境与锁文件一致（输出 `Would make no changes`）。
+将来若真要引入 polars，先立规格再 `uv add --optional data polars`。
+
+**待同步的陈旧表述**（不在本次改动范围，属其它任务文件）：`docs/STORAGE.md` §5 仍写
+"`data` extra 已声明 `duckdb` / `polars` / `pyarrow`"、`docs/ROADMAP.md` 仍写
+"`pyarrow` / `polars` 至今未安装"。这两处应随各自的文档任务更新。
 
 ## 四、关于"多份环境"
 
