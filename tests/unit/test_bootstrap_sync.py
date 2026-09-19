@@ -155,7 +155,8 @@ def test_the_cli_reports_the_derived_requirement_and_writes_nothing(
     assert payload["factor_name"] == LIQUIDITY_FACTOR
     assert payload["required_valid_bars"] == 20
     # 门槛在 configs/universe.yaml 里（所有者 2026-09-18 上调至 1.5 亿），命令只如实上报。
-    assert payload["min_average_turnover_20d"] == _universe_config().min_average_turnover_20d  # type: ignore[attr-defined]
+    configured_floor = _universe_config().min_average_turnover_20d  # type: ignore[attr-defined]
+    assert payload["min_average_turnover_20d"] == configured_floor
     assert payload["min_listing_days"] == 120
     assert list(snapshot_root.iterdir()) == []
     assert list(watchlist_root.iterdir()) == []

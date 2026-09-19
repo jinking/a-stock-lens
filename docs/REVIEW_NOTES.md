@@ -1221,3 +1221,16 @@ uv run python scripts/capture_research_baseline.py \
 `(symbol, factor)`、策略 `(strategy_id, symbol)`"——照做。计划同时也说
 "完整 JSONL 是明确的 CLI 交换证据，不注册成持久化业务状态"——照做，manifest 里
 用一个显式布尔字段把这件事写下来，免得将来有人把这份文件当成正式快照读。
+
+## 二十一、第一阶段（研究证据基线）验收结论（2026-09-19，管理者复跑）
+
+明卷与抽查全部亲自复跑，结论：**通过**。
+
+- 明卷：`tests/unit/test_research_baseline_audit.py` 21 passed；1.2 四文件 32 passed；`tests/integration/test_research_baseline_capture.py` 11 passed；全量 `uv run pytest -q` **890 passed / 0 skipped**（基线 837，只增不减）；`ruff check`／`mypy`（108 files）/`git diff --check` 全绿。
+- 抽查一（清单可复现）：本人重跑 `scripts/audit_research_baseline.py`，与交付清单比对 **5,058 个文件 sha256 零差异**——清单是机器产出的，且 `data/raw`、`data/snapshots`、`data/watchlist`、`var/jobs` 自基线以来零漂移。
+- 抽查二（提交范围）：三条提交只用白名单文件（`git show --stat` 核对），`tests/**` 差异为纯新增（0 删除断言、0 新增 skip/xfail）。
+- 抽查三（基线可复现）：两次独立 capture 的五个产物 `sha256` 逐字节一致，`population` 与 `config_summary` 相同。
+- 数字复核：研究池 2,303；四榜可打分 growth 2,302／momentum 2,281／quality 1,697／dividend 1,612；`unknown_industry_symbols` = 9（`000592.SZ`、`000968.SZ`、`002679.SZ`、`300896.SZ`、`600158.SH`、`600185.SH`、`600938.SH`、`601888.SH`、`689009.SH`）；`industry_evidence.origin=canonical` 且带 `source_sha256` 与时区化 `mapping_as_of`。
+- 反向验证复核：external 缺一只仍出诊断报告（exit 0），canonical 缺一只仍拒绝（exit 1）；正式状态 pre/post 指纹一致。
+- 遗留（已在本节修正）：`ruff format --check .` 的 1 个待重排文件是**本次验收方自己上一轮引入**的（`tests/unit/test_bootstrap_sync.py` 的长断言行），已拆行修正；另把验收方遗留的未跟踪文件 `var/industry-map-2026-09-18.csv` 移入已被忽略的 `var/benchmarks/`。
+- 待所有者裁决（见 `BLOCKED.md` 第三节）：是否单独处理 `data/watchlist/` 目录缺失的口径、是否解决脚本层 `tmp_path` 不可用的环境问题。
