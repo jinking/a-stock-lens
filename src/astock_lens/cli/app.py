@@ -64,6 +64,10 @@ from astock_lens.data.sync import (
     read_raw_rows,
     read_symbols,
 )
+from astock_lens.discovery import (
+    StrategyScreenQuery,
+    screen_strategy,
+)
 from astock_lens.domain.enums import SnapshotKind, WatchlistState
 from astock_lens.factors.config import FactorConfig, load_factor_config
 from astock_lens.factors.contracts import FactorResult
@@ -124,6 +128,7 @@ DEFAULT_UNIVERSE_CONFIG = Path("configs/universe.yaml")
 DEFAULT_STRATEGY_CONFIG_DIR = Path("configs/strategies")
 
 STRATEGY_CONFIG_PATH = Path("configs/strategies/momentum.yaml")
+LOW_COVERAGE_WARNING_RATIO = 0.90
 
 # A bare trade date means the A-share close on that day.
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -786,6 +791,87 @@ def stock(symbol: str, as_of: Annotated[str, AS_OF_OPTION]) -> None:
     entry = _watchlist_store().read(symbol)
     if entry is not None:
         _echo_entry(entry)
+
+
+@app.command()
+def screen(
+    strategy: Annotated[str, typer.Argument(help="Strategy id to screen.")],
+    as_of: Annotated[str, AS_OF_OPTION],
+    top: Annotated[
+        int, typer.Option("--top", help="Maximum number of candidates to show.")
+    ] = 20,
+    min_percentile: Annotated[
+        float | None,
+        typer.Option(
+            "--min-percentile", help="Minimum percentile threshold [0.0, 1.0]."
+        ),
+    ] = None,
+    all_results: Annotated[
+        bool,
+        typer.Option("--all-results", help="Include non-eligible symbols."),
+    ] = False,
+) -> None:
+    """Screen stored strategy evaluation results.
+
+    Only reads SnapshotKind.STRATEGY from the snapshot store.
+    No provider access, no factor or scanner recomputation, and no snapshot writing.
+    """
+    day = _as_of(as_of)
+    records = _snapshot_records(SnapshotKind.STRATEGY, day, StrategyResult)
+    if not records:
+        typer.echo(
+            f"no STRATEGY snapshot for {as_of}\n"
+            f"run `astock daily --as-of {as_of} --allow-incomplete` first",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        screened = screen_strategy(
+            records,
+            StrategyScreenQuery(
+                strategy_id=strategy,
+                limit=top,
+                eligible_only=not all_results,
+                min_percentile=min_percentile,
+            ),
+        )
+    except ValueError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+
+    if screened.coverage.total_count == 0:
+        typer.echo(
+            f"strategy '{strategy}' has no stored results for {as_of}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    typer.echo(f"{strategy} — {as_of}")
+    c = screened.coverage
+    typer.echo(
+        f"coverage: total={c.total_count} eligible={c.eligible_count} "
+        f"scored={c.scored_count} ranked={c.ranked_count}"
+    )
+    if (
+        c.total_count > 0
+        and (c.scored_count / c.total_count) < LOW_COVERAGE_WARNING_RATIO
+    ):
+        typer.echo(
+            f"coverage warning: only {c.scored_count}/{c.total_count} "
+            f"stored results have a score; ranking reflects available data"
+        )
+    typer.echo(f"showing: {len(screened.items)}")
+    for item in screened.items:
+        score_text = f"{item.score:.2f}" if item.score is not None else "None"
+        percentile_text = (
+            f"{item.rank_percentile:.4f}"
+            if item.rank_percentile is not None
+            else "None"
+        )
+        typer.echo(
+            f"  {item.rank}  {item.symbol}  score={score_text}  percentile={percentile_text}"
+        )
 
 
 @app.command()
