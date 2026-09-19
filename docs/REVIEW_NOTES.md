@@ -1501,3 +1501,54 @@ uv run python scripts/capture_research_baseline.py \
    - 状态码：`404 Not Found`
    - 返回详情：`{"detail": "no CANDIDATE snapshot for 2026-09-17"}`。
    - 验证结论：由于 Candidate 阶段因绝对质量门槛与 Market Validation 依赖而安全阻断，未写出快照，查询端点严格返回 404，不静默返回空列表或假成功。
+
+## 三十、股票发现 MVP 最终验证与停机门禁（Task 8，2026-09-19）
+
+本节记录股票发现 MVP 最终验证（Task 8）的完整质量检查证据与停机门禁确认。
+
+### 30.1 仓库全量检查结果（Step 1）
+
+在当前支持的工作环境下执行全套仓库门禁检查，实测结果如下：
+
+1. **快速回归与领域测试 (`make test-fast PYTHONPATH=`)**：
+   `955 passed, 10 warnings in 70.71s (0:01:10)`，退出码 0。
+2. **代码风格与规则检查 (`uv run ruff check .`)**：
+   `All checks passed!`，退出码 0。
+3. **格式检查 (`uv run ruff format --check .`)**：
+   `230 files already formatted`，退出码 0。
+4. **严格类型检查 (`uv run mypy`)**：
+   `Success: no issues found in 115 source files`，退出码 0。
+5. **Git 空白与冲突检查 (`git diff --check`)**：
+   无任何输出，退出码 0。
+6. **全市场压力测试 (`uv run --no-sync pytest tests/stress -v`)**：
+   `4 passed in 62.24s (0:01:02)`，4 项标的规模收敛与断点续跑压力属性测试全绿，退出码 0。
+7. **全量回归测试 (`PYTHONPATH= uv run --no-sync pytest -q`)**：
+   `959 passed, 10 warnings in 131.69s (0:02:11)`，全套 959 项测试无一失败、无一跳过，退出码 0。
+
+### 30.2 语义隔离与防泄露审计（Step 2 & Step 3）
+
+1. **严禁跨策略综合打分泄漏（Cross-Strategy Score Leakage Scan）**：
+   执行 `rg -n "global_score|combined_strategy_score|cross_strategy_score" src configs`：
+   输出 0 行匹配（退出码 1），确认未引入任何跨策略大乱斗加权或全局综合分。
+2. **严禁未授权资格生产配置（Production Qualification Config Scan）**：
+   执行 `find configs -maxdepth 2 -type f -path '*/qualifications/*' -print`：
+   输出 0 项（退出码 0），`configs/` 目录保持为 `app.yaml`、`factors/`、`market_regime.yaml`、`providers.yaml`、`strategies/`、`universe.yaml`，绝对质量门槛生产配置未被自行发明。
+3. **API 计算隔离审计（API Computation Engine Isolation）**：
+   执行 `rg -n "astock_lens\.pipelines|build_scanner|strategy_stage|factor_stage|run_analysis" src/astock_lens/api`：
+   输出 0 行匹配（退出码 1）；测试 `test_api_never_imports_the_computation_engines` 自动化断言通过，确认 API 仅读取已有快照，绝对不导入或调用因子与策略计算引擎。
+4. **选股只读保证审计（Screen CLI Read-Only Guarantee）**：
+   测试 `test_screen_read_only_guarantee` 基于目录树 SHA256 指纹比对通过，确认 `astock screen` 执行前后快照目录（`snapshots`）、自选目录（`watchlist`）与作业目录（`jobs`）无任何新增、修改或删除。
+
+### 30.3 停机门禁确认（Mandatory Stop Gate）
+
+股票发现 MVP 现已完整可用，覆盖 CLI `astock screen` 与 API 端点 `/strategies`、`/strategies/{id}/results`、`/stocks/{symbol}`。
+根据架构原则与停机门禁要求，严格禁止越界推进以下后续阶段工作：
+- 严禁自行发明或创建六策略绝对质量生产门槛配置；
+- 严禁将策略顶部选股结果直接升级或包装为 `Candidate` 对象；
+- 严禁合成假 `MarketValidation.NEUTRAL` 或假 `Signal.NO_SIGNAL`；
+- 严禁将选股结果宣称为“买入推荐”或提供买卖结论；
+- 严禁初始化 React Web 页面；
+- 严禁擅自修改策略打分权重；
+- 严禁在缺乏真实数据时臆造估值数据来修补 Value/GARP。
+
+所有后续工作必须遵循 ROADMAP 明确划分的 P1–P5 独立阶段，经项目所有者审定后方可启动。

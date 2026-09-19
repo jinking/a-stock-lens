@@ -4,12 +4,15 @@
 每完成一项就勾掉并补上提交号；每次出现新的未决事项，先记到这里或
 `docs/REVIEW_NOTES.md`，不要留在对话里。
 
-**状态快照（2026-09-19 股票发现 MVP 立项与真实基线锁定，`0876b2a`，913 tests 全绿）**
+**状态快照（2026-09-19 股票发现 MVP 完成与候选停机门禁锁定，959 tests 全绿）**
 
-本行基线由 `uv run --no-sync pytest tests/unit tests/contract tests/integration tests/artifacts -q` 于提交前实测得出（`913 passed, 10 warnings in 69.39s`）。
+本行基线由 `PYTHONPATH= uv run --no-sync pytest -q` 于提交前实测得出（`959 passed, 10 warnings in 131.69s`，含 4 项全市场压力属性测试全部通过）。
 已固化研究分析基线证据：Research Universe = 2,303 只，FactorResult = 55,272 条，StrategyResult = 13,818 条。
-Growth / Momentum / Quality / Dividend 已具备大规模真实排序能力；Value / GARP 仍受估值覆盖限制；Industry Trend 因打分口径未定保持阻塞。
-当前进入 Stock Discovery MVP 落地：见 `docs/superpowers/specs/2026-09-19-stock-discovery-mvp-design.md` 与 `docs/superpowers/plans/2026-09-19-stock-discovery-mvp-implementation-plan.md`。
+股票发现 MVP 现已完整实现并验收通过：
+- CLI 提供只读策略选股命令 `astock screen <strategy> [--as-of] [--top] [--min-percentile] [--all-results]`；
+- API 提供只读策略榜单 `/strategies/{id}/results`、策略覆盖概览 `/strategies` 与单股研究画像 `/stocks/{symbol}`；
+- 架构与数据契约严格遵守只读隔离，绝不重算因子或策略，零状态突变；单股画像中的 `candidate_status` 严格如实呈现（未发布快照时显式返回 `"not_published"`，`/candidates` 严格返回 404，绝不捏造假候选）。
+当前严格执行停机门禁（Stop Gate），后续按 P1–P5 严格分阶段推进。
 
 | 层 | 现状 |
 | --- | --- |
@@ -18,8 +21,9 @@ Growth / Momentum / Quality / Dividend 已具备大规模真实排序能力；Va
 | 因子 | 24 个配置（技术/流动性 + 基本面 + 估值） |
 | 策略 | 7 个配置，**6 个在打分**（等权，均已评审，各自独立 Scanner 类），1 个待行业数据 |
 | 执行链 | 唯一分析执行链 `pipelines/analysis.py`；正式快照只有 `astock daily` 能写 |
+| 发现 | **股票发现 MVP 已完成**（服务层、CLI `screen` 命令、API 策略榜单与单股画像已打通，只读无副作用） |
 | 候选 | `BUILD_CANDIDATES` 保持 `BLOCKED`：入选规则未批准 + Market/Signal 未实现 |
-| 接口 | CLI 10 条命令；API 5 个路由；Web 只有 `web/README.md` |
+| 接口 | CLI 11 条命令；API 8 个路由；Web 只有 `web/README.md` |
 
 ---
 
@@ -65,7 +69,7 @@ ResearchRequest → DeepResearchAdapter` 逐项对照：
 - [ ] **第 7 个 Scanner：Industry Trend**。行业 membership 已可用；缺口是行业聚合指标、Industry Trend 打分口径及对应实现仍未批准/完成。
 - [ ] **Market Regime / Market Validation / Signal 三个模块**：契约已就位，实现被上面第一节的阈值阻塞。
 - [ ] **Web 六个页面**：Today / Screener / Strategy / Stock Profile / Watchlist / Data Health（`web/README.md` 只有规划）。
-- [ ] **API 补齐**：当前 5 个路由（health/universe/factors/candidates/watchlist），还缺 Stock Profile、Data Health、Market Regime、Signal 等查询面。
+- [ ] **API 补齐**：当前 8 个路由（health/universe/factors/candidates/watchlist/strategies/strategies_results/stocks），Stock Profile 与策略榜单已补齐，还缺 Data Health、Market Regime、Signal 等查询面。
 - [ ] **深研 Adapter 实际接线**：`CliDeepResearchAdapter` 已实现且未配置时报错，但还没接上深研仓库的真实入口（`ASTOCK_DEEP_RESEARCH_CMD`）。
 - [ ] **Normalized Parquet 层 + 业务状态切 DuckDB**：2026-09-18 所有者给出四层裁决
   （Raw 继续 CSV / 分析数据走 Parquet / 快照·Watchlist·Job 走 DuckDB / JSON 只留给
@@ -141,30 +145,28 @@ ResearchRequest → DeepResearchAdapter` 逐项对照：
 策略边界已经回到各自的类里；也不再需要讨论"局部命令是否该写快照"——写入权只有
 `daily` 一条路径。
 
-## 八、下一阶段入口（建议按顺序拆成三个独立计划）
+## 八、下一阶段入口（严格分阶段推进）
 
-不要一次把剩余 Roadmap 塞给一个 Agent，按下面的切分走：
+股票发现 MVP 已完成，策略选股与研究画像已可用于日常分析。
+**正式候选发布（Candidate Publishing）依然被既定产品门禁安全阻断**。
+后续工作必须严格按以下 P1–P5 独立阶段依次推进，严禁提前跨越：
 
-### Plan B — Candidate & Strategy Semantics
+### P1：补齐 Value / GARP 估值覆盖（complete valuation coverage for Value/GARP）
+- **前提**：确认估值数据源获取路径（如按板块迭代或专用批量接口获取 PE TTM、PB、PEG）。
+- **目标**：将研究池与全市场的估值覆盖率从当前的个位数提升至全池级别，使 Value / GARP 具备与其他策略同等级别的横截面打分与排序能力。
 
-- 前提：所有者批准 Candidate Qualification（第一节第一条）、Growth 极值稳健化、
-  Dividend payout shape、PEG 处理规则。
-- 目标：让"5,500 只 StrategyResult → 少量 Research Candidate"的产品语义真正成立，
-  并建立策略特征化 / Golden Dataset。
+### P2：审定真实校准证据并批准六策略绝对质量门槛（review real calibration evidence and approve six absolute qualification rules）
+- **前提**：基于已提交的全量研究池真实分析产物与校准报告（`astock calibrate candidates`）。
+- **目标**：由项目所有者审定六个策略（Value / Growth / GARP / Quality / Dividend / Momentum）的绝对质量门槛生产配置，杜绝主观臆造。
 
-### Plan C — Full-Market Data Scale
+### P3：实现并批准市场研判与信号模块（implement/approve Market Regime, Market Validation, Signal）
+- **前提**：第一节里 Market Regime（五状态）、Market Validation（五项检验）、Signal（五类形态信号）的判定规则与输入阈值全部获批。
+- **目标**：实现 `regime`、`market_validation` 与 `signals` 模块，为候选生成提供真实的市场上下文输入与一票否决能力。
 
-- 目标：Parquet 落地、按标的/批次惰性读取（当前全市场归一化峰值约 2.9 GB）、
-  全市场日线与估值的批量路径、10 分钟日扫目标。
+### P4：打通正式候选发布链路（wire real Candidate publishing）
+- **前提**：P1–P3 门禁全部就绪。
+- **目标**：在 `pipelines/daily.py` 与 `pipelines/analysis.py` 中打通 `BUILD_CANDIDATES` 阶段，产生正式经过横截面代表性选择、绝对质量门槛与一票否决校验的 `CANDIDATE` 快照。
 
-### Plan D — Market Lifecycle & Product Surface
-
-- 目标：Industry Trend → Market Regime → Market Validation → Signal → Candidate →
-  Watchlist → Deep Research → API → React 六页面。
-- 前提：第一节里 Market Regime / Market Validation / Signal 的阈值全部获批。
-
-- [x] **研究池范围与门槛（2026-09-18，所有者决定）**：`exchanges` 只保留 SSE/SZSE（北交所日线
-  在现用接口上取不到），`min_average_turnover_20d` 由 2,000 万上调至 **1.5 亿**，研究池落在
-  **2,303 只**（目标 2,000–3,000）。财务三大表已用 westock 批量落地覆盖全池；见
-  `docs/REVIEW_NOTES.md` 第十九节。
-- [ ] **估值数据（neodata）**：`value` / `garp` 仍受估值覆盖限制（目前仅个位数标的可打分，依赖 neodata PE/PB/PEG 估值指标落地）；行业 membership 虽然已就位，但全市场/研究池估值批量落地路径仍待决策/打通。
+### P5：围绕正式候选构建 Today 概览与 Web 界面（build Today/Web around formal Candidate）
+- **前提**：P4 产出真实、受信任的 `Candidate` 记录。
+- **目标**：构建围绕正式候选的 Today 概览（CLI `astock today` 与对应 API 端点），进而构建完整的 Web 六页面界面（Today / Screener / Strategy / Stock Profile / Watchlist / Data Health）。
