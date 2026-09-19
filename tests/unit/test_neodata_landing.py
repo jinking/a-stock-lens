@@ -2,9 +2,13 @@
 
 落地的形状决定了时点能不能复现，因此这里钉住三件事：
 
-- 文件按"数据集 + 取数日"命名，同一天重跑覆盖、不同天各自留档；
+- 文件按"数据集 + 取数日"命名，同一天重跑按块身份合并、不同天各自留档；
 - 内容是逐字文本块，读回来一模一样（含多行）；
 - 未来日期的文件不会被选到——"今天看不见明天的答案"由文件选择保证。
+
+为什么同一天从"整天覆盖"改成"按块身份合并"：批量补抓必然分多轮执行
+（实测源端一批只回 1–2 只），整天覆盖会让后一轮冲掉前一轮已落地的标的。
+合并后仍然幂等——同一标的/板块当天重抓，旧块被新块替换，不会出现两份。
 """
 
 import json
@@ -117,10 +121,63 @@ def test_the_same_day_replaces_and_another_day_is_kept(local_tmp: Path) -> None:
 
     _, rows = read_raw_rows(local_tmp / "neodata" / "valuation" / "2026-09-17.csv")
 
-    assert len(rows) == len(_blocks("industry"))  # 同一天被覆盖
+    # 两块身份不同（标的 000568.SZ / 板块 01801125.PT），因此是并集而不是覆盖。
+    assert len(rows) == len(_blocks("valuation")) + len(_blocks("industry"))
     assert latest_neodata_file(
         local_tmp, "valuation", as_of=datetime(2026, 9, 18, 15, 0, tzinfo=UTC)
     ) == (local_tmp / "neodata" / "valuation" / "2026-09-17.csv")
+
+
+def _valuation_block(symbol: str, pe: str) -> tuple[str, str, str]:
+    """一条最小可辨识的估值内容块：身份由标的代码决定。"""
+    return (
+        "统一估值查询",
+        "统一估值查询",
+        f"**标的代码（统一输出字段名）**: {symbol}\n\n  **滚动市盈率（倍）**: {pe}\n",
+    )
+
+
+def test_a_second_landing_the_same_day_keeps_the_first_batch(local_tmp: Path) -> None:
+    """多轮补抓：第二轮只带来自己的标的，第一轮的标的必须还在。"""
+    _land(local_tmp, (_valuation_block("600519.SH", "19.31"),))
+    _land(local_tmp, (_valuation_block("000001.SZ", "5.18"),))
+
+    _, rows = read_raw_rows(local_tmp / "neodata" / "valuation" / "2026-09-17.csv")
+
+    symbols = {row[2].split("**:", 1)[1].split("\n", 1)[0].strip() for row in rows}
+    assert symbols == {"600519.SH", "000001.SZ"}
+    assert len(rows) == 2
+
+
+def test_relanging_the_same_symbol_replaces_only_its_own_block(
+    local_tmp: Path,
+) -> None:
+    """同一天对同一标的重抓：旧块被替换，别的标的块不受影响。"""
+    _land(local_tmp, (_valuation_block("600519.SH", "19.31"),))
+    _land(
+        local_tmp,
+        (_valuation_block("600519.SH", "20.00"), _valuation_block("000001.SZ", "5.18")),
+    )
+
+    _, rows = read_raw_rows(local_tmp / "neodata" / "valuation" / "2026-09-17.csv")
+    by_symbol = {
+        row[2].split("**:", 1)[1].split("\n", 1)[0].strip(): row for row in rows
+    }
+
+    assert len(rows) == 2
+    assert "20.00" in by_symbol["600519.SH"][2]
+    assert "19.31" not in by_symbol["600519.SH"][2]
+
+
+def test_replaying_the_same_blocks_does_not_double_count(local_tmp: Path) -> None:
+    """重放同一份响应是幂等的：块身份相同，行数不变。"""
+    rows = _blocks("valuation")
+    _land(local_tmp, rows)
+    _land(local_tmp, rows)
+
+    _, landed = read_raw_rows(local_tmp / "neodata" / "valuation" / "2026-09-17.csv")
+
+    assert landed == rows
 
 
 def test_a_failed_fetch_writes_nothing_and_names_the_gap(local_tmp: Path) -> None:

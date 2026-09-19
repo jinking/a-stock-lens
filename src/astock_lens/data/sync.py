@@ -20,7 +20,9 @@ trustworthy:
 """
 
 import csv
+import json
 import os
+import re
 import tempfile
 from collections.abc import Sequence
 from datetime import date, datetime
@@ -43,6 +45,14 @@ DEFAULT_SECURITIES_DATASET = "securities"
 
 # neodata 的落地根目录：`<raw_root>/neodata/<dataset>/<取数日>.csv`。
 NEODATA_ROOT = "neodata"
+
+# neodata 内容块里用来判定"这一块讲的是谁"的标签。标的优先，板块次之，
+# 两者都没有时退回整块内容（只去重，不覆盖）。
+NEODATA_SYMBOL_LABEL = "标的代码（统一输出字段名）"
+NEODATA_BOARD_LABEL = "板块代码"
+NEODATA_LABEL_PATTERN = re.compile(
+    r"\*\*(?P<label>[^*\n]+)\*\*\s*[:：]\s*(?P<value>[^\s]+)"
+)
 
 # Financial statements are keyed the way their source keys them: the CLI's
 # instrument code and the report period. `EndDate` is the period the numbers
@@ -137,6 +147,38 @@ def read_symbols(path: Path, *, column: str = SYMBOL_COLUMN) -> tuple[str, ...]:
     return tuple(
         sorted({row[index] for row in rows if len(row) > index and row[index]})
     )
+
+
+def read_universe_symbols(path: Path) -> tuple[str, ...]:
+    """读研究池名单：JSON 的 `research_symbols`，或 CSV 的 `symbol` 列。
+
+    名单必须显式且非空：文件缺失、外壳不认识、列不在、解析出来是空的，全部报错。
+    把"读不到名单"退化成空名单，会让一次补抓看起来跑过了，实际一只都没问——
+    这正是"不许静默兜底"要挡的东西。
+    """
+    if not path.is_file():
+        raise FileNotFoundError(f"研究池名单不存在：{path}")
+
+    if path.suffix.lower() == ".json":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict) or not isinstance(
+            payload.get("research_symbols"), list
+        ):
+            raise ValueError(
+                f"研究池 JSON 必须是一个带 research_symbols 列表的对象：{path}"
+            )
+        raw_symbols = [str(item).strip() for item in payload["research_symbols"]]
+    else:
+        columns, rows = read_raw_rows(path)
+        if SYMBOL_COLUMN not in columns:
+            raise ValueError(f"研究池 CSV 必须带 {SYMBOL_COLUMN} 列：{path}")
+        index = columns.index(SYMBOL_COLUMN)
+        raw_symbols = [row[index].strip() for row in rows if len(row) > index]
+
+    ordered = tuple(dict.fromkeys(symbol for symbol in raw_symbols if symbol))
+    if not ordered:
+        raise ValueError(f"研究池名单是空的：{path}")
+    return ordered
 
 
 def land_financial_statements(
@@ -315,10 +357,18 @@ def land_neodata_blocks(
 
     - 内容块是**逐字文本**（含多行 Markdown），合并进一张表会破坏溯源，
       也说不清"这一行是哪天问来的"；
-    - 同一取数日重跑即覆盖，天然幂等；
+    - 同一取数日重跑按**块身份**合并，天然幂等（见下）；
     - 时点选择退化成"取不晚于 `as_of` 的最新一天"，与快照复现的原则一致。
 
     文件名即取数日，所以一次运行不会覆盖另一天的答案。
+
+    为什么不是整天覆盖：实测源端一批只回 1–2 只，把 2,303 只补齐必然要分多轮执行。
+    整天覆盖会让后一轮冲掉前一轮已经落地的标的，而文件本身看起来完全正常——
+    这是最坏的一种失败（静默丢数据）。因此写入改为按块身份合并：
+
+    - 身份 = （块类型，标的代码 | 板块代码 | 整块内容）；
+    - 同身份的新块替换旧块（同一天对同一标的重抓仍然是幂等的）；
+    - 不同身份的块取并集（分批补抓互不干扰）。
     """
     if not values:
         raise ValueError("落地 neodata 数据需要至少一个查询值")
@@ -339,21 +389,76 @@ def land_neodata_blocks(
             note=raw.message or raw.status.value,
         )
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as stream:
-        writer = csv.writer(stream, lineterminator="\n")
-        writer.writerow(payload.columns)
-        writer.writerows(payload.rows)
+    existing_columns, existing_rows = read_raw_rows(path)
+    columns = _neodata_columns(payload.columns, existing_columns)
+    merged = _merge_neodata_blocks(
+        payload_columns=payload.columns,
+        payload_rows=payload.rows,
+        existing_columns=existing_columns,
+        existing_rows=existing_rows,
+        target_columns=columns,
+    )
+    _atomic_write_rows(path, columns, merged)
 
     return DatasetLanding(
         dataset=dataset,
         path=path,
         status=DataStatus.VALUE,
         rows_written=len(payload.rows),
-        rows_total=len(payload.rows),
+        rows_total=len(merged),
         symbols_missing=raw.missing_symbols,
         note=raw.message,
     )
+
+
+def _neodata_columns(
+    payload_columns: Sequence[str], existing_columns: Sequence[str]
+) -> tuple[str, ...]:
+    """目标列：载荷列在前，文件里多出来的列按原顺序接在后面。"""
+    target = list(payload_columns)
+    for name in existing_columns:
+        if name not in target:
+            target.append(name)
+    return tuple(target)
+
+
+def _merge_neodata_blocks(
+    *,
+    payload_columns: Sequence[str],
+    payload_rows: Sequence[Sequence[str]],
+    existing_columns: Sequence[str],
+    existing_rows: Sequence[Sequence[str]],
+    target_columns: Sequence[str],
+) -> tuple[tuple[str, ...], ...]:
+    """按块身份合并：同身份替换，不同身份取并集，首次出现的顺序保持。"""
+    merged: dict[tuple[str, str], tuple[str, ...]] = {}
+    order: list[tuple[str, str]] = []
+    for rows, columns in (
+        (existing_rows, existing_columns or target_columns),
+        (payload_rows, payload_columns),
+    ):
+        for row in rows:
+            padded = _pad(tuple(row), columns, target_columns)
+            identity = _neodata_block_identity(padded)
+            if identity not in merged:
+                order.append(identity)
+            merged[identity] = padded
+    return tuple(merged[identity] for identity in order)
+
+
+def _neodata_block_identity(row: Sequence[str]) -> tuple[str, str]:
+    """一个内容块的身份：优先标的代码，其次板块代码，最后退回整块内容。"""
+    block_type = row[0] if len(row) > 0 else ""
+    content = row[2] if len(row) > 2 else ""
+    labels = {
+        match.group("label"): match.group("value")
+        for match in NEODATA_LABEL_PATTERN.finditer(content)
+    }
+    for label in (NEODATA_SYMBOL_LABEL, NEODATA_BOARD_LABEL):
+        value = labels.get(label)
+        if value:
+            return (block_type, value)
+    return (block_type, content)
 
 
 def latest_neodata_file(root: Path, dataset: str, *, as_of: datetime) -> Path | None:

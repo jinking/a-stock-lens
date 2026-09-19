@@ -27,6 +27,7 @@ from astock_lens.calibration.candidate_report import (
 )
 from astock_lens.calibration.factor_distribution import CalibrationPopulation
 from astock_lens.calibration.render import render_json, render_markdown
+from astock_lens.calibration.valuation_coverage import valuation_coverage
 from astock_lens.candidates.models import Candidate
 from astock_lens.data.bootstrap import (
     bootstrap_liquidity_history,
@@ -63,6 +64,7 @@ from astock_lens.data.sync import (
     read_industry_memberships,
     read_raw_rows,
     read_symbols,
+    read_universe_symbols,
 )
 from astock_lens.discovery import (
     StrategyScreenQuery,
@@ -1141,6 +1143,236 @@ def industry_export_map(
         for symbol in sorted(mapping):
             writer.writerow((symbol, mapping[symbol]))
     typer.echo(f"industry map: {len(mapping)} symbols written to {output}")
+
+
+def _valuation_strategy_configs() -> tuple[StrategyConfig, ...]:
+    """读策略目录里的全部策略配置；覆盖报告按 `required_factors` 判定，不认策略名。"""
+    return tuple(
+        load_strategy_config(path) for path in sorted(_strategy_dir().glob("*.yaml"))
+    )
+
+
+def _covered_valuation_symbols(day: datetime) -> frozenset[str]:
+    """当前落地的估值里，真正带值的标的（缺值是缺值，不是 0）。"""
+    inputs = stages.valuation_inputs(_csv_root(), as_of=day)
+    return frozenset(
+        item.symbol for item in inputs.observations if item.value is not None
+    )
+
+
+@app.command("valuation-coverage")
+def valuation_coverage_command(
+    as_of: Annotated[str, AS_OF_OPTION],
+    universe: Annotated[
+        Path,
+        typer.Option(
+            "--universe",
+            help="研究池名单：JSON 的 research_symbols，或 CSV 的 symbol 列。",
+        ),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", help="把完整报告写成 JSON；不写则只打印摘要。"),
+    ] = None,
+) -> None:
+    """核对估值字段与策略估值侧因子在研究池上的覆盖（只读）。
+
+    分母是 `--universe` 给出的研究池名单。缺名单直接报错：拿"已落地的标的"
+    当分母会把覆盖率算成 100%，那正是这份报告要防的错觉。
+    """
+    day = _as_of(as_of)
+    try:
+        symbols = read_universe_symbols(universe)
+    except (OSError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+
+    inputs = stages.valuation_inputs(_csv_root(), as_of=day)
+    try:
+        report = valuation_coverage(
+            inputs.observations,
+            as_of=day,
+            universe=symbols,
+            strategy_configs=_valuation_strategy_configs(),
+            factor_configs=_factor_configs(),
+        )
+    except ValueError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"as_of: {day.isoformat()}")
+    typer.echo(
+        f"source: {inputs.source_file if inputs.source_file else '未落地任何估值数据'}"
+    )
+    typer.echo(f"研究池: {report.universe_size} 只")
+    typer.echo(
+        f"有任意估值: {len(report.covered_symbols)} / {report.universe_size}"
+        f"（缺口 {len(report.uncovered_symbols)} 只）"
+    )
+    for metric in report.metrics:
+        typer.echo(
+            f"  字段 {metric.metric}: {len(metric.symbols_with_value)} 只"
+            f"（{metric.ratio:.4f}）"
+        )
+    for factor in report.factors:
+        typer.echo(
+            f"  因子 {factor.factor}: {len(factor.symbols_with_value)} 只"
+            f"（{factor.ratio:.4f}）"
+        )
+    for strategy in report.strategies:
+        if not strategy.valuation_factors:
+            continue
+        blocking = "、".join(
+            f"{name} 缺 {count}" for name, count in strategy.blocking_factors
+        )
+        typer.echo(
+            f"  策略 {strategy.strategy_id}: 估值侧可打分 {len(strategy.scoreable_symbols)}"
+            f" / {report.universe_size}；缺口按因子：{blocking}"
+        )
+
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            json.dumps(report.to_payload(), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        typer.echo(f"report: {output}")
+
+
+@app.command("sync-valuation")
+def sync_valuation(
+    as_of: Annotated[str, AS_OF_OPTION],
+    universe: Annotated[
+        Path,
+        typer.Option(
+            "--universe",
+            help="研究池名单：JSON 的 research_symbols，或 CSV 的 symbol 列。",
+        ),
+    ],
+    max_rounds: Annotated[
+        int,
+        typer.Option(
+            "--max-rounds",
+            help="最多补抓几轮；每轮只请求仍然缺的标的。技术上限，不是产品阈值。",
+        ),
+    ] = 2,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", help="只处理名单前 N 只，用于小规模探针。"),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", help="把本轮清单写成 JSON（含剩余缺口）。"),
+    ] = None,
+) -> None:
+    """按缺口批量补抓估值：多轮、可重跑、缺口显式。
+
+    实测源端一批只回 1–2 只，因此补齐必须分多轮。三条纪律写在这里：
+
+    - 每轮只请求"仍缺"的标的，已覆盖的不会重复问；
+    - 落地按块身份合并，后一轮不会冲掉前一轮（见 `land_neodata_blocks`）；
+    - 一轮没有带来任何新标的就停下，并把剩余缺口原样报出——缺口不是成功。
+    """
+    day = _as_of(as_of)
+    if max_rounds <= 0:
+        raise typer.BadParameter("--max-rounds 必须为正")
+    if limit is not None and limit <= 0:
+        raise typer.BadParameter("--limit 必须为正")
+
+    try:
+        wanted = read_universe_symbols(universe)
+    except (OSError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    if limit is not None:
+        wanted = wanted[:limit]
+
+    provider = _neodata_provider()
+    health = provider.health()
+    if not health.healthy:
+        typer.echo(
+            f"provider {health.provider} is not usable: {health.message}", err=True
+        )
+        raise typer.Exit(code=1)
+
+    typer.echo(f"研究池: {len(wanted)} 只（as_of {day.date().isoformat()}）")
+    rounds: list[dict[str, object]] = []
+    stopped = "max_rounds"
+    for index in range(1, max_rounds + 1):
+        covered = _covered_valuation_symbols(day)
+        missing = tuple(symbol for symbol in wanted if symbol not in covered)
+        if not missing:
+            stopped = "covered"
+            typer.echo(f"round {index}: 已全覆盖，无需请求")
+            break
+
+        landing = land_neodata_blocks(
+            provider=provider,
+            root=_csv_root(),
+            dataset="valuation",
+            values=missing,
+            as_of=day,
+        )
+        after = _covered_valuation_symbols(day)
+        landed = tuple(symbol for symbol in missing if symbol in after)
+        still_missing = tuple(symbol for symbol in wanted if symbol not in after)
+        rounds.append(
+            {
+                "round": index,
+                "requested": len(missing),
+                "landed": len(landed),
+                "missing": len(still_missing),
+                "status": landing.status.value,
+                "note": landing.note,
+            }
+        )
+        typer.echo(
+            f"round {index}: 请求 {len(missing)} 只，落地 {len(landed)} 只，"
+            f"仍缺 {len(still_missing)} 只（{landing.status.value}）"
+        )
+        if landing.note:
+            typer.echo(f"  note: {landing.note}", err=True)
+        if not landed:
+            stopped = "no_progress"
+            typer.echo("本轮没有带来任何新标的，停止继续请求", err=True)
+            break
+    else:
+        stopped = "max_rounds"
+
+    covered = _covered_valuation_symbols(day)
+    missing_symbols = tuple(symbol for symbol in wanted if symbol not in covered)
+    typer.echo(
+        f"覆盖: {len(wanted) - len(missing_symbols)} / {len(wanted)}；"
+        f"缺口 {len(missing_symbols)} 只；停止原因 {stopped}"
+    )
+
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            json.dumps(
+                {
+                    "dataset": "valuation",
+                    "as_of": day.isoformat(),
+                    "requested_symbols": list(wanted),
+                    "covered_symbols": [
+                        symbol
+                        for symbol in wanted
+                        if symbol not in set(missing_symbols)
+                    ],
+                    "missing_symbols": list(missing_symbols),
+                    "stop_reason": stopped,
+                    "rounds": rounds,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        typer.echo(f"report: {output}")
+
+    if missing_symbols:
+        raise typer.Exit(code=1)
 
 
 @app.command("sync-research")
