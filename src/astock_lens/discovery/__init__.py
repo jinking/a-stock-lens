@@ -1,6 +1,8 @@
 """股票发现查询层模块。"""
 
 from astock_lens.discovery.models import (
+    StockProfileResponse,
+    StockProfileUniverse,
     StrategyCoverage,
     StrategyScreenItem,
     StrategyScreenQuery,
@@ -12,6 +14,8 @@ from astock_lens.discovery.service import (
 )
 
 __all__ = [
+    "StockProfileResponse",
+    "StockProfileUniverse",
     "StrategyCoverage",
     "StrategyScreenItem",
     "StrategyScreenQuery",

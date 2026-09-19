@@ -58,3 +58,23 @@ class StrategyScreenResult(DomainRecord):
     strategy_id: str
     coverage: StrategyCoverage
     items: tuple[StrategyScreenItem, ...]
+
+
+class StockProfileUniverse(DomainRecord):
+    """股票池准入与剔除规则状态。"""
+
+    included: bool
+    exclusion_rules: tuple[str, ...] = ()
+
+
+class StockProfileResponse(DomainRecord):
+    """单股全景研究画像响应契约。"""
+
+    as_of: str
+    symbol: str
+    universe: StockProfileUniverse
+    factors: tuple[dict[str, object], ...] = ()
+    strategies: tuple[dict[str, object], ...] = ()
+    candidate_status: str
+    candidate: dict[str, object] | None = None
+    watchlist: dict[str, object] | None = None

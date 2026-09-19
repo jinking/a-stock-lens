@@ -15,6 +15,8 @@ from fastapi import FastAPI, HTTPException, Query
 from astock_lens.data.snapshots.resolve import resolve_snapshot_store
 from astock_lens.data.storage.paths import StoragePaths, resolve_storage_paths
 from astock_lens.discovery import (
+    StockProfileResponse,
+    StockProfileUniverse,
     StrategyCoverage,
     StrategyScreenQuery,
     StrategyScreenResult,
@@ -154,8 +156,8 @@ def create_app(
             )
         return screened
 
-    @application.get("/stocks/{symbol}")
-    def stock_profile(symbol: str, as_of: str) -> dict[str, object]:
+    @application.get("/stocks/{symbol}", response_model=StockProfileResponse)
+    def stock_profile(symbol: str, as_of: str) -> StockProfileResponse:
         """Read full research profile for one symbol on one date."""
         universe_records = _read(
             root(), SnapshotKind.UNIVERSE, as_of, database=snapshot_database()
@@ -224,19 +226,19 @@ def create_app(
         entry = store.read(symbol)
         watchlist_data = entry.model_dump(mode="json") if entry is not None else None
 
-        return {
-            "as_of": as_of,
-            "symbol": symbol,
-            "universe": {
-                "included": included,
-                "exclusion_rules": exclusion_rules,
-            },
-            "factors": symbol_factors,
-            "strategies": symbol_strategies,
-            "candidate_status": candidate_status,
-            "candidate": candidate,
-            "watchlist": watchlist_data,
-        }
+        return StockProfileResponse(
+            as_of=as_of,
+            symbol=symbol,
+            universe=StockProfileUniverse(
+                included=included,
+                exclusion_rules=tuple(exclusion_rules),
+            ),
+            factors=tuple(symbol_factors),
+            strategies=tuple(symbol_strategies),
+            candidate_status=candidate_status,
+            candidate=candidate,
+            watchlist=watchlist_data,
+        )
 
     return application
 
@@ -291,7 +293,7 @@ def _read_optional(
     dates_fn = getattr(store, "dates", None)
     if callable(dates_fn):
         stored_dates = cast("tuple[str, ...]", dates_fn(kind))
-        if as_of not in stored_dates:
+        if day.isoformat() not in stored_dates:
             return None
     records = store.read(
         kind,
