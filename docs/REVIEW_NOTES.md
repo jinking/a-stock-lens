@@ -1385,3 +1385,52 @@ uv run python scripts/capture_research_baseline.py \
 - `pyproject.toml` 增加 `[[tool.uv.index]]`（阿里云镜像，default=true）。它同时闭合了上一会话
   记为"未决隐患"的 `uv.lock` 换源问题——镜像源从"只存在于 lock"变成"有正式声明且可复现"；
 - `pytest-xdist` 装后又卸；`tests/conftest.py` 未改；`configs/**`、`data/**`、`var/**` 零改动。
+
+## 二十八、股票发现 MVP 立项与当前真实基线锁定（2026-09-19）
+
+根据项目所有者指导，正式立项 Stock Discovery MVP，消除与代码库当前真实状态的文档漂移。
+
+### 28.1 真实仓库基线记录（Fresh Baseline Evidence）
+
+于实施前实测记录本切片起点状态，绝不复用过时数字：
+
+- **Git HEAD SHA**: `0876b2aa4df9c9c72b607bcd01fc02d638fcf12c`
+- **工作区状态 (`git status --short`)**:
+  ```text
+  ?? docs/superpowers/plans/2026-09-19-stock-discovery-mvp-implementation-plan.md
+  ?? docs/superpowers/specs/2026-09-19-stock-discovery-mvp-design.md
+  ```
+  （两份规划文档就位前，工作区零脏改动）
+- **测试实测基线 (`uv run --no-sync pytest tests/unit tests/contract tests/integration tests/artifacts -q`)**:
+  `913 passed, 10 warnings in 69.39s (0:01:09)`，退出码 0，无任何失败与跳过。
+
+### 28.2 确认已提交的研究基线硬证据（Committed Baseline Evidence）
+
+复核版本库中已提交固化的研究分析基线产物（由提交 `bd5a93a` / `0111eea` 产生，落地于 `var/acceptance/baseline-20260918/analysis/`，元数据见 `manifest.json`）：
+
+- **Research Universe**: **2,303** 只（产物 `research-universe.json`，sha256: `fe817691aa0e0925115a24c507739a1bdbd2be9bbd2f86c989be8655a100e941`）
+- **FactorResult**: **55,272** 条（产物 `factors.jsonl`，sha256: `2a50747793dc78e64c721867a04922e0b762226a2b45656d6c9b2800a47a597c`）
+- **StrategyResult**: **13,818** 条（产物 `strategies.jsonl`，sha256: `15ce4f251cb4ad83b58f07eaafab69f8ffbc4bea7628644319ae44d58989cbd3`）
+- **六策略真实覆盖分布（已提交基线证据）**：
+  - `growth`: 2,302 只可打分
+  - `momentum`: 2,281 只可打分
+  - `quality`: 1,697 只可打分
+  - `dividend`: 1,612 只可打分
+  - `value`: 2 只可打分（显式受限于估值覆盖）
+  - `garp`: 1 只可打分（显式受限于估值覆盖）
+  - `industry_trend`: 0 只可打分（行业 membership 已落地 5,542 只 / 124 行业，覆盖研究池 2,294/2,303 只；打分为 0 系行业聚合指标与打分口径未获批准，属于产品规则阻塞而非数据缺失）
+
+以上数据明确标注为版本库中已提交的审计基线证据（Committed Baseline Evidence），证明代码库已具备全研究池策略打分与排序能力。
+
+### 28.3 修正 ROADMAP 文档漂移与边界锁定
+
+1. **废除"全市场仅 5 只能打分"的过时陈述**：
+   - 2026-09-18 策略长度历史（252 根 bar）与三大表批量获取已在 2,303 只研究池上落地，Growth / Momentum / Quality / Dividend 策略已具备全池级真实横截面排序能力。更新相关条目为已完成状态。
+2. **纠正 Industry Trend 阻塞口径**：
+   - 替换原"缺行业数据"口径为准确事实：`行业 membership 已可用；缺口是行业聚合指标、Industry Trend 打分口径及对应实现仍未批准/完成。`
+3. **显式保持 Value / GARP 估值覆盖限制**：
+   - 明确 Value / GARP 策略仍然受限于 neodata 估值数据（PE TTM、PB、PEG）覆盖，目前仅个位数标的可打分。
+4. **归档规范与实施方案**：
+   - 落地设计规格：`docs/superpowers/specs/2026-09-19-stock-discovery-mvp-design.md`；
+   - 落地实施计划：`docs/superpowers/plans/2026-09-19-stock-discovery-mvp-implementation-plan.md`。
+

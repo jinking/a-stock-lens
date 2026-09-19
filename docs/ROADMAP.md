@@ -4,12 +4,12 @@
 每完成一项就勾掉并补上提交号；每次出现新的未决事项，先记到这里或
 `docs/REVIEW_NOTES.md`，不要留在对话里。
 
-**状态快照（2026-09-18 研究池前置筛选落地，`main` 起点 `4d9d87e`，734 tests 全绿）**
+**状态快照（2026-09-19 股票发现 MVP 立项与真实基线锁定，`0876b2a`，913 tests 全绿）**
 
-本行数字由 `uv run pytest -q` 于提交前实测得出（`734 passed`），不再是引用旧值：
-`d964422 / 674 tests / 3 只真实数据` 这组说法已作废，替换为本轮实测。
-研究池（Research Universe）进入实现阶段：先做只读上市元数据前置筛选，再在昂贵数据补全前
-生成研究股票池，见 `docs/superpowers/plans/2026-09-18-calibration-readiness-implementation-plan.md`。
+本行基线由 `uv run --no-sync pytest tests/unit tests/contract tests/integration tests/artifacts -q` 于提交前实测得出（`913 passed, 10 warnings in 69.39s`）。
+已固化研究分析基线证据：Research Universe = 2,303 只，FactorResult = 55,272 条，StrategyResult = 13,818 条。
+Growth / Momentum / Quality / Dividend 已具备大规模真实排序能力；Value / GARP 仍受估值覆盖限制；Industry Trend 因打分口径未定保持阻塞。
+当前进入 Stock Discovery MVP 落地：见 `docs/superpowers/specs/2026-09-19-stock-discovery-mvp-design.md` 与 `docs/superpowers/plans/2026-09-19-stock-discovery-mvp-implementation-plan.md`。
 
 | 层 | 现状 |
 | --- | --- |
@@ -37,7 +37,7 @@
 - [ ] **分红支付率的形状**：实测榜首出现 1950%/274% 的支付率（动用留存收益或特别分红），当前线性加权把 1950% 与 90% 同等对待。选项：设上限 / 区间偏好 / 接受现状。
 - [ ] **Growth 极值稳健化**：榜首 `net_profit_parent_yoy` 达 71528%，百分位把 3000% 与 70000% 压成相邻名次。选项：缩尾 / 要求两端同时成立 / 接受现状。
 - [ ] **PEG 值域复核**：源站 PEG 值域是 83–1503（正常 0–5）且出现负值。选项：接受其相对排序 / 自算 `pe_ttm / net_profit_parent_cagr_3y`。
-- [ ] **Industry Trend 的行业打分口径**：行业侧指标（收入/利润增速、估值、广度）与"行业→个股"映射的权重。
+- [ ] **Industry Trend 阻塞**：行业 membership 已可用；缺口是行业聚合指标、Industry Trend 打分口径及对应实现仍未批准/完成。
 - [ ] **停牌天数数据源**：`configs/universe.yaml` 的 `long_suspension_days` 现在是 `null`（未评审），需要能提供停牌天数的数据源。
 - [ ] **`data` extra 在本机装不上（环境阻塞）**：`uv sync --extra data` 实测跑 29 分钟后因
   `files.pythonhosted.org` 拉取 `polars-runtime-32` 超时失败，**`pyarrow` / `polars` 至今未安装**。
@@ -52,7 +52,7 @@
     Normalized 层装什么（值表 + 证据 + 诊断 + 表头）、现存 JSON 的处置（任务 2.6 历史迁入
     与无损回滚出口）。
   - **仍需所有者裁决**：见上面那条 `data` extra 装不上带来的技术栈选择（PyArrow vs DuckDB 原生）。
-- [ ] **Golden Dataset 名单**：设计要求 30–50 只固定股票覆盖多行业与边界情况，清单仍是 `Deferred`。当前本机已落地的真实数据是 5 只（`000001.SZ`、`300750.SZ`、`600519.SH`、`601318.SH`、`688981.SH`），覆盖深主板/创业板/沪主板/科创板。
+- [ ] **Golden Dataset 名单**：设计要求 30–50 只固定股票覆盖多行业与边界情况，清单仍是 `Deferred`。早期固定的 5 只 golden 样本标的为 `000001.SZ`、`300750.SZ`、`600519.SH`、`601318.SH`、`688981.SH`（覆盖深主板/创业板/沪主板/科创板），全市场/研究池正式 Golden Dataset 仍待项目所有者确认。
 
 ---
 
@@ -62,7 +62,7 @@
 market validation → signals → candidate snapshot → Today → Stock Profile → WATCH →
 ResearchRequest → DeepResearchAdapter` 逐项对照：
 
-- [ ] **第 7 个 Scanner：Industry Trend**。数据侧已有（neodata 板块成分明细含每只股票 PE TTM/总市值/资金流），缺：行业数据归一化 + 板块清单来源（neodata 不枚举板块；待探 WeStock `sector ranking`）。
+- [ ] **第 7 个 Scanner：Industry Trend**。行业 membership 已可用；缺口是行业聚合指标、Industry Trend 打分口径及对应实现仍未批准/完成。
 - [ ] **Market Regime / Market Validation / Signal 三个模块**：契约已就位，实现被上面第一节的阈值阻塞。
 - [ ] **Web 六个页面**：Today / Screener / Strategy / Stock Profile / Watchlist / Data Health（`web/README.md` 只有规划）。
 - [ ] **API 补齐**：当前 5 个路由（health/universe/factors/candidates/watchlist），还缺 Stock Profile、Data Health、Market Regime、Signal 等查询面。
@@ -89,9 +89,7 @@ ResearchRequest → DeepResearchAdapter` 逐项对照：
   涨到 **4,935 只**。证据见 `docs/REVIEW_NOTES.md` 第十五~十七节。
   遗留：293 只北交所（`920xxx.BJ`）腾讯日线接口不支持，当前显式记为 `source_error` 并被排除
   出研究池，是否换端点待所有者决策。
-- [ ] **研究池的策略长度历史**（252 根 bar，`astock sync-research`）：流动性窗口（20 根）已补齐，
-  但 `proximity_52w_high` 等策略因子需要 252 根，因此目前全市场只有 5 只能被策略打分。
-  要得到全市场排序列表，需要对本轮 4,935 只研究池再跑一次策略长度历史（预计 13 分钟左右）。
+- [x] **研究池的策略长度历史**（252 根 bar，`astock sync-research`）：2026-09-18 已对 2,303 只研究池完成落地（satisfied 2,281 只），Growth / Momentum / Quality / Dividend 已具备全池/大规模策略排序能力（Growth 2,302、Momentum 2,281、Quality 1,697、Dividend 1,612 只可打分），“目前全市场只有 5 只能被策略打分”的旧限制已解除。
 - [ ] **全市场估值批量路径**：实测估值批量覆盖极低（10 只一批只回 1–2 只），单标的可靠但全市场要 5,500 次调用。可行路径是**按板块迭代**（板块成分明细一次给出整板块每只股票的总市值与 PE TTM），需要先解决板块清单来源。
 - [ ] **全市场财报的定期刷新节奏**：37 分钟/次的季度任务，尚未定"多久跑一次、失败如何补"的节奏（`Deferred`）。
 - [ ] **neodata 财务单季与 WeStock 累计口径的对齐规则**：两者数值一致（实测茅台 H1 完全相同），但单季 vs 累计需要一层对齐才能交叉验证。
@@ -169,5 +167,4 @@ ResearchRequest → DeepResearchAdapter` 逐项对照：
   在现用接口上取不到），`min_average_turnover_20d` 由 2,000 万上调至 **1.5 亿**，研究池落在
   **2,303 只**（目标 2,000–3,000）。财务三大表已用 westock 批量落地覆盖全池；见
   `docs/REVIEW_NOTES.md` 第十九节。
-- [ ] **估值数据（neodata）**：`value` / `garp` 仍只有个位数标的可打分，因为估值批量路径依赖行业映射；
-  需要先跑 `sync-industry`（westock 行业目录与成员）再按板块迭代估值。
+- [ ] **估值数据（neodata）**：`value` / `garp` 仍受估值覆盖限制（目前仅个位数标的可打分，依赖 neodata PE/PB/PEG 估值指标落地）；行业 membership 虽然已就位，但全市场/研究池估值批量落地路径仍待决策/打通。
