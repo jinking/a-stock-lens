@@ -54,7 +54,7 @@ flowchart TD
 ## 2. 阻塞项 1：Valuation Coverage（估值数据全覆盖受限）
 
 ### 2.1 代码事实与现状
-- **相关模块：** [`src/astock_lens/providers/`](file:///Users/huangjinjin/Documents/ChatGPT/a-stock-lens/src/astock_lens/providers/)、[`src/astock_lens/factors/`](file:///Users/huangjinjin/Documents/ChatGPT/a-stock-lens/src/astock_lens/factors/)、[`src/astock_lens/strategies/value.py`](file:///Users/huangjinjin/Documents/ChatGPT/a-stock-lens/src/astock_lens/strategies/value.py)、[`src/astock_lens/strategies/garp.py`](file:///Users/huangjinjin/Documents/ChatGPT/a-stock-lens/src/astock_lens/strategies/garp.py)。
+- **相关模块（路径订正：Provider 实际位于 `data/` 之下）：** [`src/astock_lens/data/providers/neodata.py`](file:///Users/huangjinjin/Documents/ChatGPT/a-stock-lens/src/astock_lens/data/providers/neodata.py)、[`src/astock_lens/data/normalize/valuations.py`](file:///Users/huangjinjin/Documents/ChatGPT/a-stock-lens/src/astock_lens/data/normalize/valuations.py)、[`src/astock_lens/factors/valuation.py`](file:///Users/huangjinjin/Documents/ChatGPT/a-stock-lens/src/astock_lens/factors/valuation.py)、[`src/astock_lens/strategies/value.py`](file:///Users/huangjinjin/Documents/ChatGPT/a-stock-lens/src/astock_lens/strategies/value.py)、[`src/astock_lens/strategies/garp.py`](file:///Users/huangjinjin/Documents/ChatGPT/a-stock-lens/src/astock_lens/strategies/garp.py)。
 - **实测数据：**
   在 2026-09-17 基线产物（`13,818` 条策略评估记录）中：
   - `Growth`：`2,302` 只可打分；
@@ -65,8 +65,21 @@ flowchart TD
   - **`GARP`**：仅 **1** 只可打分（单样本导致 `rank_percentile=None`）。
 
 ### 2.2 本质原因与阻断机理
-- **数据源缺口：** Value 与 GARP 策略高度依赖估值因子（`pe_ttm`、`pb`、`peg`、`ps_ttm`）。当前本地离线原始数据中，neodata 估值数据源仅抓取了最初 5 只试点股票的估值数据，未在 2,303 只全研究池上批量运行全量抓取。
-- **红线约束（禁止静默兜底）：** 项目底层规则明确禁止将缺失数据默认填充为 `0.0`。根据 [`DataStatus`](file:///Users/huangjinjin/Documents/ChatGPT/a-stock-lens/src/astock_lens/domain/enums.py) 规范，缺乏估值数据的因子必须记录为 `SOURCE_ERROR` 或 `NULL`。因此 Value/GARP 无法对缺少数据的 2,301 只股票进行伪造打分。
+- **数据源缺口（2026-09-19 订正）：** Value 与 GARP 高度依赖估值因子（`pe_ttm`、`pb`、`peg`、`ps_ttm`）。
+  2026-09-17 那次试点**请求了 5 只、源端只回了 2 只**（`000001.SZ`、`600519.SH`），
+  落地文件 `data/raw/neodata/valuation/2026-09-17.csv` 里确实只有这两块。
+  这不是"忘了跑全池"，而是源端的批量回答本身就是部分的（设计规格 §24.1 三条限制之二），
+  因此全池补齐必须**按缺口多轮补抓**，不能指望一次批量调用覆盖全市场。
+- **红线约束（禁止静默兜底）：** 项目底层规则明确禁止将缺失数据默认填充为 `0.0`。
+  但缺失落到的状态**不是** `SOURCE_ERROR`（订正）：按
+  [`factors/valuation.py`](file:///Users/huangjinjin/Documents/ChatGPT/a-stock-lens/src/astock_lens/factors/valuation.py)
+  的口径，"该标的从未有过这个指标"记 `NOT_APPLICABLE`；观测存在但值为空、或全部晚于 `as_of`
+  记 `NULL`；`SOURCE_ERROR` 留给整个数据集取数失败。实测 2026-09-17 基线中，
+  `pe_ttm`/`pb`/`ps_ttm`/`pe_percentile`/`pcf_operating_ttm` 各为 `VALUE=2`、
+  `NOT_APPLICABLE=2301`，`peg` 为 `VALUE=1`、`NOT_APPLICABLE=2302`。
+  两种状态都不影响结论——Value/GARP 无法对缺少数据的 2,301 只伪造打分。
+- **口径提醒：** `NOT_APPLICABLE` 目前同时承载"还没采集"与"确实不适用"两种事实，
+  扩量前需要把采集缺口单独记成证据（见 2.4 第 1 步）。
 
 ### 2.3 为什么不能提前“偷跑”？
 若在估值数据仅覆盖 2 只股票时强行生成候选：
@@ -74,9 +87,20 @@ flowchart TD
 2. **GARP 分位数失真：** 单样本无法计算横截面分位数（Percentile 需要群体分布），导致下游门槛判定直接失效。
 
 ### 2.4 解除路径（P1）
-1. 编写批量估值离线抓取脚本或扩展 Provider（如 AkShare / 专用接口），抓取全研究池 2,303 只标的的 PE/PB/PEG/股息率；
-2. 运行标准化校验，确认估值因子在研究池覆盖率达到 90% 以上；
-3. 重新生成正式因子与策略快照，使 Value 与 GARP 具备完整的全横截面排序能力。
+1. 用 `astock sync-valuation --universe <研究池文件>` 按缺口多轮补抓（2026-09-19 已实现）：
+   每轮只请求仍缺的标的，落地按块身份合并（后一轮不冲掉前一轮），
+   一轮没有新标的就停下并报出剩余缺口，缺口未闭合时退出码 1；
+2. 用 `astock valuation-coverage --universe <研究池文件> --output <报告>` 核对覆盖：
+   字段级（每个 metric 有值多少只）与因子级（策略估值侧必需因子的交集）分开报，
+   分母是显式研究池，缺失永不记 0；2026-09-19 用 2026-09-17 原始落地复算，
+   结果与研究基线一致（Value 2 只、GARP 1 只）；
+3. **覆盖率门槛待所有者签发**："90%" 只出现在本文件，设计规格 / `PRODUCT.md` /
+   `ARCHITECTURE.md` 均无出处，属 `Deferred`。且它应定义在字段级（例如
+   `pe_ttm`/`pb` 有值率）而不是"可打分比例"——负倍数、负 PEG 按语义被判
+   `NOT_APPLICABLE`，即使抓全了也不会 100% 可打分；
+4. 前置条件：neodata 凭证 12 小时有效，需在 WorkBuddy 侧刷新；
+   2026-09-19 实测本机凭证已过期（`saved_at=2026-09-18 20:07`），因此当日未发起真实请求；
+5. 覆盖补齐后再重新生成正式因子与策略快照，使 Value 与 GARP 具备完整的全横截面排序能力。
 
 ---
 

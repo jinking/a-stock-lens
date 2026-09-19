@@ -1552,3 +1552,80 @@ uv run python scripts/capture_research_baseline.py \
 - 严禁在缺乏真实数据时臆造估值数据来修补 Value/GARP。
 
 所有后续工作必须遵循 ROADMAP 明确划分的 P1–P5 独立阶段，经项目所有者审定后方可启动。
+
+## 三十一、估值覆盖扩容（P1，2026-09-19）
+
+计划：`docs/superpowers/plans/2026-09-19-valuation-coverage-implementation-plan.md`。
+本轮把"估值覆盖受限"从一句结论变成可复算的证据与可重复运行的补齐能力。
+
+### 31.1 交付物
+
+| 交付 | 位置 | 作用 |
+| --- | --- | --- |
+| 落地按块身份合并 | `src/astock_lens/data/sync.py::land_neodata_blocks` | 分批补抓不再互相覆盖 |
+| 研究池名单读取 | `src/astock_lens/data/sync.py::read_universe_symbols` | JSON `research_symbols` / CSV `symbol`，空名单报错 |
+| 覆盖报告 | `src/astock_lens/calibration/valuation_coverage.py` | 字段级 + 策略估值侧因子交集 |
+| 补抓命令 | `astock sync-valuation` | 缺口驱动多轮、可重跑、缺口显式 |
+| 覆盖命令 | `astock valuation-coverage` | 只读核对，分母为显式研究池 |
+
+覆盖模块放在 `calibration/`（报告层）而不是 `data/quality/`：它要复用
+`factors/valuation.py` 的因子语义，而数据层不得依赖因子层（`AGENTS.md` 架构边界）。
+
+### 31.2 失败证据（RED）
+
+`land_neodata_blocks` 原为整天覆盖写。改动前先跑新用例：
+
+```text
+FAILED tests/unit/test_neodata_landing.py::test_the_same_day_replaces_and_another_day_is_kept
+FAILED tests/unit/test_neodata_landing.py::test_a_second_landing_the_same_day_keeps_the_first_batch
+2 failed, 9 passed in 0.43s
+```
+
+断言实际输出 `len(rows) == 2`（旧行为只剩最后一批），期望为并集 3；这正是"多轮补抓
+会把前一轮冲掉"的证据。实现合并后 17 passed。
+
+任务 2/3 是新增模块与新增命令，没有既有行为可以先失败；它们的证据是新增测试本身。
+
+### 31.3 真实验收数字（不是估算）
+
+`astock valuation-coverage --as-of 2026-09-17 --universe
+var/acceptance/baseline-20260918/analysis/research-universe.json --output
+var/acceptance/valuation-coverage-20260919/report.json`：
+
+- 落地文件：`data/raw/neodata/valuation/2026-09-17.csv`（230 条观测，2 只标的）；
+- 研究池 2,303 只；有任意估值 2 只，缺口 2,301 只；
+- 因子级：`pe_ttm`/`pb`/`ps_ttm`/`pe_percentile`/`pcf_operating_ttm` 各 2 只，
+  `peg` 1 只，`dividend_yield_ttm` 0 只；
+- 策略估值侧可打分：`value` 2 / 2,303；`garp` 1 / 2,303。
+
+**这与 `var/acceptance/baseline-20260918/analysis/strategies.jsonl` 的分布独立吻合**
+（value 2 / garp 1）——一个来自原始内容块经真实因子语义计算，一个来自策略产物，
+两条路径对上了。同时可见字段级与因子级必须分开报：字段 `peg` 有 2 只有值，
+因子 `peg` 只有 1 只可计算（`000001.SZ` 的 PEG 为负，判 `NOT_APPLICABLE`）。
+
+### 31.4 前置门禁：凭证过期，未发起真实抓取
+
+```text
+load_token status: expired
+candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/skills/.neodata_token exists=True
+（saved_at=2026-09-18 20:07，TTL 12 小时）
+```
+
+`astock sync-valuation --as-of 2026-09-17 --universe … --limit 100` 实测：
+退出码 1，输出 `provider neodata is not usable: 凭证已过期（12 小时有效）`，
+**未发出任何请求**（健康检查在循环之前）。这是 blocker 的当前真实状态：
+能力已就绪，缺的是有效凭证。
+
+### 31.5 全量回归
+
+| 检查 | 结果 |
+| --- | --- |
+| `uv run pytest tests/unit tests/integration tests/contract tests/artifacts -q` | `972 passed in 72.09s` |
+| `PYTHONPATH= uv run pytest -q`（含 stress） | `976 passed, 10 warnings in 133.50s` |
+| `uv run ruff check .` | `All checks passed!` |
+| `uv run ruff format --check .` | `233 files already formatted` |
+| `uv run mypy` | `Success: no issues found in 116 source files` |
+
+文档订正：`docs/REMAINING_PRODUCT_BLOCKERS.md` §2 的"抓了 5 只"改为"请求 5 只、回 2 只"，
+"`SOURCE_ERROR` 或 `NULL`"改为实际口径（`NOT_APPLICABLE` / `NULL`），
+并注明 90% 覆盖率阈值无设计文档出处、属 `Deferred`，需所有者签发。
