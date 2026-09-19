@@ -42,6 +42,47 @@
    `tests/unit/test_bootstrap_sync.py:158` 超长断言已在 `fbeba36` 拆行修正，
    本切片开工时 `ruff check` / `ruff format --check` / `mypy` / `git diff --check`
    全绿。此项无需再裁决。
+5. **`tests/stress/` 有一条用例对机器快慢敏感：快环境下稳定红，更慢的运行方式下曾绿——
+   需要你裁决怎么处理。**
+   `test_mixed_failures_stay_explicit_and_the_run_still_converges` 断言"1% 超时 + 1% 来源
+   错误 + 1% 空历史的标的不丢不伪装、循环收敛"。本轮实测：
+
+   - 剥离 shim（快）串行单跑：**连续两次失败**（118.00s / 78.20s，断言都在第 252 行；
+     单跑那次打印出的偏差标的是 `003500.SZ`）；
+   - 剥离 shim（快）并行全量：同一条失败（`916 passed, 1 failed`，711.29s）；
+   - 更慢的运行方式下它是绿的（管理者的 917 passed 记录，以及本机上一轮 582.30s 那次）。
+
+   机制：假源对"超时"标的 `time.sleep(0.2)` 之后**仍返回正常数据**
+   （`FakeMarketSource._answer`），而调度器每一轮**先查消息、再判 deadline**
+   （`bootstrap_scheduler.fetch_symbols_bounded` 第 152–167 行）。机器一快，迟到结果更容易
+   在判超时之前进队列，于是本该记超时的标被记成成功。该文件第 274–278 行的注释自己承认
+   "假源没有进程隔离，超时被放弃的调用还在线程里跑"；AkShare 真实路径走可终止子进程，
+   不存在这个迟到通道。
+
+   **不是本切片引入的**：本切片只动 `data/repository`、`storage/paths.py`、`pipelines`、
+   `settings.py` 与新增测试，没碰 `bootstrap*`；串行跑时 xdist 也不参与。我没有擅自改这条
+   用例（改断言是敏感操作）。**请裁决**：① 让假源对超时标的永不返回（堵掉迟到通道）；
+   ② 让调度器先判 deadline 再查消息（改实现语义）；③ 或者接受它"只在慢环境绿"，把它标记
+   成环境敏感用例。
+6. **`tests/conftest.py` 的 `local_tmp` 该不该恢复成 `tmp_path`？** 它 docstring 写的理由是
+   "系统临时根被沙箱拒绝"，本轮看**只对了一半**：真正坏的是 broker 的 mkdir 补丁（第 3 条），
+   不是临时根本身。候选做法：恢复 `tmp_path`（配合剥离 shim 跑），或把 `local_tmp` 挪到
+   `tempfile.gettempdir()` 之下（shim 对 `/tmp` 下的路径会整条绕过 safe-delete）。
+   本轮未改任何测试夹具，等你定。
+7. **`pytest-xdist` 已被移除——实测对本仓库无收益，且会多制造一条假失败。** 本轮按"装并行
+   插件"的建议实测（12 核机器，`-n auto`，全部剥离 shim）：
+
+   | 跑法 | 结果 | 耗时 |
+   | --- | --- | --- |
+   | 非 stress 子集 + `-n auto` | 912 passed + 1 failed | 350.97s |
+   | 全量 + 串行 | 916 passed + 1 failed（第三节第 5 条那条） | **560.90s** |
+   | 全量 + `-n auto` | 916 passed + 1 failed（同一条） | 711.29s |
+
+   并行**比串行更慢**（711.29s 对 560.90s：用例多为真实计算，12 个 worker 互相争抢），
+   并且**多制造一条假失败**：
+   `tests/unit/test_akshare_provider.py::test_process_isolation_bounds_a_non_returning_live_transport`
+   （`spawn` 起子进程后断言 `elapsed < 1.0`）在争抢下超时，而**串行时它是绿的**。
+   已执行 `uv remove --dev pytest-xdist`，结论写进 `docs/DEVELOPMENT.md` §7.1。
 
 ## 四、仍然开放的历史项（来自第一步，未闭合）
 
@@ -51,19 +92,22 @@
 2. **`data/watchlist/` 目录在本机不存在**（还没有 tracked 标的）。清单如实记成
    `present=false, files=0`，没有伪造空目录。若要求"五类根目录必须都存在"，那是
    另一条产品规则。
-3. **全量 pytest 在本机必须"无沙箱"跑，否则会出两类假 ERROR——这是本轮最大的时间坑。**
-   两条独立原因都指向同一个结论，值得单独记一笔：
+3. **全量 pytest 的时间坑来自"注入的删除 shim"，与沙箱开关无关——上一轮"必须无沙箱"的
+   结论已被本轮实测修正。**
 
-   **（a）`tmp_path` 夹具被沙箱 broker 挡住。** 4 个既有用例
+   **（a）`tmp_path` 夹具被 broker 的 mkdir 补丁挡住——与沙箱开关无关。** 4 个既有用例
    （`tests/integration/test_candidate_calibration_cli.py` 里除 `test_calibrate_cli_help`
    外的 4 条）用 pytest 的 `tmp_path`，它会去建
    `/private/var/folders/…/T/pytest-of-unknown`。该目录在本机**已存在**（更早的会话
-   残留，属主显示为 `unknown`），而沙箱的 `Path.mkdir` 补丁
+   残留，属主显示为 `unknown`），而 `sitecustomize` 的 `Path.mkdir` 补丁
    （`sitecustomize.py:747`）在 `exist_ok=True` 时**跳过了存在性短路**，直接向 broker
    发 mkdir，broker 回 `EEXIST`，补丁把它变成
    `PermissionError: EEXIST: file already exists, mkdir '…/pytest-of-unknown'`。
-   **`exist_ok=True` 的语义在这个补丁里是坏的**——不是本仓库的代码问题，但这意味着
-   沙箱内任何用 `tmp_path` 的测试都会红。
+   **`exist_ok=True` 的语义在这个补丁里是坏的**——不是本仓库的代码问题。本轮补正两点：
+   这条**与沙箱开关无关**（`PYTHONPATH` 由 Bash 工具层注入，禁沙箱后仍在），而且
+   **只要残留目录在就会红**——上一轮那次"无沙箱 917 passed"只是因为当时
+   `pytest-of-unknown` 恰好不存在。本机现在有三个残留：`pytest-of-unknown`、
+   `pytest-of-root`、`pytest-of-huangjinjin`。
 
    **（b）删除 shim 让 teardown 又慢又假红。** 沙箱通过 `PYTHONPATH` 注入的
    `sitecustomize` 把 `os.remove` / `os.rmdir` / `shutil.rmtree` / `Path.unlink` 全部
@@ -81,21 +125,19 @@
    | 默认（守卫阈值 50） | 9 passed + **9 ERROR** | — |
    | `CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000000` | 9 passed | 106.86s |
    | `CODEBUDDY_SAFE_DELETE_ENABLED=0` | 9 passed | 27.82s |
-   | **无沙箱 `uv run pytest -q`（全量）** | **917 passed / 0 ERROR** | **582.30s** |
+   | **注入 shim 的全量（上一轮）** | 917 passed / 0 ERROR | 582.30s |
+   | **`PYTHONPATH=` 单文件（`test_calibration_readiness_cli.py`）** | 9 passed | 32.25s |
+   | **`PYTHONPATH=` 全量串行（本轮最佳）** | 916 passed + **1 failed**（第三节第 5 条那条） | **560.90s** |
 
-   结论：**本切片的验收证据是"无沙箱"跑出来的**（`EXIT=0`，`917 passed, 10 warnings
-   in 582.30s`），与第一步基线那次（`890 passed`）是同一种跑法。沙箱内跑出来的 ERROR
-   一律**不算证据**——它们要么来自 `exist_ok=True` 语义被破坏的 mkdir 补丁，要么来自
-   删除守卫，与仓库代码无关。整轮里我先误判过一次（把沙箱 ERROR 当成代码回归，白追了
-   约一小时），所以这条写下来。
+   新增量化：**同一次 `mkdir + write`，注入 shim 时 0.372s，剥离后 0.0125s——差 30 倍。**
+   一次全量有上万次这类操作，这就是"全量跑不完"的真正单价。上一轮的 582.30s 说明当时
+   shim 还没退化；本轮它已慢到单条 stress 用例 21 分钟跑不完。
 
-   **需要你裁决的两件事**：① 是否把"跑全量请用无沙箱模式，或用
-   `CODEBUDDY_SAFE_DELETE_ENABLED=0`"写进仓库运行说明（`README.md` / `Makefile`），
-   免得下一个人重踩；② `tests/conftest.py` 里 `local_tmp` 的存在理由（"系统临时根被
-   沙箱拒绝"）现在看**只对了一半**——真正坏的是 broker 的 mkdir 补丁而不是临时根本身；
-   要不要恢复 `tmp_path`、或把 `local_tmp` 挪到 `tempfile.gettempdir()` 之下
-   （shim 对 `tempdir` / `/tmp` 下的路径会**整条绕过** safe-delete），请你定。本轮未改
-   任何测试夹具。
+   **已按所有者指示处理（本轮）**：`docs/DEVELOPMENT.md` 新增 §7（分层跑法 + 运行环境），
+   `README.md` 的测试章节与 `AGENTS.md` 的命令节各留指针；`Makefile` 新增 `test-fast` /
+   `test-stress`，并让 `PYTHONPATH` 可透传，于是 `make test PYTHONPATH=` 一键剥离 shim。
+   `tests/conftest.py` 的 `local_tmp` **未改**——是否恢复 `tmp_path` 见第三节第 6 条。
+   并行插件（`pytest-xdist`）实测无收益且会多制造一条假失败，已移除，见第三节第 7 条。
 
 ## 五、与所有者的约定一致、但值得记一笔的边界
 

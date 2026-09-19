@@ -51,8 +51,8 @@
 
 ```bash
 uv sync                                  # 默认轻量环境
-uv sync --extra data --extra providers   # 需要 DuckDB / PyArrow / Polars / AkShare 时
-uv run pytest                            # 测试
+uv sync --extra data --extra providers   # 需要 DuckDB / PyArrow / AkShare 时（polars 已于 2026-09-19 移除，见 docs/ENV-OPERATIONS.md）
+uv run pytest                            # 全量测试（运行环境提示见 docs/DEVELOPMENT.md §7）
 uv run ruff check .                      # lint
 uv run ruff format --check .             # 格式检查
 uv run mypy                              # 严格类型检查

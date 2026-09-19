@@ -312,13 +312,20 @@ uv run python scripts/review_strategy_weights.py --root /path/to/raw --as-of 202
 ## 测试与质量检查
 
 ```bash
-uv run pytest --cov=astock_lens --cov-report=term-missing
+uv run pytest --cov=astock_lens --cov-report=term-missing   # 全量（交付前）
+uv run pytest tests/unit tests/contract tests/integration tests/artifacts   # 快速回归
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy
 ```
 
-等价的 Makefile 目标：`make test`、`make lint`、`make typecheck`。
+第二行是改动局部时的快速回归：跳过 `tests/stress/` 的全市场压力属性。等价的 Makefile 目标：
+`make test`（全量）、`make test-fast`（跳过压力属性）、`make test-stress`（只跑压力属性）、
+`make lint`、`make typecheck`。
+
+**跑之前先看 `docs/DEVELOPMENT.md` §7**：其中记了两个只与运行环境有关的坑（注入的删除 shim
+让文件操作慢约 30 倍、并可能让 `tmp_path` 夹具整批报 `EEXIST`），以及 `tests/stress/` 为什么
+对机器快慢敏感。遇到整批 ERROR 先按那一节排查，不要当成代码回归。
 
 ## 下一步
 

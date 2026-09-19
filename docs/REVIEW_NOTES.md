@@ -1330,3 +1330,58 @@ uv run python scripts/capture_research_baseline.py \
 - 改用 `uv pip install "pyarrow>=17.0"` → **装成 `pyarrow==25.0.1`**（本地缓存命中，127ms）。`duckdb 1.5.5`、`akshare 1.18.94` 原有环境保留。
 - **`polars` 仍未安装**，且当前代码库**没有任何模块 import polars**（`rg 'import polars|from polars' src/ scripts/ tests/` 为空）；第二阶段 2.3–2.6 只需要 PyArrow。若后续确有需要，请在网络条件好时补跑 `uv sync --extra data --extra providers`（它不会移除已装的 pyarrow）。
 - 环境验证：`uv run mypy`（112 源文件）无问题；`ruff check .` 全绿；全量 `uv run pytest -q` = **917 passed / 0 skipped**（5m10s），与装之前一致。
+
+## 二十七、跑测试的耗时归因与并行评估（2026-09-19）
+
+所有者问"每次执行耗时这么长，是不是跑测试太慢"。本轮把耗时拆开实测，结论是**测试本身不慢，
+锅在运行环境与跑法**。
+
+### 27.1 测试本身的量级
+
+917 个用例、剥离 shim 后串行跑，全量 **560.90s**（9 分 20 秒）——平均 0.61s/用例。对一个含
+"全池研究分析"（研究池 2,303 只、因子行 55,272）的仓库，这是正常量级，不是病态。
+
+### 27.2 真正的单价：注入的删除 shim
+
+环境经 `PYTHONPATH` 注入 `sitecustomize.py`，把 `os.remove` / `os.rmdir` / `shutil.rmtree` /
+`Path.unlink` / `Path.mkdir` 改道（每条操作起 Node 子进程做守卫检查 + broker 往返）。
+同一次 `mkdir + write`：
+
+| 运行方式 | 耗时 |
+| --- | --- |
+| 注入 shim | **0.372s** |
+| `PYTHONPATH=` | **0.0125s** |
+
+差约 30 倍，而一次全量有上万次这类操作。本轮还观察到 shim 会随时间**退化**：上一轮同一跑法
+全量 582.30s，本轮单条 stress 用例（假源、5,300 只标的）21 分钟跑不完。
+
+### 27.3 并行（pytest-xdist）实测：本仓库不要用
+
+| 跑法（都剥离 shim） | 结果 | 耗时 |
+| --- | --- | --- |
+| 非 stress 子集 + `-n auto` | 912 passed + 1 failed | 350.97s |
+| 全量 + 串行 | 916 passed + 1 failed | **560.90s** |
+| 全量 + `-n auto` | 916 passed + 1 failed | 711.29s |
+
+① 并行**更慢**（711.29s 对 560.90s：用例多为真实计算，12 个 worker 互相争抢）；
+② 并行**多一条假失败**：`tests/unit/test_akshare_provider.py::test_process_isolation_bounds_a_non_returning_live_transport`
+（`spawn` 子进程后断言 `elapsed < 1.0`）在争抢下超时，而**串行时它是绿的**。插件已移除。
+
+### 27.4 两条"环境敏感"用例（不是本切片引入）
+
+1. `tests/stress/test_bootstrap_scale_properties.py::test_mixed_failures_stay_explicit_and_the_run_still_converges`：
+   剥离 shim（运行变快）后**串行连跑两次都失败**（118.00s / 78.20s，同一断言）。机制见
+   `BLOCKED.md` 第三节第 5 条。
+2. 上面 27.3 那条 akshare 用例：只在并行下红。
+
+两者的共同点是"用真实墙钟给并发/进程隔离设边界"，机器变快或发生争抢时，边界假设不再成立。
+本切片（2.1 / 2.2）没碰 `bootstrap*` 与 akshare provider；串行跑时 xdist 也不参与。
+
+### 27.5 处置
+
+- `docs/DEVELOPMENT.md` 新增 §7（分层跑法 + 运行环境实测）；
+- `README.md` 测试章节、`AGENTS.md` 命令节各留一个指针；
+- `Makefile` 新增 `test-fast` / `test-stress`，并让 `PYTHONPATH` 可透传（`make test PYTHONPATH=`）；
+- `pyproject.toml` 增加 `[[tool.uv.index]]`（阿里云镜像，default=true）。它同时闭合了上一会话
+  记为"未决隐患"的 `uv.lock` 换源问题——镜像源从"只存在于 lock"变成"有正式声明且可复现"；
+- `pytest-xdist` 装后又卸；`tests/conftest.py` 未改；`configs/**`、`data/**`、`var/**` 零改动。
