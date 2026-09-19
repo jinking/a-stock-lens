@@ -33,8 +33,9 @@
 ### 状态
 
 - [x] 任务 0 核验
-- [x] 任务 2.1 统一路径解析 —— 提交见本节末尾
-- [ ] 任务 2.2 归一化读取边界
+- [x] 任务 2.1 统一路径解析 —— 提交 `6a824fe`
+- [x] 任务 2.2 归一化读取边界 —— 提交见本节末尾
+- [x] 全量回归（917 passed / 0 skipped）—— 见"完成条件"一节
 
 ### 2.1 关键证据
 
@@ -56,6 +57,73 @@
 - 行为不变：`resolve_snapshot_store(root)` / `resolve_watchlist_store(root)`
   不传 `database` 时仍是 `root/<legacy>.duckdb`（有专门用例钉住）。
 - 默认后端未变：仍是 `json`；本切片没有切换任何默认读取路径。
+
+### 2.2 关键证据
+
+- RED #1：`uv run pytest tests/unit/test_normalized_repository.py
+  tests/integration/test_analysis_pipeline.py tests/integration/test_research_universe_flow.py
+  tests/integration/test_daily_pipeline.py -q` → `ModuleNotFoundError: No module
+  named 'astock_lens.data.repository.contracts'`。日志
+  `logs/task22-red-01.log`。
+- GREEN：同一命令 → **46 passed**（日志 `logs/task22-green-02.log`）。
+- 静态检查：`ruff check` / `ruff format --check`（224 files）/ `mypy`（112 files）
+  全绿。
+- **一次读取**：计数 fake 证明一次 research 分析只调 `read` **1** 次
+  （`counting.reads == [(LONG_DATASET, "securities")]`），且此时 `csv_root`
+  指向一个不存在的目录——CSV 那条路根本没被碰。
+- **异常不回退 CSV**：`logs/reverse-22-no-csv-fallback.log`。注入必抛异常的
+  repository、同时给**真实可用**的 CSV 根（`tests/fixtures/csv`，`is_dir()=True`）：
+  分析抛 `RuntimeError`，`read` 只被调用 1 次，没有回退。
+- **行为不变硬证据（三文件 sha256 与基线逐个相同）**：
+
+  | 产物 | 基线 sha256 | 2.2 之后 sha256 | 结论 |
+  | --- | --- | --- | --- |
+  | `factors.jsonl` | `2a507477…a597c` | `2a507477…a597c` | **SAME** |
+  | `strategies.jsonl` | `15ce4f25…89cbd3` | `15ce4f25…89cbd3` | **SAME** |
+  | `research-universe.json` | `fe817691…00e941` | `fe817691…00e941` | **SAME** |
+
+  完整哈希见 `logs/baseline-three-files.sha256` 与
+  `logs/after-2.2-three-files.sha256`；重跑产物在 `analysis-after-2.2/`
+  （命令：`uv run python -m scripts.capture_research_baseline --csv-root data/raw
+  --as-of 2026-09-17 --output-dir … --config-root configs
+  --industry-path data/raw/westock/industry/2026-09-17.csv`，退出码 0）。
+- **数据指纹零漂移**：重跑 1.1 盘点（`logs/task22-reaudit.log`），与基线清单逐条
+  比对——白名单 **5,058** 个文件，新增 0 / 消失 0 / sha256 变化 0，
+  `total_bytes` 都是 **300,127,558**；四类数据（`data/raw` 5,009、
+  `data/snapshots` 9、`data/watchlist` 0、`var/jobs` 3）逐个零变化。
+- 依赖方向：`src/astock_lens/data/**/*.py` 无任何 `astock_lens.pipelines` 引用
+  （有专门用例守护）。
+- 一处与计划片段的差别（不是放宽断言）：`RawDataset.fetched_at` 是
+  `datetime.now(UTC)` 墙钟，两次 `normalize_stage()` 永不相等，因此计划给的
+  `assert actual == expected` 按字面过不去。比对时递归摘掉这一个字段，其余逐项
+  比对。详见 `docs/REVIEW_NOTES.md` §26.2。
+
+### 完成条件逐条对账
+
+| 完成条件 | 结果 | 证据 |
+| --- | --- | --- |
+| 2.1 验收 pytest 全绿且 skipped=0 | **28 passed** | `logs/task21-green-*.log` |
+| 2.2 验收 pytest 全绿 | **46 passed** | `logs/task22-green-02.log` |
+| 新测试证明"一次分析只读一次" | `read` 调用计数 = **1** | `tests/unit/test_normalized_repository.py` 计数 fake |
+| 新测试证明"异常不回退 CSV" | 抛 `RuntimeError`，`read` 仍只 **1** 次 | `logs/reverse-22-no-csv-fallback.log` |
+| 2.1 反向 A：非法 YAML | 退出码 **1**、无回溯、打印 `[failed]` | `logs/reverse-21-invalid-yaml.log` |
+| 2.1 反向 B：`ASTOCK_DATABASE` | 生效路径 == 该文件，`sources['database'] == 'env'` | 同节 2.1 证据 |
+| 行为不变硬证据 | 三文件 sha256 与基线**逐个 SAME** | `logs/after-2.2-three-files.sha256` |
+| `configs/**` `data/**` `var/**` 零改动 | 提交范围 + 5,058 文件指纹零漂移 | `logs/task22-reaudit.log` |
+| 全量 `uv run pytest -q` ≥890 且 skipped=0 | **917 passed, 10 warnings in 582.30s**，`EXIT=0`，**0 failed / 0 error / 0 skipped** | `logs/full-pytest-after-2.2.log` |
+| 两条提交按计划主题 | `6a824fe` 统一分析与业务存储的有效路径解析；`提取归一化数据读取边界并复用单次分析输入` | `git log` |
+| `BLOCKED.md` 随交付 | 无阻塞项（写"无"）+ 顺手发现项 | `BLOCKED.md` |
+
+全量数字对得上：**917 = 第一步基线 890 + 本切片新增 27**（2.1 新增
+`tests/unit/test_storage_paths.py` 16 条，2.2 新增 `tests/unit/test_normalized_repository.py`
+11 条）。没有用例被跳过、删除或放宽。
+
+**跑全量必须在无沙箱模式下跑**（`EXIT=0` 那一条；沙箱内跑会出与代码无关的假 ERROR，
+原因与对照实测见 `BLOCKED.md` 第四节第 3 条）：
+
+```bash
+uv run pytest -q        # 无沙箱；本次 917 passed in 582.30s
+```
 
 ## 一阶段（已完成）
 

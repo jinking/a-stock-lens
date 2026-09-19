@@ -32,6 +32,7 @@ from astock_lens.candidates.policy import (
     CANDIDATE_POLICY_DEFERRED,
     CandidatePolicy,
 )
+from astock_lens.data.repository.contracts import NormalizedRepository
 from astock_lens.data.snapshots.store import SnapshotStore
 from astock_lens.domain.enums import JobStage, MarketValidation, Signal, SnapshotKind
 from astock_lens.domain.models import DomainRecord
@@ -174,6 +175,7 @@ def run_daily(
     sync: Callable[[], StageOutcome] | None = None,
     candidate_policy: CandidatePolicy | None = None,
     qualifiers: Mapping[str, StrategyQualifier] | None = None,
+    repository: NormalizedRepository | None = None,
 ) -> DailyRunResult:
     """Run every stage of the daily pipeline once for one point in time.
 
@@ -182,6 +184,9 @@ def run_daily(
     The candidate policy is configuration too, and its absence is a decision:
     without one the `BUILD_CANDIDATES` stage is `BLOCKED`, never replaced by a
     default rule.
+
+    `repository` 是归一化读取边界的注入点，与 `run_analysis` 等入口同名同义；
+    为 `None` 时 NORMALIZE 阶段走 CSV 回放，与迁移前一致。
     """
     context = _Context(
         csv_root=csv_root,
@@ -196,6 +201,7 @@ def run_daily(
         sync=sync,
         candidate_policy=candidate_policy,
         qualifiers=qualifiers,
+        repository=repository,
     )
     state = _State()
 
@@ -240,6 +246,7 @@ class _Context:
     sync: Callable[[], StageOutcome] | None
     candidate_policy: CandidatePolicy | None
     qualifiers: Mapping[str, StrategyQualifier] | None = None
+    repository: NormalizedRepository | None = None
 
 
 def _blocked_reasons(stage: JobStage, context: _Context) -> tuple[str, ...]:
@@ -371,6 +378,7 @@ def _normalize(context: _Context, state: _State) -> StageOutcome:
         as_of=context.as_of,
         dataset=context.dataset,
         securities_dataset=context.securities_dataset,
+        repository=context.repository,
     )
     return StageOutcome(
         rows_in=state.outcome.raw_bars.row_count,

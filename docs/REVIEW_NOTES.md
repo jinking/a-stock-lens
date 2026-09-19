@@ -1234,3 +1234,78 @@ uv run python scripts/capture_research_baseline.py \
 - 反向验证复核：external 缺一只仍出诊断报告（exit 0），canonical 缺一只仍拒绝（exit 1）；正式状态 pre/post 指纹一致。
 - 遗留（已在本节修正）：`ruff format --check .` 的 1 个待重排文件是**本次验收方自己上一轮引入**的（`tests/unit/test_bootstrap_sync.py` 的长断言行），已拆行修正；另把验收方遗留的未跟踪文件 `var/industry-map-2026-09-18.csv` 移入已被忽略的 `var/benchmarks/`。
 - 待所有者裁决（见 `BLOCKED.md` 第三节）：是否单独处理 `data/watchlist/` 目录缺失的口径、是否解决脚本层 `tmp_path` 不可用的环境问题。
+
+## 二十五、存储路径解析收敛到一处（2026-09-19，第二步任务 2.1）
+
+### 25.1 做了什么
+
+新增 `data/storage/paths.py`：`resolve_storage_paths(*, config_path=None, environ=None)`
+是**唯一**读 env、唯一读配置文件的存储路径解析点，返回冻结 dataclass
+`StoragePaths`（`database` / `normalized_root` / `snapshot_root` / `watchlist_root` /
+`job_root` + `sources`）。规则：env 优先于配置；配置文件缺失或非法必须抛错；
+相对路径保持相对（不做绝对化）；三个 JSON root 沿用既有环境变量与既有默认，
+不引入新的配置键。
+
+改动面：`settings.py`（新增 `resolve_config_path`，把非法 YAML 包成 `ValueError`）、
+`cli/app.py`（`_storage_paths()` 成为唯一来源，`_store` / `_watchlist_store` /
+`_job_store` 都从它取；`doctor` 打印五条生效路径与来源）、`api/app.py`（默认走
+统一路径，显式传 root 的调用方保留旧的按 root 数据库位置）、`snapshots/resolve.py`
+与 `watchlist/store.py`（新增 keyword-only `database`，显式传入时优先）。
+
+### 25.2 两处需要所有者知道的口径变化
+
+1. **命令现在依赖配置文件可读。** `_store()` / `_job_store()` 以前只读 env，现在
+   会加载 `configs/app.yaml`。这是"指定配置文件缺失必须报错"的直接后果，也正是
+   计划要的口径；但如果将来有人想在**没有 configs/** 的目录里跑 CLI，得先设
+   `ASTOCK_CONFIG` 指到一份合法配置。这属于有意为之，不是回归。
+2. **非法 YAML 由 `YAMLError` 改报 `ValueError`**（原始异常挂在 `__cause__`）。
+   原因：`doctor` 只捕获 `OSError` / `ValueError` / `ValidationError`，不包装就会
+   以一条回溯结束、而不是一条"配置读不了"的失败信息。异常类型变了，报错这件事
+   没变。
+
+### 25.3 验证
+
+- 验收命令 `tests/unit/test_storage_paths.py tests/unit/test_settings.py tests/unit/test_api.py`
+  → **28 passed**；反向 A（非法 YAML）`astock doctor` 退出码 **1** 且无回溯；
+  反向 B（`ASTOCK_DATABASE`）生效路径即该文件且 `sources['database'] == 'env'`。
+- 默认后端仍是 `json`；本任务没有切换任何默认读取路径，也没有发布 Parquet 布局。
+
+## 二十六、归一化读取边界（2026-09-19，第二步任务 2.2）
+
+### 26.1 做了什么
+
+三个数据模型（`FinancialInputs` / `ValuationInputs` / `NormalizeOutcome`）原样
+从 `pipelines/stages.py` 移入 `data/repository/models.py`，`stages` 继续以同一批
+名字重导出；CSV 回放算法搬进 `data/repository/csv.py` 的
+`CsvNormalizedRepository`；新增 `data/repository/contracts.py` 声明
+`NormalizedRepository` 协议（`@runtime_checkable`）。
+
+`normalize_stage`、`compute_research_universe`、`compute_factor_state`、
+`run_analysis`、`run_research_analysis` 与 `run_daily` 都新增同名可选参数
+`repository`；为 `None` 时走 CSV 回放（与迁移前完全一致），显式传入时**只**从它读。
+`run_research_analysis` 现在归一化**一次**，研究池与完整分析复用同一个 `outcome`
+对象（抽出 `research_universe_from_outcome`，只调用既有 stage，不重写算法）。
+
+### 26.2 实测发现（计划片段没写、但比较时会踩）
+
+`RawDataset.fetched_at` 是 provider 用 `datetime.now(UTC)` 打的**墙钟**。因此
+`normalize_stage()` 的两次调用**永远不可能相等**——计划给的那段
+`assert actual == expected` 在真实仓库上按字面是过不去的。
+
+处理方式：比对前递归摘掉 `fetched_at` 这**一个**字段，其余每一个字段照旧逐项
+比对。这不是放宽断言——留着它等于断言"两次调用发生在同一微秒"，那是在断言一件
+假事。同理，`AnalysisState` / `ResearchUniverseState` 的相等性比较也按此口径。
+
+这条事实值得记住：以后任何"比对两份 `NormalizeOutcome`"的代码都必须先决定
+要不要看 `fetched_at`，默认的比较会永远不相等。
+
+### 26.3 验证
+
+- 验收命令 `tests/unit/test_normalized_repository.py tests/integration/test_analysis_pipeline.py
+  tests/integration/test_research_universe_flow.py tests/integration/test_daily_pipeline.py`
+  → **46 passed**。
+- 反向验证：注入一个必抛异常的 repository、同时给一个**真实可用**的 CSV 根
+  （回退在技术上做得到，正因如此它必须是错的）→ `run_research_analysis` 抛
+  `RuntimeError`，`read` 只被调用 **1** 次，没有 CSV 回退。
+- 依赖方向：`src/astock_lens/data/**/*.py` 里没有任何 `astock_lens.pipelines`
+  引用，有专门用例守护。

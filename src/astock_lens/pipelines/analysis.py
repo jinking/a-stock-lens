@@ -23,13 +23,14 @@ from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
+from astock_lens.data.repository.contracts import NormalizedRepository
+from astock_lens.data.repository.models import NormalizeOutcome
 from astock_lens.domain.models import DomainRecord
 from astock_lens.factors.config import FactorConfig
 from astock_lens.factors.contracts import FactorResult
 from astock_lens.pipelines.stages import (
     DEFAULT_DATASET,
     DEFAULT_SECURITIES_DATASET,
-    NormalizeOutcome,
     factor_stage,
     normalize_stage,
     strategy_stage,
@@ -39,7 +40,7 @@ from astock_lens.strategies.contracts import StrategyResult
 from astock_lens.strategies.registry import RegisteredStrategy
 from astock_lens.universe.builder import LIQUIDITY_FACTOR
 from astock_lens.universe.config import UniverseConfig
-from astock_lens.universe.models import UniverseExclusion
+from astock_lens.universe.models import UniverseExclusion, UniverseSnapshot
 from astock_lens.universe.prefilter import prefilter_listing
 
 
@@ -66,6 +67,7 @@ def compute_research_universe(
     factor_configs: Sequence[FactorConfig],
     dataset: str = DEFAULT_DATASET,
     securities_dataset: str = DEFAULT_SECURITIES_DATASET,
+    repository: NormalizedRepository | None = None,
 ) -> ResearchUniverseState:
     """Materialize the research population before anything expensive happens.
 
@@ -76,13 +78,38 @@ def compute_research_universe(
 
     `dataset` / `securities_dataset` are the same knobs the rest of the pipeline
     exposes, so a caller can point this at whatever the daily run would read.
+    `repository` 是读取边界的注入点；为 `None` 时走 CSV 回放，与迁移前一致。
     """
     outcome = normalize_stage(
         csv_root=csv_root,
         as_of=as_of,
         dataset=dataset,
         securities_dataset=securities_dataset,
+        repository=repository,
     )
+    return research_universe_from_outcome(
+        outcome=outcome,
+        as_of=as_of,
+        universe_config=universe_config,
+        factor_configs=factor_configs,
+    )
+
+
+def research_universe_from_outcome(
+    *,
+    outcome: NormalizeOutcome,
+    as_of: datetime,
+    universe_config: UniverseConfig,
+    factor_configs: Sequence[FactorConfig],
+) -> ResearchUniverseState:
+    """从一份**已经读好的**归一化结果里算研究池。
+
+    抽出来是为了让"读一次、多处复用"真的做得到：`run_research_analysis` 需要
+    研究池和完整分析看同一份数据，做不到就只能读两遍——而读两遍不只是慢，
+    它还给"两次读数不一样"留了一道缝。
+
+    这里只调用既有的 `factor_stage` / `universe_stage`，没有重写任何规则。
+    """
     prefiltered = prefilter_listing(
         outcome.securities, config=universe_config, as_of=as_of
     )
@@ -112,9 +139,16 @@ def compute_research_universe(
     )
 
 
-from astock_lens.universe.models import UniverseSnapshot
-
-__all__ = ["AnalysisState", "FactorState", "compute_factor_state", "run_analysis"]
+__all__ = [
+    "AnalysisState",
+    "FactorState",
+    "ResearchUniverseState",
+    "compute_factor_state",
+    "compute_research_universe",
+    "research_universe_from_outcome",
+    "run_analysis",
+    "run_research_analysis",
+]
 
 
 class AnalysisState(DomainRecord):
@@ -150,6 +184,7 @@ def compute_factor_state(
     factor_configs: Sequence[FactorConfig],
     dataset: str = DEFAULT_DATASET,
     securities_dataset: str = DEFAULT_SECURITIES_DATASET,
+    repository: NormalizedRepository | None = None,
 ) -> FactorState:
     """Normalize and measure, then stop. Nothing is persisted."""
     outcome = normalize_stage(
@@ -157,6 +192,7 @@ def compute_factor_state(
         as_of=as_of,
         dataset=dataset,
         securities_dataset=securities_dataset,
+        repository=repository,
     )
     return FactorState(
         as_of=as_of,
@@ -178,6 +214,7 @@ def run_research_analysis(
     scanners: Sequence[RegisteredStrategy],
     dataset: str = DEFAULT_DATASET,
     securities_dataset: str = DEFAULT_SECURITIES_DATASET,
+    repository: NormalizedRepository | None = None,
 ) -> tuple[ResearchUniverseState, AnalysisState]:
     """Run the canonical chain on the Research Universe, and only on it.
 
@@ -189,20 +226,23 @@ def run_research_analysis(
 
     Returns both the population decision and the analysis it produced, because
     a calibration report has to show the population it was computed on.
+
+    归一化输入**只读一次**：研究池和后面的完整分析用的是同一个 `outcome` 对象。
+    这不是为了省时间，而是为了让"研究池算在什么数据上"和"因子算在什么数据上"
+    不可能出现两份答案。
     """
-    state = compute_research_universe(
-        csv_root=csv_root,
-        as_of=as_of,
-        universe_config=universe_config,
-        factor_configs=factor_configs,
-        dataset=dataset,
-        securities_dataset=securities_dataset,
-    )
     outcome = normalize_stage(
         csv_root=csv_root,
         as_of=as_of,
         dataset=dataset,
         securities_dataset=securities_dataset,
+        repository=repository,
+    )
+    state = research_universe_from_outcome(
+        outcome=outcome,
+        as_of=as_of,
+        universe_config=universe_config,
+        factor_configs=factor_configs,
     )
     research = set(state.research_symbols)
     narrowed = outcome.bars.model_copy(
@@ -253,6 +293,7 @@ def run_analysis(
     scanners: Sequence[RegisteredStrategy],
     dataset: str = DEFAULT_DATASET,
     securities_dataset: str = DEFAULT_SECURITIES_DATASET,
+    repository: NormalizedRepository | None = None,
 ) -> AnalysisState:
     """Run the canonical chain once for one point in time.
 
@@ -268,6 +309,7 @@ def run_analysis(
         factor_configs=factor_configs,
         dataset=dataset,
         securities_dataset=securities_dataset,
+        repository=repository,
     )
     universe = universe_stage(
         outcome=measured.outcome,

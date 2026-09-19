@@ -1,1 +1,6 @@
-"""Local Parquet and DuckDB storage adapters. Deferred."""
+"""本地存储适配器。
+
+`paths.py` 是存储路径的**唯一**解析点（任务 2.1）：env 优先于配置，配置文件
+缺失或非法直接抛错，相对路径保持相对。Parquet 读写适配器与独立的比对报告属
+任务 2.3 起，尚未落地。
+"""
