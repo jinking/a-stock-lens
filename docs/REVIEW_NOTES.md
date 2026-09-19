@@ -1122,3 +1122,102 @@ canonical 的"仍拒绝"是在**全池真实数据**上跑的（不是小夹具�
 描述的是某一份外部映射，没有那份映射时它无话可说，静默忽略会让用户以为日期
 被记下了。这条选择连同测试一起留在
 `tests/integration/test_calibration_readiness_cli.py`。
+
+## 二十四、迁移前的研究分析与校准基线（2026-09-19，第一步任务 1.3）
+
+任务 1.1 固定了**输入**，这一节固定**输出**：一次只读分析，六个产物，供迁移后
+逐字节对照。目标是让"结果变了没有"这个问题有一个可以算的答案。
+
+### 24.1 命令与产物
+
+```bash
+uv run python scripts/capture_research_baseline.py \
+  --csv-root data/raw --as-of 2026-09-17 --config-root configs \
+  --industry-path data/raw/westock/industry/2026-09-17.csv \
+  --output-dir var/acceptance/baseline-20260918/analysis
+# 退出码 0，耗时 3 分 23 秒
+```
+
+| 产物 | 大小 | 条数 | sha256（前 16 位） |
+| --- | --- | --- | --- |
+| `factors.jsonl` | 25,215,694 B | 55,272 | `2a50747793dc78e6` |
+| `strategies.jsonl` | 170,801,773 B | 13,818 | `15ce4f251cb4ad83` |
+| `research-universe.json` | 761,099 B | 2,303 只 | `fe817691aa0e0925` |
+| `calibration.json` | 218,037 B | 6 个策略 | `f7e418cf8e637de9` |
+| `calibration.md` | 116,661 B | — | `293e3c102b47e0b7` |
+| `manifest.json` | 9,831 B | — | 记上面五项的哈希 |
+
+55,272 = 24 因子 × 2,303；13,818 = 6 策略 × 2,303。两个数字都是**算出来的**，
+不是期望值。
+
+`manifest.json` 里 `artifact_kind = "research_diagnostic"`、
+`registered_as_business_state = false`：它是 `var/acceptance` 下的交换证据，
+不是 SnapshotStore 的产物，正式链路不读它。manifest 记录的输入共 33 个文件
+（成员 CSV + `universe.yaml` + 24 个因子 YAML + 6 个策略 YAML），每一个都带
+`bytes` 与 `sha256`。
+
+### 24.2 四条实现红线
+
+1. **只调用一次 `run_research_analysis`。** 报告与两个 JSONL 都由这一次的返回
+   结果渲染；有测试记账断言调用次数恰为 1。
+2. **离线。** 三个外部 Provider（AkShare / WeStock CLI / Neodata）的 `fetch`
+   在测试里被换成抛异常，流程仍然通过；同时记账断言**只有** `LocalCsvProvider`
+   被问到过数据。这条守卫防的是回归：一旦 capture 依赖外部抓取，"迁移前基线"
+   就成了网络状况的函数。
+3. **数值不四舍五入。** 每行直接写 `record.model_dump_json()`。测试断言每一行
+   都能被领域模型原样读回并原样再序列化（逐字符串相同），并要求至少有一个因子值
+   ≠ `round(value, 4)`——如果写入端做了四舍五入，后一条会红。四舍五入会在迁移
+   比对时把真实差异抹平，那正是这份基线唯一要做的事。
+4. **排序键显式。** 因子 `(symbol, factor)`、策略 `(strategy_id, symbol)`，
+   与输入顺序无关。测试断言键序列等于自身排序结果，且无重复键。
+
+`--industry-path` 是**显式输入**而不是按约定路径探测：基线必须能记录它实际用的
+是哪一份成员文件（连 sha256），否则"用的是哪份映射"无从复算。缺行业时关掉
+`require_full_industry_coverage`——这里的产物是诊断材料，不是决策材料。
+
+### 24.3 实测数字（全池 2026-09-17）
+
+- 宽名单 5,565 → 前置筛选 4,991 → 研究池 **2,303**（比率 0.4138）。
+- `unknown_industry_symbols` **9** 只，覆盖 **2,294 / 2,303 = 0.9961**。
+- 四榜可打分：growth **2,302**、momentum **2,281**、quality **1,697**、
+  dividend **1,612**。**与开工现状给的数字逐个一致**，没有一处需要"改数据凑数"。
+- `industry_evidence`：`origin=canonical`、
+  `source_ref=data/raw/westock/industry/2026-09-17.csv`、
+  `source_sha256=5557063cc415e0fce7e8f4aff15b7aafc4ce59956dce586ddcc5219d52c9fec1`、
+  `mapping_as_of=2026-09-17T15:00:00+08:00`（成员自己声明的取数时点，不是分析日
+  硬填出来的）、`diagnostic_only=true`。
+
+### 24.4 反向验证（红→绿，实跑）
+
+| 步骤 | 命令 | 退出码 | 输出 |
+| --- | --- | --- | --- |
+| 绿 | 验收命令原样 | 0 | 六个产物齐全，`total` 见 24.1 |
+| 红 A | `--industry-path data/raw/westock/industry/1999-01-01.csv` | 1 | `capture failed: FileNotFoundError: --industry-path does not exist: …`；**产物目录没有被创建** |
+| 红 B | `--as-of 2026-09-17T15:00:00`（裸时间） | 1 | `capture failed: ValueError: --as-of needs a timezone offset when a time is given, got '2026-09-17T15:00:00'` |
+| 绿 | 还原参数重跑到 `analysis-recheck/` | 0 | 五个交换产物 sha256 与首次运行**逐个相同** |
+
+红 A 与红 B 都在**读输入阶段**就失败：输入先读、先失败，绝不在输出目录里留下一份
+"看起来跑过了"的半成品。红 A 的文件不存在与"文件存在但没有成员"是两件不同的事实，
+实现里分成 `FileNotFoundError` 与 `ValueError` 两条路径，没有合并成一个含糊的
+"没有成员"（`read_industry_memberships` 对不存在的文件返回空，那是它守的另一条规矩）。
+
+### 24.5 约束零改动：指纹比对
+
+在 1.3 全部真实运行（1 次 capture + 1 次 canonical 拒绝 + 1 次重跑 + 2 次红）之后，
+重跑 1.1 的盘点脚本并与**开工时那份清单**逐条比对：
+
+| 集合 | 文件数 | 新增 | 消失 | sha256 变化 |
+| --- | --- | --- | --- | --- |
+| `data/raw` + `data/snapshots` + `data/watchlist` + `var/jobs` | 5,021 | 0 | 0 | **0** |
+| 全量白名单（再加 `configs` / `pyproject.toml` / `uv.lock`） | 5,058 | 0 | 0 | **0** |
+
+两次盘点的 `total_bytes` 都是 300,127,558，逐字节相同。**仓库没有多出任何数据产物**：
+所有本轮产物都落在 `var/acceptance/` 下，而该目录已按 `.gitignore` 的
+`var/acceptance/` 不入库。
+
+### 24.6 一处与计划措辞的差别（不是偏离行为）
+
+计划写"JSONL 每行直接用领域对象的 `model_dump_json()`，排序键为因子
+`(symbol, factor)`、策略 `(strategy_id, symbol)`"——照做。计划同时也说
+"完整 JSONL 是明确的 CLI 交换证据，不注册成持久化业务状态"——照做，manifest 里
+用一个显式布尔字段把这件事写下来，免得将来有人把这份文件当成正式快照读。
