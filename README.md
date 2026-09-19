@@ -64,7 +64,7 @@ V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学�
 | 全市场财报同步已验证（5,576 只 × 三大表，37 分钟，缺口 4–6 只且有名有姓） | AkShare 全市场日线（5564 只 × 全history，尚未跑过） |
 | 评分机器（`strategies/percentile_scorer.py` 共享组件，支持极性）+ 权重评审工具（真实全市场数据）；每个策略一个独立 Scanner 类 | 重跑一次权重评审以确认现行数字 |
 | neodata 一等 Provider（估值 / 行业 / 单季财报查询模板、批量、缺口补抓、凭证状态进 doctor）+ 估值归一化 | 行业数据归一化、Industry Trend |
-| Job Run 记录与 Manifest（每阶段独立可重跑）、`astock daily`；CLI `sync` / `stock` / `watch` / `research` / `strategy run`；API `/health` `/universe` `/factors` `/candidates` `/watchlist` | |
+| Job Run 记录与 Manifest（每阶段独立可重跑）、`astock daily`；CLI `sync` / `stock` / `screen` / `watch` / `research` / `strategy run`；API `/health` `/universe` `/factors` `/candidates` `/watchlist` `/strategies` `/strategies/{strategy_id}/results` `/stocks/{symbol}` | |
 | 独立 Artifact Validator（快照 + Job Manifest，不导入生产代码） | |
 
 包结构已按 `docs/ARCHITECTURE.md` 建立，`src/astock_lens/` 下的 `backtest`、`portfolio`、`events` 等目录只是预留边界，没有 V1 实现。
@@ -117,12 +117,39 @@ uv run astock strategy run momentum --as-of 2026-09-04   # 单个 scanner 的排
 uv run astock daily --as-of 2026-09-04 --allow-incomplete # 唯一正式快照写入者：11 个阶段逐个 Job Run
 
 uv run uvicorn --factory astock_lens.api.app:create_app
+curl "http://127.0.0.1:8000/strategies?as_of=2026-09-17"
+curl "http://127.0.0.1:8000/strategies/growth/results?as_of=2026-09-17&limit=20"
+curl "http://127.0.0.1:8000/stocks/600519.SH?as_of=2026-09-17"
 curl "http://127.0.0.1:8000/universe?as_of=2026-09-04"
 curl "http://127.0.0.1:8000/candidates?as_of=2026-09-04"
 curl "http://127.0.0.1:8000/watchlist"
 ```
 
 `--as-of` 接受交易日 `YYYY-MM-DD`，按当日 A 股收盘（15:00 +08:00）解析。
+
+### 选股与单股研究工作流（Daily-to-Screener Workflow）
+
+标准的日常发现与选股工作流程如下：
+
+```bash
+# 1. 产出正式策略快照（Candidate 阶段继续保持安全阻断）
+uv run astock daily --as-of 2026-09-17 --allow-incomplete
+
+# 2. 查询已落盘的策略选股榜单
+uv run astock screen growth --as-of 2026-09-17 --top 20
+
+# 3. 查看单只股票研究画像
+uv run astock stock 600519.SH --as-of 2026-09-17
+```
+
+**概念边界与职责区分**：
+- `screen = 研究选股榜单 / Research Ranking`：基于已持久化的 `STRATEGY` 快照提供只读选股与排序（支持 `--top` 截断、`--min-percentile` 阈值过滤、`--all-results` 包含未合格标的），绝不重算因子或扫描器，绝不修改存储快照。
+- `candidates = 正式候选池（因绝对门槛/市场验证门禁尚未批准，当前处于安全阻断状态）`：Candidate 是经过 Market Regime、Market Validation 与 Signal 门禁后的最终研究对象；在上述上游层与准入决策正式批准前，Candidate 阶段保持显式安全阻断（`BLOCKED`），绝不输出未经验证的伪候选或兜底占位。
+
+**HTTP API 路由**：
+- `GET /strategies?as_of=...`：获取指定交易日所有策略的覆盖率摘要列表（总数、合格数、打分数、排名数）。
+- `GET /strategies/{strategy_id}/results?as_of=...`：查询指定策略已落盘的选股榜单，支持查询参数 `limit`（默认 20，最大 500）、`eligible_only`（默认 `true`）与 `min_percentile`（可选分位数阈值 `[0.0, 1.0]`）。
+- `GET /stocks/{symbol}?as_of=...`：查看单只标的的完整研究画像（Universe 纳入状态与剔除规则、各因子测量值、各策略评分与理由、Watchlist 跟踪状态，以及 Candidate 状态如 `not_published`）。
 
 ### 生命周期命令
 
