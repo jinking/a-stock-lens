@@ -1309,3 +1309,15 @@ uv run python scripts/capture_research_baseline.py \
   `RuntimeError`，`read` 只被调用 **1** 次，没有 CSV 回退。
 - 依赖方向：`src/astock_lens/data/**/*.py` 里没有任何 `astock_lens.pipelines`
   引用，有专门用例守护。
+
+## 二十二、第二阶段第一刀（2.1＋2.2）验收结论（2026-09-19，管理者复跑）
+
+明卷与抽查全部亲自复跑，结论：**通过**。
+
+- 明卷：2.1 `uv run pytest tests/unit/test_storage_paths.py tests/unit/test_settings.py tests/unit/test_api.py -q` = 28 passed；2.2 四文件 = 46 passed；全量 `uv run pytest -q` = **917 passed / 0 skipped / 0 failed**（5m18s；890 基线 + 27 新增，数字自洽）。
+- 行为不变硬证据（本人复跑，非采信日志）：用迁移后代码重跑 capture 到 `var/acceptance/verify-stage2-by-manager/analysis/`，`factors.jsonl`（`2a507477…`）、`strategies.jsonl`（`15ce4f25…`）、`research-universe.json`（`fe817691…`）与迁移前基线**逐字节相同**；基线自身未被覆盖（哈希仍等于第一阶段验收时记录的值）。
+- 数据指纹零漂移（本人复跑 `scripts/audit_research_baseline.py`）：5,058 个白名单文件 sha256 与基线清单完全一致，`configs/**`、`data/**`、`var/**` 零改动；工作区干净。
+- 反向验证（本人独立重放）：`ASTOCK_DATABASE` 覆盖生效且 `sources["database"] == "env"`；坏 YAML 配置报 `ValueError` 而非静默默认；`tests/unit/test_normalized_repository.py` 中"异常不回退 CSV"与"只读一次"两处为真断言（后者还故意传入不存在的 CSV 根，回退必然失败）。
+- 防作弊抽查：两条提交范围均落在计划点名文件内（`6a824fe` 8 个文件、`cee456f` 14 个文件）；`tests/**` 无新增跳过，唯一被删的一行断言来自本次验收方自己的格式修复（`fbeba36`）；`data/` 层未 import `pipelines/`（且有测试守这条）。
+- 如实记录的偏差：计划片段里的 `assert actual == expected` 按字面不可成立（`RawDataset.fetched_at` 是取数墙钟，两次调用必然不同）。执行方改为只摘 `fetched_at` 一个字段、其余逐项比对，并在测试与评审记录里写明——本次验收确认它只摘了这一个字段，比较强度未被放宽。
+- 待所有者裁决（本轮未动）：① 是否把"全量测试的沙箱模式差异"写进 `README.md`/`Makefile`（本次验收在普通模式下 917 passed/5m18s，未见执行方报告的删除守卫拖慢，说明是执行环境特有）；② 是否恢复沙箱下不可用的 `tmp_path` 夹具（现用 `local_tmp`）。
