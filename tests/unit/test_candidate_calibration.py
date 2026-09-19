@@ -152,3 +152,66 @@ def test_deterministic_rendering_byte_for_byte() -> None:
     assert json_a == json_b
     assert CALIBRATION_WARNING in md_a
     assert CALIBRATION_WARNING in json_a
+
+
+# --- 行业证据字段的兼容性（第一步任务 1.2）------------------------------------
+
+
+def test_the_report_still_builds_without_the_new_evidence_fields() -> None:
+    """既有调用方不传任何新字段也必须照常构造，默认是"未声明 + 诊断材料"。"""
+    from astock_lens.calibration.candidate_report import (
+        CandidateCalibrationReport,
+        IndustryEvidence,
+    )
+
+    report = CandidateCalibrationReport(
+        as_of=AS_OF,
+        warning=CALIBRATION_WARNING,
+        strategies=(),
+        industry_coverage_ratio=0.0,
+        unknown_industry_count=0,
+    )
+    assert report.unknown_industry_symbols == ()
+    assert report.industry_evidence == IndustryEvidence()
+    assert report.industry_evidence.origin == "unspecified"
+    assert report.industry_coverage is None
+
+
+def test_the_denominator_is_the_scored_population_not_the_industry_map() -> None:
+    """缺口的分母是**参与计算的标的**，不是行业映射文件里的名单。
+
+    映射里多出来的、这一轮根本没参与计算的代码，既不是缺口也不是覆盖；用映射
+    名单冒充研究池会让覆盖率凭空变好看。
+    """
+    ind_map = {
+        "600001.SH": "银行",
+        "600002.SH": "电子",
+        # 下面两只在映射里，但本轮没有任何因子/策略结果——不参与分母。
+        "600009.SH": "医药",
+        "600010.SH": "有色",
+    }
+    report = generate_calibration_report(
+        as_of=AS_OF,
+        strategy_results=[_strat("600001.SH", "value", 0.95, 95.0)],
+        factor_results=[_factor("600002.SH", "peg", 1.5)],
+        industry_map=ind_map,
+    )
+    assert report.industry_coverage is not None
+    assert report.industry_coverage.total_count == 2
+    assert report.industry_coverage.known_count == 2
+    assert report.industry_coverage.ratio == 1.0
+    assert report.unknown_industry_symbols == ()
+
+    # 同一份映射，把一只没行业归属的标的加进参与集合，缺口立刻出现。
+    widened = generate_calibration_report(
+        as_of=AS_OF,
+        strategy_results=[_strat("600001.SH", "value", 0.95, 95.0)],
+        factor_results=[
+            _factor("600002.SH", "peg", 1.5),
+            _factor("600008.SH", "peg", 2.0),
+        ],
+        industry_map=ind_map,
+    )
+    assert widened.unknown_industry_symbols == ("600008.SH",)
+    assert widened.industry_coverage is not None
+    assert widened.industry_coverage.total_count == 3

@@ -2,14 +2,53 @@
 
 import json
 from collections.abc import Mapping
+from datetime import datetime
 
-from astock_lens.calibration.candidate_report import CandidateCalibrationReport
+from astock_lens.calibration.candidate_report import (
+    CandidateCalibrationReport,
+    IndustryEvidence,
+)
 
 
 def _show_quantile(quantiles: Mapping[str, float], label: str) -> str:
     """A quantile or `N/A` — never a zero standing in for "no observations"."""
     value = quantiles.get(label)
     return "N/A" if value is None else f"{value:.4f}"
+
+
+def _evidence_lines(evidence: IndustryEvidence, as_of: datetime) -> list[str]:
+    """行业映射这份证据的来源、日期与缺口，一律写在报告头上。
+
+    三件事必须同时出现，少一件读者就会自己脑补：这是**诊断材料**不是已批准规则；
+    映射是谁给的（规范链路 / 外部文件 / 未声明）；日期是声明的还是**未知**。
+    未知就写未知——不用文件 mtime 顶替，也不把分析时点当成映射日期。
+    """
+    source = evidence.source_ref if evidence.source_ref else "未声明"
+    digest = evidence.source_sha256 if evidence.source_sha256 else "未计算"
+    lines = [
+        (
+            "- **行业映射证据（诊断材料，非已批准的产品规则）:** "
+            f"origin={evidence.origin}"
+            "（canonical=仓库规范链路，external=外部映射，unspecified=未声明），"
+            f"source_ref={source}，source_sha256={digest}，"
+            f"diagnostic_only={str(evidence.diagnostic_only).lower()}"
+        ),
+    ]
+
+    if evidence.mapping_as_of is None:
+        lines.append(
+            "- **行业映射日期:** 日期未知（映射文件未声明）；"
+            "不以文件 mtime 顶替，也不把分析时点当成映射日期"
+        )
+    elif evidence.mapping_as_of > as_of:
+        lines.append(
+            f"- **行业映射日期:** {evidence.mapping_as_of.isoformat()}"
+            f"（晚于分析时点 {as_of.isoformat()}，"
+            "只能作为诊断展示，不得作为该时点的正式行业证据）"
+        )
+    else:
+        lines.append(f"- **行业映射日期:** {evidence.mapping_as_of.isoformat()}")
+    return lines
 
 
 def render_json(report: CandidateCalibrationReport) -> str:
@@ -21,14 +60,18 @@ def render_json(report: CandidateCalibrationReport) -> str:
 
 def render_markdown(report: CandidateCalibrationReport) -> str:
     """Render the calibration report as deterministic GitHub-flavored Markdown."""
+    as_of_iso = report.as_of.isoformat()
+    missing = report.unknown_industry_symbols
     lines: list[str] = [
         "# Candidate Qualification Calibration Report",
         "",
         f"> **WARNING: {report.warning}**",
         "",
-        f"- **As of:** {report.as_of.isoformat()}",
+        f"- **As of:** {as_of_iso}",
         f"- **Industry Coverage:** {report.industry_coverage_ratio * 100:.2f}%",
         f"- **Unknown Industry Symbols:** {report.unknown_industry_count}",
+        *_evidence_lines(report.industry_evidence, report.as_of),
+        f"- **缺失行业代码（{len(missing)}）:** " + (", ".join(missing) or "无"),
         "",
         "## 1. Strategy Summary & Sensitivity",
         "",

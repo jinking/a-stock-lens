@@ -6,6 +6,7 @@ did nothing — a failure exits non-zero with the reason.
 """
 
 import csv
+import hashlib
 import json
 import os
 import platform
@@ -20,7 +21,10 @@ from zoneinfo import ZoneInfo
 import typer
 from pydantic import BaseModel, ValidationError
 
-from astock_lens.calibration.candidate_report import generate_calibration_report
+from astock_lens.calibration.candidate_report import (
+    IndustryEvidence,
+    generate_calibration_report,
+)
 from astock_lens.calibration.factor_distribution import CalibrationPopulation
 from astock_lens.calibration.render import render_json, render_markdown
 from astock_lens.candidates.models import Candidate
@@ -1519,6 +1523,37 @@ def _research_action(
     )
 
 
+def _file_sha256(path: Path) -> str:
+    """一份映射文件的摘要：让报告里的"用的是哪份文件"可以被复算。"""
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _declared_mapping_as_of(value: str | None) -> datetime | None:
+    """把命令行声明的映射日期解析成带时区的时间；没给就是 `None`。
+
+    裸时间不是事实：没有时区的 ISO 串被拒绝，而不是被悄悄补上本机时区。缺省
+    留 `None` 也不许拿文件 mtime 顶替——mtime 是文件系统的噪声，不是映射的时点。
+    """
+    if value is None:
+        return None
+    try:
+        declared = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise typer.BadParameter(
+            f"--industry-map-as-of must be an ISO-8601 datetime, got {value!r}"
+        ) from error
+    if declared.tzinfo is None or declared.tzinfo.utcoffset(declared) is None:
+        raise typer.BadParameter(
+            "--industry-map-as-of needs a timezone offset (e.g. "
+            f"2026-09-17T15:00:00+08:00); a bare time is not a fact, got {value!r}"
+        )
+    return declared
+
+
 def _load_industry_map(path: Path) -> dict[str, str]:
     """Load and validate the symbol-to-industry CSV mapping."""
     if not path.is_file():
@@ -1594,8 +1629,26 @@ def calibrate_candidates(
             ),
         ),
     ] = None,
+    industry_map_as_of: Annotated[
+        str | None,
+        typer.Option(
+            "--industry-map-as-of",
+            help=(
+                "外部映射自己的时点（带时区 ISO 时间，如 2026-09-17T15:00:00+08:00）。"
+                "只描述 --industry-map；不给就记为未知，绝不用文件 mtime 顶替。"
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Generate cross-sectional candidate calibration report without mutating state."""
+    if industry_map_as_of is not None and industry_map is None:
+        raise typer.BadParameter(
+            "--industry-map-as-of describes a --industry-map file; pass "
+            "--industry-map too, or drop the date (the canonical mapping dates "
+            "itself from the membership records it was built from)"
+        )
+    declared_as_of = _declared_mapping_as_of(industry_map_as_of)
+
     day = _as_of(as_of)
     factor_configs = _factor_configs()
     universe_config = load_universe_config(_universe_config_path())
@@ -1610,13 +1663,21 @@ def calibrate_candidates(
         securities_dataset=_securities_dataset(),
     )
 
+    # 本阶段所有校准报告都是诊断材料；来源与日期必须如实标注，不许含混。
+    evidence = IndustryEvidence(origin="unspecified", diagnostic_only=True)
     if industry_map is not None:
         mapping = _load_industry_map(industry_map)
         requires_full_coverage = False
-    else:
-        canonical = read_industry_memberships(
-            _csv_root() / INDUSTRY_ROOT / f"{day.date().isoformat()}.csv"
+        evidence = IndustryEvidence(
+            origin="external",
+            source_ref=str(industry_map),
+            source_sha256=_file_sha256(industry_map),
+            mapping_as_of=declared_as_of,
+            diagnostic_only=True,
         )
+    else:
+        canonical_path = _csv_root() / INDUSTRY_ROOT / f"{day.date().isoformat()}.csv"
+        canonical = read_industry_memberships(canonical_path)
         if not canonical:
             typer.echo(
                 "no canonical industry mapping for this date: run "
@@ -1628,12 +1689,25 @@ def calibrate_candidates(
             raise typer.Exit(code=1)
         mapping = build_industry_map(canonical, as_of=day)
         requires_full_coverage = True
+        # 日期取**可见**成员自己声明的取数时点：晚于分析时点的记录已经被
+        # `build_industry_map` 过滤掉，所以这里不可能把一个未来日期当成历史口径。
+        visible_dates = [
+            membership.as_of for membership in canonical if membership.as_of <= day
+        ]
+        evidence = IndustryEvidence(
+            origin="canonical",
+            source_ref=str(canonical_path),
+            source_sha256=_file_sha256(canonical_path),
+            mapping_as_of=max(visible_dates, default=None),
+            diagnostic_only=True,
+        )
 
     report = generate_calibration_report(
         strategy_results=analysis.strategy_results,
         factor_results=analysis.factor_results,
         industry_map=mapping,
         as_of=analysis.as_of,
+        industry_evidence=evidence,
         population=CalibrationPopulation(
             broad_listing_count=len(analysis.outcome.securities),
             prefilter_count=len(population_state.listing_prefilter_symbols),

@@ -993,3 +993,132 @@ configs 35 份与 3 个真实 CSV，共 52 个被盘点文件）上：
   既有未跟踪文件 `var/industry-map-2026-09-18.csv`（保留未动、不入库）。
 - 本任务的提交只包含上面 5 个文件（外加本节所在的 `docs/REVIEW_NOTES.md`），
   没有 `git add -A`，没有触碰 `configs/**` 与 lint/mypy 配置。
+
+## 二十三、校准报告显式携带行业证据（2026-09-19，第一步任务 1.2）
+
+研究池 2,303 只里有 9 只没有行业归属。旧行为是：canonical 路径直接抛
+`IndustryCoverageUnavailable`，报告一个字都不落。问题是**缺 9 只不等于整份材料
+没有价值**——把它整份扔掉，读者拿到的信息量是零；而把缺口悄悄抹平，读者拿到的
+是假信息。这一节记录的是第三种做法：把缺口写成报告的一部分。
+
+### 23.1 两个新模型与三个新字段（`calibration/candidate_report.py`）
+
+```python
+class IndustryEvidence(DomainRecord):
+    origin: Literal["canonical", "external", "unspecified"] = "unspecified"
+    source_ref: str | None = None
+    source_sha256: str | None = None
+    mapping_as_of: datetime | None = None
+    diagnostic_only: bool = True
+
+class IndustryCoverage(DomainRecord):
+    missing_symbols: tuple[str, ...]
+    known_count: int
+    total_count: int
+    ratio: float
+```
+
+`CandidateCalibrationReport` 新增 `unknown_industry_symbols: tuple[str, ...] = ()`、
+`industry_coverage: IndustryCoverage | None = None`、
+`industry_evidence: IndustryEvidence = Field(default_factory=IndustryEvidence)`。
+三个字段都有默认值，**既有调用方不传也照常构造**（有测试钉住）。旧的
+`industry_coverage_ratio` 与 `unknown_industry_count` 一个都没删、语义也没改。
+
+缺口用**集合差**算，不是"总数减已知数"：
+
+```python
+missing_symbols = tuple(sorted(set(all_symbols) - set(known_symbols)))
+```
+
+后者在去重失误或重复代码时会给出一个自洽而错误的数字；集合差只会如实列出真正
+缺的那些代码。同时有一条测试盯住"标量计数 / 代码列表 / 结构化覆盖"三者必须
+说的是同一件事——这三处一旦漂移，读者会拿到两个互相矛盾的覆盖率。
+
+### 23.2 外部映射允许残缺，规范映射一律拒绝
+
+分界线写在 CLI 里，而不是写在模型里：
+
+| 路径 | `origin` | 缺标的时 |
+| --- | --- | --- |
+| `--industry-map <csv>` | `external` | 出诊断，缺口如实列出（`require_full_industry_coverage=False`） |
+| 自动加载 canonical | `canonical` | 仍然抛 `IndustryCoverageUnavailable` |
+
+`external` 不会被改写成 `canonical`：那等于用一次便利输入替换掉正式证据。
+本阶段所有报告 `diagnostic_only=True`，没有任何"已批准"标识（有测试禁掉了
+`decision_grade` / `approved_by` / `已批准` 这类字眼）。
+
+### 23.3 映射日期：只能是声明的，或是"未知"
+
+- 新增 `--industry-map-as-of`（可选，**带时区** ISO 时间）。它只描述
+  `--industry-map`；只给日期不给映射是用法错误（退出码 2）。裸时间（没有时区）
+  被拒绝，而不是被悄悄补上本机时区。
+- 不给就是 `None`，报告里写**日期未知**，并明说"不以文件 mtime 顶替，也不把
+  分析时点当成映射日期"。
+- canonical 的日期取**可见成员自己声明的**取数时点
+  （`max(m.as_of for m in canonical if m.as_of <= day)`）。因为
+  `build_industry_map` 已经过滤掉晚于 `as_of` 的记录，所以一个未来日期不可能
+  被当成历史口径；有一条测试专门在成员文件里塞了一条未来记录（还换了行业），
+  断言它既不改行业也不改映射日期。
+
+### 23.4 加字段不许改数字
+
+最硬的一条：**换一份 `industry_evidence` 进去，报告里除它自己之外逐字段完全
+相同**（`test_industry_evidence_never_changes_a_single_computed_number`）。
+证据是"附加说明"，不是"计算输入"。
+
+实测（全池、`--as-of 2026-09-17`）也验证了这一点：`external` 基线缺 9 只，
+把映射里的一只（`000001.SZ`）删掉后缺 10 只，**多出来的恰好是被删的那一只**；
+把两份报告逐字段对照，唯一变化的是 `value` 策略的 `industry_counts`
+（`股份制银行Ⅱ` → `未知行业`）——那是**映射派生**的标签，本来就该随映射变。
+其余全部逐字节相同：
+
+| 对照项 | 结果 |
+| --- | --- |
+| 六个策略的 score / rank_percentile / ranked_count / 分位 / 重叠 / 敏感度 | 全部相同 |
+| `factor_distributions`（24 个因子的分位与计数） | 相同 |
+| `data_status_counts` | 相同 |
+| `factor_anomalies` | 相同 |
+| `population`（5565 / 4991 / 2303） | 相同 |
+| `value.industry_counts` | **不同**（映射派生标签，符合预期） |
+
+### 23.5 实测数字（全池 2026-09-17）
+
+```bash
+uv run astock calibrate candidates --as-of 2026-09-17 --output-dir <dir> \
+  --industry-map var/acceptance/baseline-20260918/reverse-1.2/industry-external-2026-09-17.csv
+# 退出码 0
+```
+
+- 研究池 **2,303**；覆盖 **2,294 / 2,303 = 0.9961**；缺口 **9**：
+  `000592.SZ`、`000968.SZ`、`002679.SZ`、`300896.SZ`、`600158.SH`、`600185.SH`、
+  `600938.SH`、`601888.SH`、`689009.SH`。
+- 四榜可打分（`ranked`）：growth **2,302**、momentum **2,281**、quality **1,697**、
+  dividend **1,612**——与开工现状给的数字**逐个一致**。
+- `industry_evidence` 落成：
+  `{"diagnostic_only": true, "mapping_as_of": null, "origin": "external",
+    "source_ref": "...", "source_sha256": "f3e0d692…"}`。
+  `mapping_as_of` 是 `null` 而不是分析日：那份 CSV 确实没声明日期。
+
+### 23.6 反向验证（红→绿，实跑）
+
+| 步骤 | 命令 | 退出码 | 结果 |
+| --- | --- | --- | --- |
+| 绿 | `--industry-map`（覆盖 2,294 只） | 0 | 报告落盘，`unknown_industry_symbols` 恰 9 只 |
+| 绿 | `--industry-map` 删掉 `000001.SZ` | 0 | 仍出报告，缺口恰 10 只且**包含**被删的那只 |
+| 红 | 不给 `--industry-map`（走 canonical） | 1 | `IndustryCoverageUnavailable: decision-grade calibration requires canonical industry coverage for every symbol, but 9 of 2303 have no industry membership; run 'astock sync-industry' or pass an explicit --industry-map and label the report as externally mapped` |
+| 红 | `--industry-map-as-of 2026-09-16T15:00:00`（裸时间） | 2 | `needs a timezone offset (e.g. 2026-09-17T15:00:00+08:00); a bare time is not a fact` |
+| 红 | 只给 `--industry-map-as-of` 不给 `--industry-map` | 2 | 点名需要 `--industry-map` |
+
+canonical 的"仍拒绝"是在**全池真实数据**上跑的（不是小夹具），所以上表里那句
+`9 of 2303` 就是现状描述里那一句，一个字不差。
+
+**正式状态零改动**：跑完 1.2 的三次真实运行之后，`data/snapshots` 与 `var/jobs` 的
+12 个 JSON 文件 sha256 与开工前逐一相同（`diff` 无输出）。
+
+### 23.7 一处偏离计划原文
+
+计划写"新增 `--industry-map-as-of` 为可选的带时区 ISO 时间，未提供就存 `None`"，
+没有规定"给了日期却没给映射"怎么办。实现选择**显式拒绝（退出码 2）**：那个日期
+描述的是某一份外部映射，没有那份映射时它无话可说，静默忽略会让用户以为日期
+被记下了。这条选择连同测试一起留在
+`tests/integration/test_calibration_readiness_cli.py`。

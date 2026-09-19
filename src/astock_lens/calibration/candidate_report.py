@@ -4,6 +4,9 @@ import statistics
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from typing import Literal
+
+from pydantic import Field
 
 from astock_lens.calibration.factor_distribution import (
     BoundarySample,
@@ -22,6 +25,42 @@ CALIBRATION_PERCENTILES: tuple[float, ...] = (0.80, 0.85, 0.90, 0.95)
 
 class IndustryCoverageUnavailable(RuntimeError):
     """决策级报告缺少行业覆盖：少一整项证据就不该被当成可批复的材料。"""
+
+
+class IndustryEvidence(DomainRecord):
+    """行业映射这份证据是谁给的、哪一天的、能不能当正式口径用。
+
+    这张映射有一半是"事实"，另一半是"判断"，字段必须把两者分开：
+
+    * `origin` 说清这份映射是仓库规范链路（`canonical`）产出的，还是外部文件
+      （`external`），还是压根没声明（`unspecified`）。外部映射**永远不会**被
+      改写成 `canonical`——那等于用一次便利输入替换掉正式证据。
+    * `mapping_as_of` 是映射自己的时点。不知道就留 `None`。**不用文件 mtime
+      顶替，也不把分析时点写上去**：前者是文件系统的噪声，后者是把别人的日期
+      说成自己的。
+    * `source_sha256` 让"用的是哪一份文件"可复算；`source_ref` 是它的名字。
+    * `diagnostic_only` 本阶段恒为 `True`。这张映射只用于诊断，不构成已批准
+      的产品规则。
+    """
+
+    origin: Literal["canonical", "external", "unspecified"] = "unspecified"
+    source_ref: str | None = None
+    source_sha256: str | None = None
+    mapping_as_of: datetime | None = None
+    diagnostic_only: bool = True
+
+
+class IndustryCoverage(DomainRecord):
+    """参与计算的标的里有多少只有行业归属，缺的到底是哪些代码。
+
+    缺口用**集合差**算出来（参与计算标的 − 有行业归属标的），不靠计数反推：
+    一份只有数字没有代码的缺口报告，读者无法核对也无法据此补数据。
+    """
+
+    missing_symbols: tuple[str, ...]
+    known_count: int
+    total_count: int
+    ratio: float
 
 
 TRACKED_ANOMALY_FACTORS: tuple[str, ...] = (
@@ -59,6 +98,12 @@ class CandidateCalibrationReport(DomainRecord):
     strategies: tuple[StrategyCalibration, ...]
     industry_coverage_ratio: float
     unknown_industry_count: int
+    # 缺口同时以三种形态存在，它们必须说的是同一件事：标量计数供人读，代码列表
+    # 供人核，结构化的 `IndustryCoverage` 供机器消费。测试里有一条专门盯住三者
+    # 不许漂移。
+    unknown_industry_symbols: tuple[str, ...] = ()
+    industry_coverage: IndustryCoverage | None = None
+    industry_evidence: IndustryEvidence = Field(default_factory=IndustryEvidence)
     factor_anomalies: tuple[tuple[str, str], ...] = ()
     data_status_counts: tuple[tuple[str, int], ...] = ()
     factor_distributions: tuple[FactorDistribution, ...] = ()
@@ -86,6 +131,7 @@ def generate_calibration_report(
     factor_results: Sequence[FactorResult],
     industry_map: Mapping[str, str],
     population: CalibrationPopulation | None = None,
+    industry_evidence: IndustryEvidence | None = None,
     require_full_industry_coverage: bool = False,
 ) -> CandidateCalibrationReport:
     """Generate a deterministic calibration evidence report.
@@ -93,6 +139,11 @@ def generate_calibration_report(
     Raises ValueError if industry_map is empty, and `IndustryCoverageUnavailable`
     when full coverage is required but some symbols have no industry: a report
     missing the industry evidence must not read as a decision-grade one.
+
+    `industry_evidence` describes the mapping itself and is recorded verbatim;
+    it never takes part in the computation. `require_full_industry_coverage`
+    is the *only* branch that refuses on a gap — external mappings are allowed
+    to be incomplete and must still produce a diagnostic that names the gap.
     """
     if not industry_map:
         raise ValueError("industry_map cannot be empty")
@@ -103,7 +154,10 @@ def generate_calibration_report(
     known_symbols = [
         s for s in all_symbols if s in industry_map and industry_map[s].strip()
     ]
-    unknown_industry_count = len(all_symbols) - len(known_symbols)
+    # 缺口是集合差，不是 "总数减已知数"：后者在重复代码或去重失误时会给出一个
+    # 自洽但错误的数字，而集合差只会如实列出真正缺的那些代码。
+    missing_symbols = tuple(sorted(set(all_symbols) - set(known_symbols)))
+    unknown_industry_count = len(missing_symbols)
     if require_full_industry_coverage and unknown_industry_count:
         raise IndustryCoverageUnavailable(
             "decision-grade calibration requires canonical industry coverage for "
@@ -249,6 +303,16 @@ def generate_calibration_report(
         strategies=tuple(strategy_calibrations),
         industry_coverage_ratio=round(industry_coverage_ratio, 4),
         unknown_industry_count=unknown_industry_count,
+        unknown_industry_symbols=missing_symbols,
+        industry_coverage=IndustryCoverage(
+            missing_symbols=missing_symbols,
+            known_count=len(known_symbols),
+            total_count=len(all_symbols),
+            ratio=round(industry_coverage_ratio, 4),
+        ),
+        industry_evidence=(
+            industry_evidence if industry_evidence is not None else IndustryEvidence()
+        ),
         factor_anomalies=tuple(anomalies),
         data_status_counts=sorted_status,
         factor_distributions=factor_distributions(factor_results),
