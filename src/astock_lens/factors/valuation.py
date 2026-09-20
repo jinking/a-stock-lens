@@ -48,7 +48,6 @@ VALUATION_FACTORS: Mapping[str, ValuationMetricSpec] = {
     "pb": ValuationMetricSpec("pb", "x", True),
     "ps_ttm": ValuationMetricSpec("ps_ttm", "x", True),
     "pe_percentile": ValuationMetricSpec("pe_percentile", "%"),
-    "dividend_yield_ttm": ValuationMetricSpec("dividend_yield_ttm", "%"),
     "pcf_operating_ttm": ValuationMetricSpec("pcf_operating_ttm", "x", True),
     "peg": ValuationMetricSpec("peg", "x", True),
 }

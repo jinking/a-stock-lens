@@ -18,6 +18,7 @@ from astock_lens.factors.contracts import (
     FactorMetadata,
     FactorResult,
 )
+from astock_lens.factors.dividend import DividendYieldTTMFactor
 from astock_lens.factors.fundamental import (
     METRIC_DEFINITIONS,
     RATIO_DEFINITIONS,
@@ -236,6 +237,8 @@ def build_factor(factor_config: FactorConfig) -> Factor:
         return FundamentalRatioFactor(factor_config)
     if factor_config.name in METRIC_DEFINITIONS:
         return MetricPassthroughFactor(factor_config)
+    if factor_config.name == "dividend_yield_ttm":
+        return DividendYieldTTMFactor(factor_config)
     if factor_config.name in VALUATION_FACTORS:
         return ValuationFactor(factor_config)
     raise ValueError(
