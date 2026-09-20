@@ -7,8 +7,10 @@ import yaml
 
 from astock_lens.domain.enums import DataStatus
 from astock_lens.domain.models import DomainRecord
-from astock_lens.qualifications.models import AbsoluteQualificationVerdict
-from astock_lens.strategies.contracts import StrategyResult
+from astock_lens.qualifications.models import (
+    AbsoluteQualificationVerdict,
+    QualificationContext,
+)
 
 
 class FactorThreshold(DomainRecord):
@@ -34,9 +36,14 @@ class FactorThresholdRule:
         self.thresholds = dict(thresholds)
         self.description = description
 
-    def evaluate(self, result: StrategyResult) -> AbsoluteQualificationVerdict:
-        """Evaluate strategy result factor snapshot against all configured thresholds."""
-        factor_map = {f.factor: f for f in result.factor_snapshot}
+    def evaluate(self, context: QualificationContext) -> AbsoluteQualificationVerdict:
+        """Evaluate the symbol's full factor evidence against all configured thresholds.
+
+        证据来自 ``context.factors``（该股票的完整 FactorResult 集合），而不仅是
+        策略评分快照。缺失因子、``raw_value is None`` 或非 ``DataStatus.VALUE``
+        一律记为 risk 并导致失败关闭。
+        """
+        factor_map = {f.factor: f for f in context.factors}
         reasons: list[str] = []
         risks: list[str] = []
 

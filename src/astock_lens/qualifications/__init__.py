@@ -15,6 +15,7 @@ from astock_lens.qualifications.garp import GARPQualifier
 from astock_lens.qualifications.growth import GrowthQualifier
 from astock_lens.qualifications.models import (
     AbsoluteQualificationVerdict,
+    QualificationContext,
     StrategyQualification,
 )
 from astock_lens.qualifications.momentum import MomentumQualifier
@@ -44,6 +45,7 @@ __all__ = [
     "GARPQualifier",
     "GrowthQualifier",
     "MomentumQualifier",
+    "QualificationContext",
     "QualificationRuleNotConfigured",
     "QualityQualifier",
     "StrategyQualification",

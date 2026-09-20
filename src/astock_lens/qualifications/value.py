@@ -2,8 +2,10 @@
 
 from astock_lens.qualifications.common import build_qualification
 from astock_lens.qualifications.contracts import AbsoluteQualificationRule
-from astock_lens.qualifications.models import StrategyQualification
-from astock_lens.strategies.contracts import StrategyResult
+from astock_lens.qualifications.models import (
+    QualificationContext,
+    StrategyQualification,
+)
 
 
 class ValueQualifier:
@@ -20,9 +22,9 @@ class ValueQualifier:
         self.absolute_rule = absolute_rule
         self.qualification_version = qualification_version
 
-    def qualify(self, result: StrategyResult) -> StrategyQualification:
+    def qualify(self, context: QualificationContext) -> StrategyQualification:
         return build_qualification(
-            result=result,
+            context=context,
             expected_strategy_id=self.strategy_id,
             qualification_version=self.qualification_version,
             absolute_rule=self.absolute_rule,

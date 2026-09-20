@@ -14,6 +14,7 @@ from astock_lens.qualifications.garp import GARPQualifier
 from astock_lens.qualifications.growth import GrowthQualifier
 from astock_lens.qualifications.models import (
     AbsoluteQualificationVerdict,
+    QualificationContext,
 )
 from astock_lens.qualifications.momentum import MomentumQualifier
 from astock_lens.qualifications.quality import QualityQualifier
@@ -47,17 +48,25 @@ def _strategy_result(
     )
 
 
+def _context(result: StrategyResult) -> QualificationContext:
+    """把策略结果包装为资格上下文，默认沿用其评分快照作为证据。"""
+    return QualificationContext(
+        strategy_result=result,
+        factors=result.factor_snapshot,
+    )
+
+
 class _AlwaysPassAbsoluteRule:
     version = "rule-v1"
 
-    def evaluate(self, result: StrategyResult) -> AbsoluteQualificationVerdict:
+    def evaluate(self, context: QualificationContext) -> AbsoluteQualificationVerdict:
         return AbsoluteQualificationVerdict(passed=True, reasons=("absolute pass",))
 
 
 class _AlwaysFailAbsoluteRule:
     version = "rule-v1"
 
-    def evaluate(self, result: StrategyResult) -> AbsoluteQualificationVerdict:
+    def evaluate(self, context: QualificationContext) -> AbsoluteQualificationVerdict:
         return AbsoluteQualificationVerdict(passed=False, risks=("absolute fail",))
 
 
@@ -67,7 +76,7 @@ def test_percentile_below_top_ten_percent_cannot_qualify() -> None:
         absolute_rule=_AlwaysPassAbsoluteRule(),
         qualification_version="v1",
     )
-    qualification = qualifier.qualify(result)
+    qualification = qualifier.qualify(_context(result))
     assert qualification.percentile_pass is False
     assert qualification.absolute_pass is True
     assert qualification.qualified is False
@@ -79,7 +88,7 @@ def test_percentile_and_absolute_gate_must_both_pass() -> None:
         absolute_rule=_AlwaysPassAbsoluteRule(),
         qualification_version="v1",
     )
-    qualification = qualifier.qualify(result)
+    qualification = qualifier.qualify(_context(result))
     assert qualification.percentile_pass is True
     assert qualification.absolute_pass is True
     assert qualification.qualified is True
@@ -91,7 +100,7 @@ def test_qualification_version_is_pinned_and_non_empty() -> None:
         absolute_rule=_AlwaysPassAbsoluteRule(),
         qualification_version="val-qual-v2",
     )
-    qualification = qualifier.qualify(result)
+    qualification = qualifier.qualify(_context(result))
     assert qualification.qualification_version == "val-qual-v2"
 
 
@@ -101,7 +110,7 @@ def test_absolute_failure_blocks_qualification_even_with_high_percentile() -> No
         absolute_rule=_AlwaysFailAbsoluteRule(),
         qualification_version="v1",
     )
-    qualification = qualifier.qualify(result)
+    qualification = qualifier.qualify(_context(result))
     assert qualification.percentile_pass is True
     assert qualification.absolute_pass is False
     assert qualification.qualified is False
@@ -115,7 +124,7 @@ def test_missing_rank_percentile_raises_value_error() -> None:
         qualification_version="v1",
     )
     with pytest.raises(ValueError, match="rank_percentile"):
-        qualifier.qualify(result)
+        qualifier.qualify(_context(result))
 
 
 def test_qualifier_rejects_mismatched_strategy_id() -> None:
@@ -125,7 +134,7 @@ def test_qualifier_rejects_mismatched_strategy_id() -> None:
         qualification_version="v1",
     )
     with pytest.raises(ValueError, match="Strategy ID mismatch"):
-        qualifier.qualify(result)
+        qualifier.qualify(_context(result))
 
 
 def test_six_independent_qualifiers_instantiate_correctly() -> None:
@@ -148,7 +157,7 @@ def test_six_independent_qualifiers_instantiate_correctly() -> None:
     ]
     for q in qualifiers:
         res = _strategy_result(strategy_id=q.strategy_id, rank_percentile=0.95)
-        qual = q.qualify(res)
+        qual = q.qualify(_context(res))
         assert qual.qualified is True
         assert qual.strategy_id == q.strategy_id
 
@@ -209,7 +218,7 @@ def test_factor_threshold_rule_evaluation() -> None:
         ),
     )
     res_pass = res_pass.model_copy(update={"factor_snapshot": factors_pass})
-    verdict_pass = rule.evaluate(res_pass)
+    verdict_pass = rule.evaluate(_context(res_pass))
     assert verdict_pass.passed is True
     assert len(verdict_pass.risks) == 0
 
@@ -234,7 +243,7 @@ def test_factor_threshold_rule_evaluation() -> None:
         ),
     )
     res_fail = res_pass.model_copy(update={"factor_snapshot": factors_fail})
-    verdict_fail = rule.evaluate(res_fail)
+    verdict_fail = rule.evaluate(_context(res_fail))
     assert verdict_fail.passed is False
     assert any("net_profit_parent_yoy" in r for r in verdict_fail.risks)
 

@@ -4,9 +4,9 @@ from typing import Protocol
 
 from astock_lens.qualifications.models import (
     AbsoluteQualificationVerdict,
+    QualificationContext,
     StrategyQualification,
 )
-from astock_lens.strategies.contracts import StrategyResult
 
 
 class QualificationRuleNotConfigured(RuntimeError):
@@ -18,8 +18,8 @@ class AbsoluteQualificationRule(Protocol):
 
     version: str
 
-    def evaluate(self, result: StrategyResult) -> AbsoluteQualificationVerdict:
-        """Evaluate strategy result against absolute quality criteria."""
+    def evaluate(self, context: QualificationContext) -> AbsoluteQualificationVerdict:
+        """Evaluate the symbol's full qualification evidence against absolute criteria."""
         ...
 
 
@@ -29,6 +29,6 @@ class StrategyQualifier(Protocol):
     strategy_id: str
     qualification_version: str
 
-    def qualify(self, result: StrategyResult) -> StrategyQualification:
-        """Evaluate a strategy result against both percentile and absolute quality gates."""
+    def qualify(self, context: QualificationContext) -> StrategyQualification:
+        """Evaluate a symbol against both percentile and absolute quality gates."""
         ...

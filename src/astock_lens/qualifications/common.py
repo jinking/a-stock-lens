@@ -1,7 +1,10 @@
 """Common helpers for strategy qualification."""
 
 from astock_lens.qualifications.contracts import AbsoluteQualificationRule
-from astock_lens.qualifications.models import StrategyQualification
+from astock_lens.qualifications.models import (
+    QualificationContext,
+    StrategyQualification,
+)
 from astock_lens.strategies.contracts import StrategyResult
 
 TOP_TEN_PERCENT_FLOOR = 0.90
@@ -17,12 +20,17 @@ def passes_percentile(result: StrategyResult) -> bool:
 
 def build_qualification(
     *,
-    result: StrategyResult,
+    context: QualificationContext,
     expected_strategy_id: str,
     qualification_version: str,
     absolute_rule: AbsoluteQualificationRule,
 ) -> StrategyQualification:
-    """Assemble a StrategyQualification applying both percentile and absolute gates."""
+    """Assemble a StrategyQualification applying both percentile and absolute gates.
+
+    百分位门槛读取策略结果本身；绝对资格门槛读取 ``context``，从而获得该股票
+    完整 Factor 证据，而不仅是策略评分快照。
+    """
+    result = context.strategy_result
     if result.strategy_id != expected_strategy_id:
         raise ValueError(
             f"Strategy ID mismatch: expected '{expected_strategy_id}', got '{result.strategy_id}'"
@@ -33,7 +41,7 @@ def build_qualification(
     percentile_pass = passes_percentile(result)
     assert result.rank_percentile is not None
 
-    verdict = absolute_rule.evaluate(result)
+    verdict = absolute_rule.evaluate(context)
     qualified = percentile_pass and verdict.passed
 
     return StrategyQualification(
