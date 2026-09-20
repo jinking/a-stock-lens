@@ -1909,3 +1909,46 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
     - `BUILD_CANDIDATES` 阶段成功装配资格规则，`"strategy qualification rules are not configured: absolute quality thresholds have not been approved"` 阻断原因完全消除；
     - 阶段依法依规保持受限于上游未实施的 Regime / Validation / Signal 模块与 Candidate Selection Policy，继续输出 `5 blocked, 0 failed`，符合设计预期；
   - 全量快速回归测试通过：`make test-fast PYTHONPATH=` 达 **996 passed**（新增 6 个测试用例，0 失败），`ruff` 与 `mypy` 静态检查完全 Clean。
+
+### 33.11 锁定六策略资格规则契约测试：生产规则漂移 RED 证据（2026-09-20）
+
+- **任务**：Qualification Correctness Hardening 实施计划 Task 1（Step 1–6）。
+- **新增契约测试**：`tests/contract/test_qualification_production_rules.py`。把所有者于 2026-09-20 批准的六策略绝对资格规则逐字写死为 `EXPECTED`，并对生产 YAML 做硬契约断言；在 Task 4 修复生产 YAML 之前保持 RED。
+- **运行命令与结果**（`PYTHONPATH= .venv/bin/python -m pytest tests/contract/test_qualification_production_rules.py -v`）：
+
+  ```text
+  5 failed, 3 passed in 0.19s
+  ```
+
+  逐用例：
+
+  ```text
+  test_production_rule_matches_owner_approval[value]    FAILED
+  test_production_rule_matches_owner_approval[growth]   FAILED
+  test_production_rule_matches_owner_approval[garp]     FAILED
+  test_production_rule_matches_owner_approval[quality]  PASSED
+  test_production_rule_matches_owner_approval[dividend] FAILED
+  test_production_rule_matches_owner_approval[momentum] PASSED
+  test_dividend_rule_uses_approved_metrics_not_percent_ratio_substitute FAILED
+  test_momentum_liquidity_is_an_upstream_universe_gate  PASSED
+  ```
+
+- **真实失配清单（契约测试实际输出）**：
+  - **value**：生产 YAML 私自追加了未经审批的正数下限。
+    - 现状：`pe_ttm {min: 0.0001, max: 25.0}`、`pb {min: 0.0001, max: 2.5}`、`roe_ttm {min: 5.0}`；
+    - 批准：`pe_ttm {max: 25.0}`、`pb {max: 2.5}`、`roe_ttm {min: 5.0}`；
+    - 差异：`pe_ttm`、`pb` 多出 `min: 0.0001`。非正 PE/PB 已由 Factor 层判定 `NOT_APPLICABLE`，资格层不得重复发明"正数"语义。
+  - **growth**：`roe_ttm >= 8%` 被未经审批替换为 `net_profit_parent_cagr_3y >= 10%`。
+    - 现状：`net_profit_parent_yoy {min: 15.0}`、`revenue_yoy {min: 5.0}`、`net_profit_parent_cagr_3y {min: 10.0}`；
+    - 批准：`net_profit_parent_yoy {min: 15.0}`、`revenue_yoy {min: 5.0}`、`roe_ttm {min: 8.0}`。
+  - **garp**：指标替换 + 单位错误。
+    - 现状：`pe_percentile {max: 0.6}`、`net_profit_parent_cagr_3y {min: 15.0}`、`roe_ttm {min: 10.0}`；
+    - 批准：`pe_ttm {max: 35.0}`、`net_profit_parent_yoy {min: 15.0}`、`roe_ttm {min: 10.0}`；
+    - `pe_percentile` 原始单位为 `%`，`0.60` 实为 `0.60%` 而非 `60%`。
+  - **dividend**：指标替换 + 单位错误（专项用例 `KeyError: 'dividend_yield_ttm'`）。
+    - 现状：`dividend_paid_ratio {min: 0.10, max: 0.80}`、`ocf_to_net_profit {min: 0.50}`；缺 `dividend_yield_ttm`；
+    - 批准：`dividend_yield_ttm {min: 3.0}`、`dividend_payout_ttm {min: 0.10, max: 0.80}`；
+    - `dividend_paid_ratio` 单位是 `%`，真实值可为 `27.13` / `79.00`，`0.10~0.80` 实际退化为 `0.10%~0.80%`。
+  - **quality**：与批准一致（`roe_ttm>=12`、`gross_margin>=20`、`debt_to_asset<=65`），PASSED。
+  - **momentum**：与批准一致（仅 `proximity_52w_high {min: 0.80}`），PASSED；流动性由 canonical Universe `min_average_turnover_20d = 150,000,000` 承担，专项用例 PASSED。
+- **结论**：生产资格规则存在 4 个策略的审批漂移（value/growth/garp/dividend），其中 2 个同时含单位错误（garp/dividend）。本契约测试即为后续 Task 4 必须达成的目标，RED 证据已留存。
