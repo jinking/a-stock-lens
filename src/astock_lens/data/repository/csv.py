@@ -16,6 +16,8 @@ from astock_lens.data.contracts import (
     RawDataset,
     RawPayload,
 )
+from astock_lens.data.dividends.models import DividendEvent
+from astock_lens.data.dividends.normalize import normalize_dividend_events
 from astock_lens.data.normalize.csv_bars import CsvDailyBarNormalizer
 from astock_lens.data.normalize.csv_securities import CsvSecurityNormalizer
 from astock_lens.data.normalize.financials import (
@@ -79,6 +81,7 @@ class CsvNormalizedRepository:
 
         financials = self.financial_inputs(as_of=as_of)
         valuations = self.valuation_inputs(as_of=as_of)
+        dividends = self.dividend_inputs(as_of=as_of)
 
         gated = NormalizedDataset(
             dataset=normalized.dataset,
@@ -88,6 +91,7 @@ class CsvNormalizedRepository:
             # the fundamentals travel with the bars rather than beside them.
             observations=financials.observations,
             valuations=valuations.observations,
+            dividend_events=dividends,
             parse_failures=normalized.parse_failures,
         )
 
@@ -175,3 +179,15 @@ class CsvNormalizedRepository:
             absent_metrics=outcome.absent_metrics,
             failures=outcome.failures,
         )
+
+    def dividend_inputs(self, *, as_of: datetime) -> tuple[DividendEvent, ...]:
+        """读取不晚于 as_of 的最新分红历史落地文件并归一化。"""
+        path = latest_neodata_file(self._csv_root, "dividend_history", as_of=as_of)
+        if path is None:
+            return ()
+        _, rows = read_raw_rows(path)
+        events: list[DividendEvent] = []
+        for row in rows:
+            if len(row) >= 3:
+                events.extend(normalize_dividend_events(row[2], default_as_of=as_of))
+        return tuple(events)
