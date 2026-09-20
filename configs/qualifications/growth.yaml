@@ -1,0 +1,11 @@
+# 稳健成长策略绝对质量门槛（所有者审批 2026-09-20 方案 1）
+strategy_id: growth
+version: v1
+description: 稳健成长质量门槛：单季度净利增速>=15%，营收增速>=5%，3年净利复合增速>=10%
+thresholds:
+  net_profit_parent_yoy:
+    min: 15.0
+  revenue_yoy:
+    min: 5.0
+  net_profit_parent_cagr_3y:
+    min: 10.0

@@ -82,6 +82,33 @@ def test_no_approved_absolute_rules_blocks_build_candidates() -> None:
     assert any("strategy qualification rules are not configured" in r for r in reasons)
 
 
+def test_canonical_qualifiers_removes_unconfigured_reason() -> None:
+    from astock_lens.qualifications.registry import load_canonical_qualifiers
+
+    context = _Context(
+        csv_root=Path("/fake"),
+        as_of=AS_OF,
+        dataset="bars",
+        securities_dataset="securities",
+        universe_config=UniverseConfig(
+            exchanges=("SSE", "SZSE"),
+            min_listing_days=180,
+            min_average_turnover_20d=10_000_000.0,
+        ),
+        factor_configs=(),
+        scanners=(),
+        strategy_directory=Path("/fake"),
+        store=None,  # type: ignore[arg-type]
+        sync=None,
+        candidate_policy=RepresentativeCandidatePolicy(),
+        qualifiers=load_canonical_qualifiers(),
+    )
+    reasons = _blocked_reasons(JobStage.BUILD_CANDIDATES, context)
+    assert not any(
+        "strategy qualification rules are not configured" in r for r in reasons
+    )
+
+
 def test_missing_upstream_layers_blocks_build_candidates() -> None:
     context = _Context(
         csv_root=Path("/fake"),

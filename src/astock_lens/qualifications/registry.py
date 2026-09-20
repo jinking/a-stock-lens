@@ -1,6 +1,8 @@
 """Registry and factory for strategy qualifiers."""
 
+import os
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from astock_lens.qualifications.contracts import (
@@ -13,6 +15,7 @@ from astock_lens.qualifications.garp import GARPQualifier
 from astock_lens.qualifications.growth import GrowthQualifier
 from astock_lens.qualifications.momentum import MomentumQualifier
 from astock_lens.qualifications.quality import QualityQualifier
+from astock_lens.qualifications.rules import load_qualification_rule
 from astock_lens.qualifications.value import ValueQualifier
 
 QUALIFIER_CLASSES: dict[str, type[Any]] = {
@@ -61,3 +64,35 @@ def build_qualifiers(
         )
         qualifiers[strategy_id] = qualifier
     return qualifiers
+
+
+QUALIFICATION_CONFIG_DIR_ENV = "ASTOCK_QUALIFICATION_DIR"
+DEFAULT_QUALIFICATION_CONFIG_DIR = Path("configs/qualifications")
+
+
+def load_canonical_qualifiers(
+    config_dir: Path | None = None,
+    *,
+    enabled_strategy_ids: tuple[str, ...] = CANONICAL_STRATEGY_IDS,
+) -> dict[str, StrategyQualifier]:
+    """Load canonical qualifiers for enabled strategies from configuration directory.
+
+    Raises QualificationRuleNotConfigured if any enabled strategy lacks an approved rule.
+    """
+    if config_dir is not None:
+        target_dir = config_dir
+    else:
+        env_val = os.getenv(QUALIFICATION_CONFIG_DIR_ENV)
+        target_dir = Path(env_val) if env_val else DEFAULT_QUALIFICATION_CONFIG_DIR
+
+    rules: dict[str, AbsoluteQualificationRule] = {}
+    for strat_id in enabled_strategy_ids:
+        cfg_file = target_dir / f"{strat_id}.yaml"
+        if not cfg_file.is_file():
+            raise QualificationRuleNotConfigured(
+                f"Missing approved absolute qualification rule for strategy '{strat_id}': "
+                f"expected file {cfg_file}"
+            )
+        rules[strat_id] = load_qualification_rule(cfg_file)
+
+    return build_qualifiers(rules, enabled_strategy_ids=enabled_strategy_ids)

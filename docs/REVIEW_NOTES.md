@@ -1886,3 +1886,26 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
     - 证据来源：`origin="canonical"`，`mapping_as_of="2026-09-18T15:00:00+08:00"`；
     - `IndustryCoverageUnavailable` 阻断彻底解除，成功生成决策级校准报告；
   - 全量快速回归测试通过：`make test-fast PYTHONPATH=` 达 **990 passed**（新增 4 个用例，0 失败），`ruff` 与 `mypy` 严格通过。
+
+### 33.10 六策略稳健平衡型绝对质量门槛生产落地与日常管线接入（2026-09-20）
+
+- **背景与裁决执行**：
+  - 基于项目所有者正式批准的【方案 1：稳健平衡型规则】及决策文件 `docs/decision-packets/2026-09-20-candidate-qualification-diagnostic-packet.md`；
+  - 终结 `configs/qualifications/` 长期保持 0 个规则的空白状态，由规范 YAML 配置赋予六大策略显式数字门槛。
+- **六策略绝对质量门槛规则生产落地（`configs/qualifications/`）**：
+  - `growth.yaml`：`net_profit_parent_yoy >= 15.0%`、`revenue_yoy >= 5.0%`、`net_profit_parent_cagr_3y >= 10.0%`（防范微利暴增异象，强化持续验证）；
+  - `momentum.yaml`：`proximity_52w_high >= 0.80`（创一年新高附近，价格强度确认）；
+  - `quality.yaml`：`roe_ttm >= 12.0%`、`gross_margin >= 20.0%`、`debt_to_asset <= 65.0%`（优秀盈利、产品护城河与安全负债）；
+  - `dividend.yaml`：`0.10 <= dividend_paid_ratio <= 0.80`、`ocf_to_net_profit >= 0.50`（剔除 9282% 等清仓式分红与微利分红，要求经营现金流支撑）；
+  - `value.yaml`：`0 < pe_ttm <= 25.0`、`0 < pb <= 2.5`、`roe_ttm >= 5.0%`（兼顾低估值与正向收益底线，防止低价价值陷阱）；
+  - `garp.yaml`：`pe_percentile <= 0.60`、`net_profit_parent_cagr_3y >= 15.0%`、`roe_ttm >= 10.0%`（历史估值分位未透支前提下的高质复合增长）。
+- **规则引擎与加载器架构（`src/astock_lens/qualifications/`）**：
+  - 新增 `FactorThreshold` 与 `FactorThresholdRule`（实现 `AbsoluteQualificationRule` 协议），基于 `StrategyResult.factor_snapshot` 逐项校验因子存在性、`DataStatus.VALUE` 状态与 `[min, max]` 区间，生成明确原因与风险；
+  - 新增 `load_qualification_rule` 与 `load_canonical_qualifiers`（支持 `ASTOCK_QUALIFICATION_DIR` 环境变量路径隔离与测试覆盖）；
+  - 严格保持契约：若任一启用策略缺少规则配置文件，抛出 `QualificationRuleNotConfigured` 强拦截。
+- **日常管线调度接入与状态机核验**：
+  - 在 `src/astock_lens/cli/app.py::_run_daily` 中将 `qualifiers=load_canonical_qualifiers()` 注入 `run_daily`；
+  - 运行 `astock daily --as-of 2026-09-18` 实测验证：
+    - `BUILD_CANDIDATES` 阶段成功装配资格规则，`"strategy qualification rules are not configured: absolute quality thresholds have not been approved"` 阻断原因完全消除；
+    - 阶段依法依规保持受限于上游未实施的 Regime / Validation / Signal 模块与 Candidate Selection Policy，继续输出 `5 blocked, 0 failed`，符合设计预期；
+  - 全量快速回归测试通过：`make test-fast PYTHONPATH=` 达 **996 passed**（新增 6 个测试用例，0 失败），`ruff` 与 `mypy` 静态检查完全 Clean。

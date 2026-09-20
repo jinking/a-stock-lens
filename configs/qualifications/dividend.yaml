@@ -1,0 +1,10 @@
+# 红利策略绝对质量门槛（所有者审批 2026-09-20 方案 1）
+strategy_id: dividend
+version: v1
+description: 可持续红利门槛：分红支付率处于合理区间（10%~80%），经营现金流对净利润支撑>=0.5
+thresholds:
+  dividend_paid_ratio:
+    min: 0.10
+    max: 0.80
+  ocf_to_net_profit:
+    min: 0.50

@@ -23,6 +23,12 @@ from astock_lens.qualifications.registry import (
     CANONICAL_STRATEGY_IDS,
     QUALIFIER_CLASSES,
     build_qualifiers,
+    load_canonical_qualifiers,
+)
+from astock_lens.qualifications.rules import (
+    FactorThreshold,
+    FactorThresholdRule,
+    load_qualification_rule,
 )
 from astock_lens.qualifications.value import ValueQualifier
 
@@ -33,6 +39,8 @@ __all__ = [
     "AbsoluteQualificationRule",
     "AbsoluteQualificationVerdict",
     "DividendQualifier",
+    "FactorThreshold",
+    "FactorThresholdRule",
     "GARPQualifier",
     "GrowthQualifier",
     "MomentumQualifier",
@@ -43,5 +51,7 @@ __all__ = [
     "ValueQualifier",
     "build_qualification",
     "build_qualifiers",
+    "load_canonical_qualifiers",
+    "load_qualification_rule",
     "passes_percentile",
 ]

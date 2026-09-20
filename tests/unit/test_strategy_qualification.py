@@ -1,6 +1,7 @@
 """策略内资格判定单元测试：双门槛（Top 10% + 绝对质量门槛）。"""
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -165,5 +166,130 @@ def test_build_qualifiers_with_missing_rule_raises_not_configured() -> None:
 def test_build_qualifiers_succeeds_when_all_configured() -> None:
     rules = {s: _AlwaysPassAbsoluteRule() for s in CANONICAL_STRATEGY_IDS}
     qualifiers = build_qualifiers(rules)
+    assert len(qualifiers) == 6
+    assert set(qualifiers.keys()) == set(CANONICAL_STRATEGY_IDS)
+
+
+def test_factor_threshold_rule_evaluation() -> None:
+    from astock_lens.domain.enums import DataStatus
+    from astock_lens.factors.contracts import FactorResult
+    from astock_lens.qualifications.rules import FactorThreshold, FactorThresholdRule
+
+    rule = FactorThresholdRule(
+        strategy_id="growth",
+        version="v1",
+        thresholds={
+            "net_profit_parent_yoy": FactorThreshold(min=15.0),
+            "revenue_yoy": FactorThreshold(min=5.0),
+        },
+    )
+
+    res_pass = _strategy_result(
+        strategy_id="growth",
+        rank_percentile=0.95,
+    )
+    factors_pass = (
+        FactorResult(
+            symbol="600000.SH",
+            factor="net_profit_parent_yoy",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(strategy_version="v1"),
+            raw_value=20.0,
+        ),
+        FactorResult(
+            symbol="600000.SH",
+            factor="revenue_yoy",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(strategy_version="v1"),
+            raw_value=8.0,
+        ),
+    )
+    res_pass = res_pass.model_copy(update={"factor_snapshot": factors_pass})
+    verdict_pass = rule.evaluate(res_pass)
+    assert verdict_pass.passed is True
+    assert len(verdict_pass.risks) == 0
+
+    factors_fail = (
+        FactorResult(
+            symbol="600000.SH",
+            factor="net_profit_parent_yoy",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(strategy_version="v1"),
+            raw_value=12.0,  # < 15.0
+        ),
+        FactorResult(
+            symbol="600000.SH",
+            factor="revenue_yoy",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(strategy_version="v1"),
+            raw_value=8.0,
+        ),
+    )
+    res_fail = res_pass.model_copy(update={"factor_snapshot": factors_fail})
+    verdict_fail = rule.evaluate(res_fail)
+    assert verdict_fail.passed is False
+    assert any("net_profit_parent_yoy" in r for r in verdict_fail.risks)
+
+
+def test_load_qualification_rule_from_yaml(tmp_path: Path) -> None:
+    from astock_lens.qualifications.rules import load_qualification_rule
+
+    yaml_file = tmp_path / "growth.yaml"
+    yaml_file.write_text(
+        "strategy_id: growth\n"
+        "version: v1\n"
+        "thresholds:\n"
+        "  net_profit_parent_yoy:\n"
+        "    min: 15.0\n"
+        "  revenue_yoy:\n"
+        "    min: 5.0\n",
+        encoding="utf-8",
+    )
+    rule = load_qualification_rule(yaml_file)
+    assert rule.strategy_id == "growth"
+    assert rule.version == "v1"
+    assert "net_profit_parent_yoy" in rule.thresholds
+    assert rule.thresholds["net_profit_parent_yoy"].min == 15.0
+    assert rule.thresholds["revenue_yoy"].min == 5.0
+
+
+def test_load_canonical_qualifiers_missing_rule_raises(tmp_path: Path) -> None:
+    from astock_lens.qualifications.registry import load_canonical_qualifiers
+
+    # 临时目录为空，没有任何策略资格配置
+    with pytest.raises(
+        QualificationRuleNotConfigured,
+        match="Missing approved absolute qualification rule",
+    ):
+        load_canonical_qualifiers(config_dir=tmp_path)
+
+
+def test_load_canonical_qualifiers_succeeds_when_all_present(tmp_path: Path) -> None:
+    from astock_lens.qualifications.registry import load_canonical_qualifiers
+
+    for strat_id in CANONICAL_STRATEGY_IDS:
+        yaml_file = tmp_path / f"{strat_id}.yaml"
+        yaml_file.write_text(
+            f"strategy_id: {strat_id}\nversion: v1\nthresholds: {{}}\n",
+            encoding="utf-8",
+        )
+
+    qualifiers = load_canonical_qualifiers(config_dir=tmp_path)
+    assert len(qualifiers) == 6
+    assert set(qualifiers.keys()) == set(CANONICAL_STRATEGY_IDS)
+
+
+def test_load_canonical_qualifiers_from_default_directory() -> None:
+    from astock_lens.qualifications.registry import load_canonical_qualifiers
+
+    qualifiers = load_canonical_qualifiers()
     assert len(qualifiers) == 6
     assert set(qualifiers.keys()) == set(CANONICAL_STRATEGY_IDS)

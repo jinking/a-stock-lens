@@ -87,6 +87,10 @@ from astock_lens.pipelines.analysis import (
     run_research_analysis,
 )
 from astock_lens.pipelines.daily import DailyRunResult, run_daily
+from astock_lens.qualifications import (
+    QualificationRuleNotConfigured,
+    load_canonical_qualifiers,
+)
 from astock_lens.research.adapters.cli import (
     CliDeepResearchAdapter,
     DeepResearchInvocationError,
@@ -1053,6 +1057,10 @@ def daily(
 def _run_daily(day: datetime, *, land: bool) -> DailyRunResult:
     """Run the daily pipeline with the configured paths."""
     scanners = load_scanners(_strategy_dir())
+    try:
+        qualifiers = load_canonical_qualifiers()
+    except QualificationRuleNotConfigured:
+        qualifiers = None
     return run_daily(
         csv_root=_csv_root(),
         as_of=day,
@@ -1065,6 +1073,7 @@ def _run_daily(day: datetime, *, land: bool) -> DailyRunResult:
         dataset=_dataset(),
         securities_dataset=_securities_dataset(),
         sync=_sync_stage(day) if land else None,
+        qualifiers=qualifiers,
     )
 
 
