@@ -19,6 +19,7 @@ class SignalContext(DomainRecord):
     as_of: datetime
     factors: tuple[FactorResult, ...] = ()
     market_regime: MarketRegime | None = None
+    strategy_id: str | None = None
 
 
 class SignalResult(DomainRecord):
