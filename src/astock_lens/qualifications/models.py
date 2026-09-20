@@ -1,5 +1,7 @@
 """Strategy qualification models."""
 
+from datetime import datetime
+
 from astock_lens.domain.models import DomainRecord
 from astock_lens.factors.contracts import FactorResult
 from astock_lens.strategies.contracts import StrategyResult
@@ -41,5 +43,6 @@ class StrategyQualification(DomainRecord):
     percentile_pass: bool
     absolute_pass: bool
     rank_percentile: float
+    as_of: datetime | None = None
     reasons: tuple[str, ...] = ()
     risks: tuple[str, ...] = ()

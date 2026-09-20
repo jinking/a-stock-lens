@@ -501,3 +501,73 @@ def test_real_snapshots_from_the_analysis_flow_validate_cleanly(
         )
 
     assert findings == ()
+
+
+def test_real_candidate_snapshots_from_daily_pipeline_validate_cleanly(
+    local_tmp: Path,
+) -> None:
+    """真实 daily 管线生成的全部快照（含 CANDIDATE）通过独立产物校验器。
+
+    使用真实配置与日线数据执行 daily 管线，然后交由独立产物校验器完成：
+    1. 单快照规则审计（CANDIDATE 必填字段、策略资格引用、版本标记、市场验证非否决）；
+    2. 跨快照引用审计（引用的策略结果与因子在同日快照中确凿存在）。
+    """
+    from astock_lens.candidates.policy import RepresentativeCandidatePolicy
+    from astock_lens.jobs.store import JsonJobStore
+    from astock_lens.pipelines.daily import run_daily
+    from astock_lens.qualifications.registry import load_canonical_qualifiers
+    from astock_lens.strategies.registry import load_scanners
+
+    configs_factors = tuple(
+        load_factor_config(path)
+        for path in sorted((ROOT / "configs" / "factors").glob("*.yaml"))
+    )
+    scanners = load_scanners(ROOT / "configs" / "strategies")
+    qualifiers = load_canonical_qualifiers(
+        known_factor_names={cfg.name for cfg in configs_factors}
+    )
+
+    store: SnapshotStore = JsonSnapshotStore(local_tmp / "snapshots")
+    result = run_daily(
+        csv_root=CSV_ROOT,
+        as_of=AS_OF,
+        universe_config=load_universe_config(ROOT / "configs" / "universe.yaml"),
+        factor_configs=configs_factors,
+        scanners=scanners,
+        strategy_directory=ROOT / "configs" / "strategies",
+        dataset=LONG_DATASET,
+        store=store,
+        job_store=JsonJobStore(local_tmp / "jobs"),
+        qualifiers=qualifiers,
+        candidate_policy=RepresentativeCandidatePolicy(version="v1"),
+    )
+
+    assert len(result.candidates) > 0
+
+    candidate_records = store.read(SnapshotKind.CANDIDATE, AS_OF)
+    factor_records = store.read(SnapshotKind.FACTOR, AS_OF)
+    strategy_records = store.read(SnapshotKind.STRATEGY, AS_OF)
+    universe_records = store.read(SnapshotKind.UNIVERSE, AS_OF)
+
+    assert candidate_records is not None
+    assert factor_records is not None
+    assert strategy_records is not None
+    assert universe_records is not None
+
+    known_strat_ids = {s.config.id for s in scanners}
+    findings_cand = validate_snapshot(
+        "CANDIDATE",
+        candidate_records,
+        as_of=AS_OF,
+        known_factor_names=KNOWN_FACTORS,
+        known_strategy_ids=known_strat_ids,
+    )
+    assert findings_cand == ()
+
+    findings_set = validate_snapshot_set(
+        factor_records=factor_records,
+        strategy_records=strategy_records,
+        candidate_records=candidate_records,
+        as_of=AS_OF,
+    )
+    assert findings_set == ()

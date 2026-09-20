@@ -53,6 +53,7 @@ def build_qualification(
         percentile_pass=percentile_pass,
         absolute_pass=verdict.passed,
         rank_percentile=result.rank_percentile,
+        as_of=result.as_of,
         reasons=verdict.reasons,
         risks=verdict.risks,
     )

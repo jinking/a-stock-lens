@@ -15,9 +15,16 @@ import astock_lens.api.app as api_module
 from astock_lens.api.app import create_app
 from astock_lens.candidates.models import Candidate
 from astock_lens.data.snapshots.store import JsonSnapshotStore
-from astock_lens.domain.enums import DataStatus, NextAction, SnapshotKind
+from astock_lens.domain.enums import (
+    DataStatus,
+    MarketValidation,
+    NextAction,
+    Signal,
+    SnapshotKind,
+)
 from astock_lens.domain.models import SnapshotLineage
 from astock_lens.factors.contracts import FactorResult
+from astock_lens.qualifications.models import StrategyQualification
 from astock_lens.strategies.contracts import StrategyResult
 from astock_lens.universe.models import (
     UniverseExclusion,
@@ -525,6 +532,18 @@ def test_stock_profile_candidate_not_selected(local_tmp: Path) -> None:
 def test_stock_profile_candidate_published(local_tmp: Path) -> None:
     _seed_profile_base(local_tmp)
     store = JsonSnapshotStore(local_tmp)
+    qual = StrategyQualification(
+        symbol="600000.SH",
+        strategy_id="growth",
+        strategy_version="v1",
+        qualification_version="v1",
+        qualified=True,
+        percentile_pass=True,
+        absolute_pass=True,
+        rank_percentile=0.95,
+        as_of=AS_OF,
+        reasons=("strong_growth",),
+    )
     store.write(
         SnapshotKind.CANDIDATE,
         AS_OF,
@@ -534,6 +553,9 @@ def test_stock_profile_candidate_published(local_tmp: Path) -> None:
                 as_of=AS_OF,
                 next_action=NextAction.DEEP_RESEARCH,
                 lineage=SnapshotLineage(factor_version="v1", strategy_version="v1"),
+                strategy_qualifications=(qual,),
+                market_validation=MarketValidation.CONFIRMED,
+                signal=Signal.BREAKOUT,
             )
         ],
     )
@@ -547,6 +569,10 @@ def test_stock_profile_candidate_published(local_tmp: Path) -> None:
     assert payload["candidate"] is not None
     assert payload["candidate"]["symbol"] == "600000.SH"
     assert payload["candidate"]["next_action"] == "DEEP_RESEARCH"
+    assert payload["candidate"]["market_validation"] == "CONFIRMED"
+    assert payload["candidate"]["signal"] == "BREAKOUT"
+    assert len(payload["candidate"]["strategy_qualifications"]) == 1
+    assert payload["candidate"]["strategy_qualifications"][0]["strategy_id"] == "growth"
 
 
 def test_stock_profile_excluded_universe(local_tmp: Path) -> None:
