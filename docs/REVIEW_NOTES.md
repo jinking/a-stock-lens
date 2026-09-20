@@ -1835,3 +1835,26 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
   - 代码库中不存在任何跨策略伪合成评分字段（无 `global_score` / `combined_strategy_score` / `cross_strategy_score`）；
   - `GET /candidates?as_of=2026-09-19` 严格返回 404；调度作业 `BUILD_CANDIDATES` 状态严格保持 `BLOCKED`；
   - 升级包第一阶段准备工作全部闭环，进入项目所有者决策审批门禁（Owner Stop Gate）。
+
+### 33.8 休市日交易日历与行情跳过机制落地（2026-09-20）
+
+- **背景与第一性原理**：
+  - 响应项目所有者要求：“把休市日下次给单独列出来，这一天不要去获取股市的数据”。
+  - 解决周末或法定节假日执行 `astock daily --sync` 或 `sync-research` 时产生无意义外部行情网络请求与报错的问题。
+- **交易日历模块架构（`src/astock_lens/calendar/`）**：
+  - 契约接口：`TradingCalendar` 协议定义 `is_trade_date(target: date) -> bool` 与 `get_latest_trade_date(target: date) -> date`；
+  - 核心实现：`ChinaTradingCalendar` 内置 2024~2027 年已知法定节假日与调休规则，周末（周六/周日）一律判定为休市；支持传入自定义交易日集合；
+  - 零外部网络依赖，单测秒级响应，符合本地优先与确定性原则。
+- **底层落地层门禁拦截（`src/astock_lens/data/sync.py::land_raw`）**：
+  - 当 `as_of` 为非交易日时，严格跳过向 Provider 发送 `daily_bars` 请求；
+  - `DatasetLanding` 明确返回 `DataStatus.NOT_APPLICABLE`，附带 `note="non-trading day (weekend/holiday), skipped market data fetch"`；
+  - 保证休市日零外部网络 I/O，且不产生虚假空数据。
+- **CLI 命令增强与友好提示（`src/astock_lens/cli/app.py`）**：
+  - 新增 `astock calendar is-open --date YYYY-MM-DD`（查询指定日期开市/休市状态）；
+  - 新增 `astock calendar latest --date YYYY-MM-DD`（查询指定日期不晚于当天的最近交易日）；
+  - `astock sync-research` 在休市日自动检测并友好提示，非财务模式下直接优雅退出，彻底跳过全池价格历史抓取。
+- **严格 TDD 验证与回归结果**：
+  - 新增 `tests/unit/test_trading_calendar.py`（6 passed）；
+  - `tests/unit/test_raw_sync.py` 增加休市日跳过单测（17 passed）；
+  - `tests/unit/test_cli.py` 增加 CLI 查询与跳过单测（9 passed）；
+  - 全量 `make test-fast`：**986 passed**，`ruff` 与 `mypy` 全部 Clean。

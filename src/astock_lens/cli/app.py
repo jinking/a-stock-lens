@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 import typer
 from pydantic import BaseModel, ValidationError
 
+from astock_lens.calendar.china import get_calendar
 from astock_lens.calibration.candidate_report import (
     IndustryEvidence,
     generate_calibration_report,
@@ -1100,6 +1101,51 @@ industry_app = typer.Typer(
 )
 app.add_typer(industry_app, name="industry")
 
+calendar_app = typer.Typer(
+    no_args_is_help=True,
+    help="Trading calendar commands.",
+)
+app.add_typer(calendar_app, name="calendar")
+
+
+@calendar_app.command("is-open")
+def calendar_is_open(
+    date: Annotated[
+        str,
+        typer.Option(
+            "--date",
+            help="Target date to inspect, formatted as YYYY-MM-DD.",
+        ),
+    ],
+) -> None:
+    """Check if a date is an active A-Share trading day."""
+    day = _as_of(date)
+    cal = get_calendar()
+    is_open = cal.is_trade_date(day.date())
+    if is_open:
+        typer.echo(f"{day.date().isoformat()} is OPEN (trading day)")
+    else:
+        typer.echo(
+            f"{day.date().isoformat()} is CLOSED (non-trading day / weekend / holiday)"
+        )
+
+
+@calendar_app.command("latest")
+def calendar_latest(
+    date: Annotated[
+        str,
+        typer.Option(
+            "--date",
+            help="Reference date, formatted as YYYY-MM-DD.",
+        ),
+    ],
+) -> None:
+    """Find the latest effective trade date on or before the target date."""
+    day = _as_of(date)
+    cal = get_calendar()
+    latest = cal.get_latest_trade_date(day.date())
+    typer.echo(f"latest trade date: {latest.isoformat()}")
+
 
 @app.command("sync-industry")
 def sync_industry(as_of: Annotated[str, AS_OF_OPTION]) -> None:
@@ -1430,8 +1476,17 @@ def sync_research(
     single-symbol neodata calls, and reports the block instead.
     """
     day = _as_of(as_of)
+    cal = get_calendar()
+    if not cal.is_trade_date(day.date()):
+        typer.echo(
+            f"{day.date().isoformat()} is a non-trading day (weekend/holiday). Skipping market data sync."
+        )
+        if not financials:
+            return
+
     provider = _bulk_provider()
     health = provider.health()
+
     if not health.healthy:
         typer.echo(
             f"provider {health.provider} is not usable: {health.message}", err=True

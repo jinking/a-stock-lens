@@ -20,7 +20,12 @@ from astock_lens.data.contracts import (
     RawDataset,
     RawPayload,
 )
-from astock_lens.data.sync import land_raw, landed_symbols, read_raw_rows
+from astock_lens.data.sync import (
+    SyncResult,
+    land_raw,
+    landed_symbols,
+    read_raw_rows,
+)
 from astock_lens.domain.enums import DataStatus
 
 AS_OF = datetime(2026, 9, 4, 15, 0, tzinfo=UTC)
@@ -87,7 +92,7 @@ class StubProvider:
         )
 
 
-def _land(local_tmp: Path, provider: StubProvider) -> object:
+def _land(local_tmp: Path, provider: StubProvider) -> SyncResult:
     return land_raw(provider=provider, root=local_tmp, as_of=AS_OF)
 
 
@@ -351,3 +356,23 @@ def test_an_empty_source_writes_no_file(local_tmp: Path) -> None:
     assert all(landing.rows_written == 0 for landing in result.landings)
     assert not (local_tmp / "securities.csv").exists()
     assert not result.is_complete
+
+
+def test_land_raw_skips_bars_on_non_trading_day(local_tmp: Path) -> None:
+    """休市日（周末/法定节假日）不发起行情网络请求，显式返回 NOT_APPLICABLE。"""
+    provider = StubProvider()
+    weekend = datetime(2026, 9, 19, 15, 0, tzinfo=UTC)  # 周六
+
+    result = land_raw(provider=provider, root=local_tmp, as_of=weekend)
+
+    # 验证 provider 未收到 daily_bars 请求
+    requested_datasets = [req.dataset for req in provider.requests]
+    assert "daily_bars" not in requested_datasets
+
+    # 验证 daily_bars landing 状态为 NOT_APPLICABLE
+    bars_landing = next(
+        landing for landing in result.landings if landing.dataset == "daily_bars"
+    )
+    assert bars_landing.status is DataStatus.NOT_APPLICABLE
+    assert bars_landing.rows_written == 0
+    assert "non-trading day" in (bars_landing.note or "").lower()

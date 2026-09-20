@@ -8,8 +8,7 @@ than print a reassuring summary for a run that did nothing.
 import json
 from pathlib import Path
 
-from click.testing import Result
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 from astock_lens.cli.app import app
 
@@ -118,3 +117,28 @@ def test_scan_rejects_a_malformed_date(local_tmp: Path) -> None:
 
     assert result.exit_code != 0
     assert "YYYY-MM-DD" in result.output
+
+
+def test_calendar_commands_report_trading_status(local_tmp: Path) -> None:
+    """astock calendar 子命令可以查询是否休市及最新交易日。"""
+    # 2026-09-19 周六休市
+    result_sat = _invoke(local_tmp, "calendar", "is-open", "--date", "2026-09-19")
+    assert result_sat.exit_code == 0
+    assert "closed" in result_sat.stdout.lower() or "休市" in result_sat.stdout
+
+    # 2026-09-18 周五正常交易
+    result_fri = _invoke(local_tmp, "calendar", "is-open", "--date", "2026-09-18")
+    assert result_fri.exit_code == 0
+    assert "open" in result_fri.stdout.lower() or "开市" in result_fri.stdout
+
+    # 查询周六的最近交易日为周五
+    result_latest = _invoke(local_tmp, "calendar", "latest", "--date", "2026-09-19")
+    assert result_latest.exit_code == 0
+    assert "2026-09-18" in result_latest.stdout
+
+
+def test_sync_research_on_non_trading_day_skips_market_sync(local_tmp: Path) -> None:
+    """休市日执行 sync-research 时跳过行情抓取并优雅返回。"""
+    result = _invoke(local_tmp, "sync-research", "--as-of", "2026-09-19")
+    assert result.exit_code == 0
+    assert "non-trading day" in result.stdout.lower() or "休市" in result.stdout

@@ -28,6 +28,8 @@ from collections.abc import Sequence
 from datetime import date, datetime
 from pathlib import Path
 
+from astock_lens.calendar.china import get_calendar
+from astock_lens.calendar.contracts import TradingCalendar
 from astock_lens.data.contracts import DataProvider, FetchRequest, RawPayload
 from astock_lens.data.industry import IndustryMembership, IndustrySource
 from astock_lens.data.normalize.industry import (
@@ -495,6 +497,7 @@ def land_raw(
     symbols: Sequence[str] | None = None,
     bar_dataset: str = DEFAULT_BAR_DATASET,
     securities_dataset: str = DEFAULT_SECURITIES_DATASET,
+    calendar: TradingCalendar | None = None,
 ) -> SyncResult:
     """Land the securities listing and one date of daily bars.
 
@@ -506,6 +509,20 @@ def land_raw(
         provider=provider, root=root, as_of=as_of, dataset=securities_dataset
     )
     wanted = tuple(symbols) if symbols is not None else _listed_symbols(listing.payload)
+
+    cal = calendar if calendar is not None else get_calendar()
+    if not cal.is_trade_date(as_of.date()):
+        bar_path = root / f"{bar_dataset}.csv"
+        bars_landing = DatasetLanding(
+            dataset=bar_dataset,
+            path=bar_path,
+            status=DataStatus.NOT_APPLICABLE,
+            rows_written=0,
+            rows_total=len(read_raw_rows(bar_path)[1]),
+            symbols_skipped=wanted,
+            note="non-trading day (weekend/holiday), skipped market data fetch",
+        )
+        return SyncResult(as_of=as_of, landings=(listing.landing, bars_landing))
 
     bars = _land_dataset(
         provider=provider,
