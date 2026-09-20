@@ -1,0 +1,51 @@
+# 本 workflow 是 HEAD 的独立验证通道：仓库此前完全依赖本地证据链，这里让远端对每个
+# 提交复跑与本地交付门禁完全相同的命令（ruff / format / mypy / 全量 pytest）。
+#
+# 两个刻意选择：
+# 1. `--extra data` 必装：duckdb 相关用例是 `pytest.importorskip`，缺依赖会“跳过式假绿”；
+#    `providers`（akshare）extra 不装 —— 源码对 akshare 是懒加载，测试全部注入桩，装了只增耗时。
+# 2. `pytest` 跑全量（含 `tests/stress`），与 Makefile 的交付前门禁一致，不做子集替代。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: 全量验证（ruff / format / mypy / pytest）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v7
+
+      - name: 安装 uv 与 Python 3.12
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: 同步依赖（锁定文件 + data extra）
+        run: uv sync --frozen --extra data
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+      - name: mypy（严格模式）
+        run: uv run mypy
+
+      - name: pytest（全量，含 tests/stress）
+        run: uv run pytest -q

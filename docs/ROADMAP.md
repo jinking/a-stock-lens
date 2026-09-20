@@ -129,6 +129,10 @@ ResearchRequest → DeepResearchAdapter` 逐项对照：
 
 ## 五、文档与约定维护
 
+- [x] **GitHub Actions CI 接入（2026-09-20）**：`.github/workflows/ci.yml` 在 `push main` 与 PR 时
+  复跑与本地交付门禁相同的命令（ruff check / format --check / mypy / 全量 pytest，含 `tests/stress`）。
+  Python 3.12（声明的支持下限，与本地 3.14 形成双解释器交叉验证）；必装 `--extra data`
+  （duckdb 用例是 `importorskip`，缺依赖会导致“跳过式假绿”）。
 - [ ] `docs/DATA_MODEL.md` 补上 `ValuationObservation`（与 `FinancialObservation` 分开建模的理由）。
 - [ ] `configs/factors/README.md` 更新到 24 个因子（含估值与基本面两类）。
 - [ ] 每次裁决后同步 `docs/REVIEW_NOTES.md` 与 `.workbuddy/memory/<日期>.md`。
