@@ -4,24 +4,26 @@
 每完成一项就勾掉并补上提交号；每次出现新的未决事项，先记到这里或
 `docs/REVIEW_NOTES.md`，不要留在对话里。
 
-**状态快照（2026-09-20 估值补齐与正式快照发布完成，六策略选股榜全量上线）**
+**状态快照（2026-09-20 六策略资格正确性加固完成：REPAIRED + AUDITED）**
 
-本行基线由 `PYTHONPATH= uv run --no-sync pytest -q` 于提交前实测得出（977 passed, 10 warnings）。
-已发布 2026-09-19 正式快照：Research Universe = 2,303 只，FactorResult = 55,272 条，StrategyResult = 13,818 条。
+本行基线由 `PYTHONPATH= .venv/bin/python -m pytest` 于提交前实测得出（结果见 Task 8 门禁）。
+已发布 2026-09-19 正式快照：Research Universe = 2,303 只，FactorResult = 120,192 条（**全市场口径** 5,008 × 24；研究池投影为 55,272 条），StrategyResult = 13,818 条。
 六策略选股榜与单股画像正式上线，Value 达 1,578 只、GARP 达 849 只，历史旧限制彻底解除：
 - CLI 提供只读策略选股命令 `astock screen <strategy> [--as-of] [--top] [--min-percentile] [--all-results]`；
 - API 提供只读策略榜单 `/strategies/{id}/results`、策略覆盖概览 `/strategies` 与单股研究画像 `/stocks/{symbol}`；
 - 架构与数据契约严格遵守只读隔离，绝不重算因子或策略，零状态突变；单股画像中的 `candidate_status` 严格如实呈现（未发布快照时显式返回 `"not_published"`，`/candidates` 严格返回 404，绝不捏造假候选）。
-当前严格执行停机门禁（Stop Gate），Candidate 绝对门槛审定前保持 BLOCKED。
+生产资格规则已恢复为所有者批准口径，并完成全研究池只读审计（见 `docs/decision-packets/2026-09-20-qualification-repair-audit.md`）。
+当前严格执行停机门禁（Stop Gate），Candidate 发布前的 Market/Signal 模块与候选政策未就绪，`BUILD_CANDIDATES` 保持 BLOCKED。
 
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
-| **Stock Discovery** | **COMPLETE** | 基于含最新估值的正式快照（2026-09-19），六策略与单股画像均可用 |
-| **P1 估值补齐/正式重算** | **COMPLETE** | 2,241 / 2,303 覆盖（97.3%），残余 62 只缺口与语义不可算已明确记录 |
-| **P2 候选资格校准证据** | **APPROVED BY OWNER** | 所有者已批准稳健平衡型规则（2026-09-20）；待 100% 行业覆盖与休市日日历就绪后写入配置 |
-| **P3 市场机制/验证/信号** | **BLOCKED** | Market Regime / Validation / Signal 阈值与逻辑待设计与开发 |
-| **P4 候选发布 (Candidate)** | **BLOCKED** | 需前置模块完成且 100% 行业覆盖，BUILD_CANDIDATES 依法保持阻断 |
-| **P5 展现层 (Today/Web)** | **NOT STARTED** | 待候选生成体系全链路就绪后启动 |
+| Stock Discovery | COMPLETE | 基于含最新估值的正式快照（2026-09-19），六策略与单股画像均可用 |
+| P1 Valuation | COMPLETE | 2,241 / 2,303 覆盖（97.3%），残余 62 只缺口与语义不可算已明确记录 |
+| P2 Owner Qualification Decision | COMPLETE | 所有者已批准稳健平衡型六策略规则（2026-09-20） |
+| P2 Qualification Implementation | REPAIRED + AUDITED | 六份生产 YAML 已恢复批准原文；资格改用完整股票因子证据；非法配置 fail-closed；已全研究池只读审计 |
+| P3 Market Regime/Validation/Signal | BLOCKED | 阈值与逻辑待设计与开发 |
+| P4 Candidate Publishing | BLOCKED | 需 P3 完成与候选政策批准，`BUILD_CANDIDATES` 依法保持阻断 |
+| P5 Today/Web | NOT STARTED | 待候选生成体系全链路就绪后启动 |
 
 
 | 层 | 现状 |
@@ -32,7 +34,7 @@
 | 策略 | 7 个配置，**6 个在打分**（等权，均已评审，各自独立 Scanner 类），1 个待行业数据 |
 | 执行链 | 唯一分析执行链 `pipelines/analysis.py`；正式快照只有 `astock daily` 能写 |
 | 发现 | **股票发现 MVP 已完成**（服务层、CLI `screen` 命令、API 策略榜单与单股画像已打通，只读无副作用） |
-| 候选 | `BUILD_CANDIDATES` 保持 `BLOCKED`：入选规则未批准 + Market/Signal 未实现 |
+| 候选 | `BUILD_CANDIDATES` 保持 `BLOCKED`：上游 Market/Signal 未实现（入选规则已批准并落地 REPAIRED + AUDITED） |
 | 接口 | CLI 11 条命令；API 8 个路由；Web 只有 `web/README.md` |
 
 ---
@@ -45,7 +47,8 @@
 - [ ] **Candidate Qualification 绝对门槛与候选发布**：
   - **批准架构（Approved Architecture）**：双门槛机制（相对分位数底线 `rank_percentile >= 0.90` + 独立绝对质量门槛）；横截面代表性选择政策（每策略软保底 3 只、上限 50 只、不硬凑 20 只下限、Market Validation 一票否决、严禁跨策略综合加权打分；详见 `docs/superpowers/specs/2026-09-17-candidate-qualification-design.md`）；
   - **已实现基础设施（Implemented Infrastructure）**：策略资格模型与契约（`src/astock_lens/qualifications/`）、6 个策略判定器框架、横截面代表性选择策略（`RepresentativeCandidatePolicy`）、候选证据装配与持久化（`strategy_qualifications`, `candidate_policy_version`）、管线阶段解耦（`qualification_stage` 与 `candidate_stage`）、全市场只读校准报告引擎与 CLI（`astock calibrate candidates`）、独立产物审计器（`tests/artifacts/validator.py`）；
-  - **依然阻塞（Still Blocked）**：六个策略的绝对质量门槛（Value/Growth/GARP/Quality/Dividend/Momentum）保持未配置状态，等待全市场校准报告产出真实分布证据后由项目所有者审定；上游 Market Regime、Market Validation、Signal 模块未实现；日常管线中 `BUILD_CANDIDATES` 依法保持 `BLOCKED`。
+  - **已修复并审计（Repaired + Audited，2026-09-20）**：六个策略的绝对质量门槛（Value/Growth/GARP/Quality/Dividend/Momentum）生产配置已恢复为所有者批准口径（`configs/qualifications/*.yaml`）；资格判定改用该股票完整 Factor 证据；非法配置 fail-closed；已完成全研究池只读审计（见 `docs/decision-packets/2026-09-20-qualification-repair-audit.md`）。
+  - **依然阻塞（Still Blocked）**：上游 Market Regime、Market Validation、Signal 模块未实现；`RepresentativeCandidatePolicy` 未生产接线；日常管线中 `BUILD_CANDIDATES` 依法保持 `BLOCKED`。此外新发现 Dividend `dividend_yield_ttm` 上游数据全池缺失（见 `docs/REMAINING_PRODUCT_BLOCKERS.md`）。
 - [ ] **Market Validation 阈值**：个股趋势、行业趋势、相对强弱、量价、流动性五项输入如何判 `CONFIRMED/NEUTRAL/CONTRADICTED`。
 - [ ] **Signal 检测阈值**：`BREAKOUT / PULLBACK / TREND_CONTINUE / TREND_WEAKEN / BREAKDOWN` 的判定规则。
 - [ ] **分红支付率的形状**：实测榜首出现 1950%/274% 的支付率（动用留存收益或特别分红），当前线性加权把 1950% 与 90% 同等对待。选项：设上限 / 区间偏好 / 接受现状。
@@ -104,7 +107,7 @@ ResearchRequest → DeepResearchAdapter` 逐项对照：
   遗留：293 只北交所（`920xxx.BJ`）腾讯日线接口不支持，当前显式记为 `source_error` 并被排除
   出研究池，是否换端点待所有者决策。
 - [x] **全市场估值批量路径与研究池覆盖**（2026-09-19/20）：已通过加固后的 `sync-valuation` 多轮补抓（落地 2,241 / 2,303 只，覆盖率 97.3%），并在 2026-09-20 正式写入 `2026-09-19` 日常快照（`astock daily`）。正式快照中六策略全部具备大规模排名能力：Value 达 1,578 只、GARP 达 849 只、Growth 达 2,302 只、Momentum 达 2,281 只、Quality 达 1,697 只、Dividend 达 1,612 只。剩余未打分标的系非正指标等业务语义判定（`NOT_APPLICABLE`），非数据接入缺陷。
-- [ ] **休市日日历与数据抓取跳过**（用户明确需求，2026-09-20）：将休市日单独列出交易日历表；在休市日当天直接跳过获取股市行情及相关时效数据，防止空 bar 误判及无效网络开销。
+- [x] **休市日日历与数据抓取跳过**（用户明确需求，2026-09-20）：已实现。`src/astock_lens/calendar/` 提供 A 股交易日历，`astock calendar is-open` / `latest` 可查询；`astock sync-research` 在休市日自动检测并优雅跳过全池价格抓取，休市日零外部网络 I/O。证据见 `docs/REVIEW_NOTES.md` §33.8。（原文保留为历史需求。）
 - [ ] **全市场财报的定期刷新节奏**：37 分钟/次的季度任务，尚未定"多久跑一次、失败如何补"的节奏（`Deferred`）。
 - [ ] **neodata 财务单季与 WeStock 累计口径的对齐规则**：两者数值一致（实测茅台 H1 完全相同），但单季 vs 累计需要一层对齐才能交叉验证。
 - [ ] **Data Health 扩展**：`doctor` 现在报 provider 状态与数据集行数/日期区间，还缺 neodata 各数据集的"最后成功取数日"与失败原因汇总。

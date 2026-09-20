@@ -281,3 +281,55 @@ evidence = CandidateEvidence(
 
 **当前行动准则：**  
 在 P1–P3 未经正式批准与实现前，系统继续保持 **Stock Discovery MVP** 的只读研究状态，不提前跨入 Candidate 发布，不提供伪造的交易买卖建议。
+
+---
+
+## 9. 附录：2026-09-20 修复审计新发现的阻塞项（与上文 P 状态并列，不改写任何已批准结论）
+
+> **本节定位：** 2026-09-20「六策略资格正确性加固」全研究池只读审计（见
+> [docs/decision-packets/2026-09-20-qualification-repair-audit.md](file:///Users/huangjinjin/Documents/ChatGPT/a-stock-lens/docs/decision-packets/2026-09-20-qualification-repair-audit.md)）
+> 新暴露出一个**上游数据缺口**。它**不属于**上文 §2 的 P1 估值覆盖（P1 已 COMPLETE）、也**不是**本次修复引入的缺陷，
+> 故单列为附录，**不改写**上文任何已批准的 P1/P2 结论或状态表。
+
+### 9.1 现象
+
+在正式基线（`2026-09-19` 快照：FactorResult = 120,192 条全市场口径、StrategyResult = 13,818 条、Universe = 2,303 只）上运行只读审计：
+
+```bash
+PYTHONPATH= .venv/bin/python -m astock_lens.cli.app calibrate qualification-impact \
+  --as-of 2026-09-19 --output-dir var/calibration/qualification-repair
+```
+
+六策略分布中，**Dividend 的 `absolute_pass=0`、`dual_pass=0`**，即 1,612 只 ranked 标的**无一只**能通过绝对质量门槛。
+
+### 9.2 根因：`dividend_yield_ttm` 上游全池缺失（非阈值错误、非单位错误）
+
+1. **FACTOR 快照**中 `dividend_yield_ttm` 的 DataStatus 分布为 **`VALUE=0`、`NULL=2241`、`NOT_APPLICABLE=2767`**（合计 5,008）。
+   因子的 `unit = "%"`。
+2. 对照 `dividend_payout_ttm`（另一条门槛）：`VALUE=1622`、`NULL=415`、`NOT_APPLICABLE=2971`；
+   其中落入批准区间 `[0.10, 0.80]` 的有 **1,309** 只 —— 说明**分红支付率这一路数据可用**。
+3. **原始来源** `data/raw/neodata/valuation/2026-09-19.csv`（neodata「统一估值查询」，共 2,241 只标的）的
+   markdown 时序表里**确实存在**「静态股息率（%）」「滚动股息率（%）」两列，但：
+   - 总时间序列单元格 **24,619** 个；
+   - 上述两列在**全部 24,619 个单元格中无一有值**（均为 `--`）。
+4. 结论：`dividend` 的 1,612 只 ranked 全部栽在 `dividend_yield_ttm` 缺失上 → `absolute_pass=0` → `dual_pass=0`。
+
+**口径裁定：** 批准阈值 `dividend_yield_ttm >= 3.0`（单位 `%`，与因子定义
+`description: Trailing dividend yield, in percent.` 及 `unit=%` 一致）被**正确地**应用了。
+数据缺失被如实记为 `NULL`（未静默填 `0`）。这属于**上游数据缺口**，**不是**本次修复的缺陷。
+**严禁修改已批准阈值**（计划 Mandatory STOP Gate）。
+
+### 9.3 为什么不能"偷跑"（伪造或改阈值）
+
+- **禁止静默兜底**：项目底层红线禁止把缺失数据默认填 `0.0`——若填 0 会让全部标的的股息率变成 0 而被误判为「不合格」，掩盖真实缺口。
+- **禁止自创阈值**：`dividend_yield_ttm >= 3.0` 是所有者 2026-09-20 已批准的口径（方案 1：稳健平衡型规则），工程侧与 AI 均无权擅自下调。
+- **禁止伪造分红结论**：在没有真实股息率数据的情况下，任何"合格"判定都是捏造。
+
+### 9.4 解除路径（需所有者裁定，属 P2 数据侧后续）
+
+1. **补数据源（首选）**：核查 neodata「统一估值查询」为何两列股息率全 `--`（可能需改用其
+   「股息率」专项接口，或对齐字段名/复权口径），补齐后重跑 `astock sync-valuation` 与 `astock daily`，
+   使 `dividend_yield_ttm` 具备全池 `VALUE`；
+2. **或重新审批 Dividend 门槛**：若确认该数据源短期无法提供股息率，由所有者决定是否以其它可得的
+   分红质量指标替换/增补 Dividend 的绝对门槛（**必须走所有者签发流程**，不得由工程侧自行替换）。
+3. 在上述任一裁定落地前，**Dividend 的 `dual_pass` 保持为 0，Candidate 发布继续阻塞**。
