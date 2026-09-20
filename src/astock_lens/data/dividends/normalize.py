@@ -18,7 +18,7 @@ MISSING_MARKERS: frozenset[str] = frozenset(
     {"--", "-", "", "暂无数据", "暂无", "nan", "none", "null"}
 )
 
-SYMBOL_SECTION_PATTERN = re.compile(r"##\s*.*?（标的代码[：:]\s*([0-9]{6}\.[A-Z]{2})）")
+SYMBOL_SECTION_PATTERN = re.compile(r"#{2,4}\s*.*?([0-9]{6}\.[A-Z]{2})")
 CURRENCY_PATTERN = re.compile(r"货币单位[：:]\s*([^\s\n\r|]+)")
 CASH_DIVIDEND_PATTERN = re.compile(
     r"(?:10派|每10股派|派现)?\s*([0-9]+(?:\.[0-9]+)?)\s*元?"
@@ -29,8 +29,8 @@ def _parse_date(text: str) -> date | None:
     cleaned = text.strip()
     if not cleaned or cleaned in MISSING_MARKERS:
         return None
-    # 支持 YYYY-MM-DD 或 YYYY/MM/DD
-    m = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})", cleaned)
+    # 支持 YYYY-MM-DD 或 YYYY/MM/DD 或 YYYY年MM月DD日
+    m = re.match(r"^(\d{4})[年/-](\d{1,2})[月/-](\d{1,2})[日]?", cleaned)
     if m:
         return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
     # 支持 YYYYMMDD
@@ -60,7 +60,7 @@ def normalize_dividend_events(
     """解析文本内容中的全部标的分红事件。"""
     events: list[DividendEvent] = []
 
-    # 按二级标题划分标的段落
+    # 按标题划分标的段落
     lines = content.splitlines(keepends=True)
     sections: list[tuple[str, str]] = []
     current_symbol: str | None = None
@@ -98,7 +98,17 @@ def normalize_dividend_events(
                 (
                     i
                     for i, c in enumerate(cols)
-                    if any(k in c for k in ("公告日期", "公告日", "预案日", "实施日"))
+                    if any(
+                        k in c
+                        for k in (
+                            "公告日期",
+                            "公告日",
+                            "预案日",
+                            "实施日",
+                            "事件日期",
+                            "日期",
+                        )
+                    )
                 ),
                 None,
             )
@@ -110,20 +120,31 @@ def normalize_dividend_events(
                 ),
                 None,
             )
+            cash_idx = next(
+                (
+                    i
+                    for i, c in enumerate(cols)
+                    if i != status_idx
+                    and any(k in c for k in ("每10股派息", "派息", "分红金额"))
+                ),
+                None,
+            )
             scheme_idx = next(
                 (
                     i
                     for i, c in enumerate(cols)
                     if i != status_idx
+                    and i != cash_idx
+                    and "币" not in c
                     and any(
                         k in c
                         for k in (
                             "分红方案",
-                            "每10股派息",
-                            "派息",
+                            "方案描述",
+                            "方案",
+                            "描述",
                             "分红明细",
                             "分红",
-                            "金额",
                         )
                     )
                 ),
@@ -147,7 +168,12 @@ def normalize_dividend_events(
             )
 
             # 如果这表没有分红/方案相关列，可能不是分红明细表
-            if scheme_idx is None and status_idx is None and ex_idx is None:
+            if (
+                scheme_idx is None
+                and status_idx is None
+                and ex_idx is None
+                and cash_idx is None
+            ):
                 continue
 
             for row in table.rows:
@@ -167,19 +193,34 @@ def normalize_dividend_events(
                     else None
                 )
 
+                row_text = " ".join(row)
                 status = ""
                 if status_idx is not None and status_idx < len(row):
                     status = row[status_idx].strip()
-                if not status and scheme_idx is not None and scheme_idx < len(row):
-                    # 如果状态列不存在，尝试从方案列识别
-                    if "预案" in row[scheme_idx]:
+                if not status:
+                    if "预案" in row_text:
                         status = "预案"
-                    elif "实施" in row[scheme_idx]:
+                    elif "实施" in row_text:
                         status = "实施"
+                    elif "不分配" in row_text or "不转增" in row_text:
+                        status = "不分配"
 
                 cash_div = None
-                if scheme_idx is not None and scheme_idx < len(row):
+                if cash_idx is not None and cash_idx < len(row):
+                    cash_div = _parse_cash_dividend(row[cash_idx])
+                if (
+                    cash_div is None
+                    and scheme_idx is not None
+                    and scheme_idx < len(row)
+                ):
                     cash_div = _parse_cash_dividend(row[scheme_idx])
+
+                if (
+                    not status
+                    and (ex_date is not None or reg_date is not None)
+                    and cash_div is not None
+                ):
+                    status = "实施"
 
                 if ann_date is not None:
                     available_at = datetime(

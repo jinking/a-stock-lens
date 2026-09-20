@@ -362,3 +362,23 @@ PYTHONPATH= .venv/bin/python -m astock_lens.cli.app calibrate qualification-impa
    由它计算 TTM 股息率需要新定义因子口径（TTM 窗口、预案/实施取舍、除权处理、与现价对齐），
    属**新因子设计**，不在资格正确性修复的授权范围内 —— 需所有者批准后另立规格与计划；
 3. 该路径落地前，Dividend 维持 `absolute_pass=0 / dual_pass=0`，`BUILD_CANDIDATES` 继续阻断。
+
+### 9.6 Plan B 分红派息数据就绪与决策包进展（2026-09-20 更新）
+
+为彻底解决 Dividend 策略绝对门槛受阻问题，工程侧已执行并交付 **Plan B: 分红派息数据就绪 (Dividend Data Readiness)**：
+
+1. **基础设施已就绪（Task 1~4）**：
+   - 固化注册 neodata「分红派息详细」查询数据集模板（`src/astock_lens/data/providers/neodata.py`）；
+   - 建立高保真分红事件领域模型 `DividendEvent` 与逐字证据归一化解析器（`src/astock_lens/data/dividends/`）；
+   - 建立支持断点续跑、多轮增量、按块合并的研究池分红补抓命令 `astock sync-dividends`（`src/astock_lens/cli/app.py`）；
+   - 建立以显式研究池（2,303 只）为分母的只读分红覆盖审计工具 `astock dividend-coverage`（`src/astock_lens/calibration/dividend_coverage.py`）。
+2. **决策材料包已交付（Task 5）**：
+   - 形成完整决策材料包：[`docs/decision-packets/2026-09-20-dividend-yield-definition-decision.md`](file:///Users/huangjinjin/Documents/ChatGPT/a-stock-lens/docs/decision-packets/2026-09-20-dividend-yield-definition-decision.md)；
+   - 形成全研究池审计报告：[`docs/decision-packets/2026-09-20-dividend-coverage-audit.md`](file:///Users/huangjinjin/Documents/ChatGPT/a-stock-lens/docs/decision-packets/2026-09-20-dividend-coverage-audit.md)；
+   - 呈报了包含银行、公用事业、能源等 7 只代表性标的的真实原始证据（含 12 个月多次分红、纯预案无日期等典型场景）；
+   - 呈报了 TTM 时间窗口（除权日/登记日/公告日）、预案处理口径（排除/包含）、价格分母（现价/除权日价）等中立选项，等待所有者签发。
+3. **强制安全门禁（Mandatory STOP Gate）**：
+   - 严禁私自推导或计算 `dividend_yield_ttm`；
+   - 严禁修改已批准的 Dividend 门槛（`dividend_yield_ttm >= 3.0`）；
+   - 严禁 Candidate 发布，待所有者批准因子定义后另立开发实施。
+

@@ -2028,3 +2028,53 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
 - **真实 API Smoke 验证**：
   Value (qualified=132, 200 OK)、Growth (qualified=151, 200 OK)、Dividend (qualified=0, 200 OK) 路由均准确返回相应数据结构，无任何运行时异常。
 
+## 三十六、分红派息数据就绪与 TTM 股息率口径决策包交付（Plan B，2026-09-20）
+
+### 36.1 基础设施架构与能力交付（Task 1~4）
+
+针对 Dividend 策略受阻于 `dividend_yield_ttm` 全池缺失的问题，依规实施 Plan B 数据就绪：
+1. **固化固定数据集查询（Task 1，commit `ce30752`）**：
+   - 在 `src/astock_lens/data/providers/neodata.py` 注册 `dividend_history: "{names} 历史分红送配 每10股派息 股权登记日 除权日 实施状态"` 查询模板，加入 `SYMBOL_DATASETS` 覆盖核对。
+2. **建立高保真分红事件领域模型（Task 2，commit `6d599b6`）**：
+   - 创建 `src/astock_lens/data/dividends/models.py`，定义包含 `symbol, announcement_date, registration_date, ex_date, implementation_status, cash_dividend_per_10_shares, currency, available_at, source_text` 的纯数据契约；
+   - 创建 `src/astock_lens/data/dividends/normalize.py`，实现 `normalize_dividend_events` 纯函数，保留逐字证据，缺失日期保留为 `None`，严禁猜测。
+3. **断点续跑缺口补抓命令（Task 3，commit `d9e6043`）**：
+   - 在 `src/astock_lens/cli/app.py` 挂载 `astock sync-dividends`，支持 `--max-rounds`、`--batch-size`、`--limit`；按块身份幂等合并，无进展自动停机（`no_progress`），剩余缺口原样暴露。
+4. **显式分母分红覆盖审计（Task 4，commit `e73669f`）**：
+   - 创建 `src/astock_lens/calibration/dividend_coverage.py`，必须显式传入全量研究池名单（2,303 只）作为分母；独立统计已实施、预案、具备除权日、具备登记日；支持确定性 JSON 与 Markdown 报告渲染；挂载 `astock dividend-coverage` CLI 命令；证明过程严格只读。
+
+### 36.2 真实源站数据特征与归一化演进实测
+
+在对代表性股票进行真实源站取数实测中，发现了源站返回格式的几项关键事实，归一化解析器已相应自适应进化：
+1. **标题格式**：源站返回形如 `### 601857.SH 中国石油（A股）分红信息...`，解析器通过 `re.compile(r"#{2,4}\s*.*?([0-9]{6}\.[A-Z]{2})")` 兼容标题与代码组合；
+2. **日期中文格式**：源站日期呈现为 `2026年09月08日`，解析器扩展支持 `YYYY年MM月DD日`、`YYYY-MM-DD`、`YYYY/MM/DD`；
+3. **列结构与状态呈现**：源站无独立的「方案进度」列，而是将 `(预案)` 直接标注在「分红方案描述」列中（如 `10派9.8元 (预案)`），并有「分红币种」列。解析器排除了币种列干扰，从整行精准识别「实施」、「预案」与「不分配」。
+
+### 36.3 探针实测覆盖与真实案例证据（Task 5）
+
+对 7 只代表性标的（工商银行、招商银行、长江电力、中国石油、中国神华、中国石化、贵州茅台）执行真实同步与审计：
+- **研究池分母**：2,303 只（来自 2026-09-19 全量快照）；
+- **实测覆盖**：已同步 7 只探针标的 100% 覆盖（有任意事件 7 只，有已实施现金分红 7 只，具备除权日 7 只，具备登记日 7 只）；
+- **有效事件数**：19 条（其中实施 13 条，预案 3 条，不分配 3 条）；
+- **典型业务形态全覆盖**：
+  - 一年多次分红（工行、招行、长电、茅台均存在 2~3 次派息）；
+  - 纯预案与无日期（工行、神华、中石化 2026 年 8 月底公布的每 10 股派息预案均无除权日与登记日）；
+  - 明示不分配（招行、长电、茅台中报明确公告不分配不转增）。
+
+### 36.4 决策材料包交付与 Mandatory STOP Gate
+
+工程侧已正式交付决策材料包：
+- 材料包文件：`docs/decision-packets/2026-09-20-dividend-yield-definition-decision.md`
+- 审计报告文件：`docs/decision-packets/2026-09-20-dividend-coverage-audit.md` 与 `.json`
+- 呈报选项：
+  - A. TTM 窗口判定基准（A1 除权日 / A2 登记日 / A3 公告日）
+  - B. 预案处理口径（B1 严格排除 / B2 纳入并显式标记）
+  - C. 价格分母基准（C1 基准日现价 / C2 除权日股价 / C3 其它）
+  - D. 分红累加聚合规则
+
+**严守安全红线：**
+- `src/astock_lens/factors/valuation.py` 因子代码未作任何修改；
+- `configs/qualifications/dividend.yaml` 门槛配置未作任何修改；
+- Candidate 发布依然保持安全阻断，等待项目所有者审定签发后，另立开发计划实施。
+
+
