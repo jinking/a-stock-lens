@@ -22,6 +22,7 @@ from astock_lens.factors.config import load_factor_config
 from astock_lens.pipelines.analysis import run_research_analysis
 from astock_lens.strategies.registry import load_scanners
 from astock_lens.universe.config import load_universe_config
+from tests.support import strip_ansi
 
 ROOT = Path(__file__).resolve().parents[2]
 AS_OF_TEXT = "2026-09-18"
@@ -328,7 +329,7 @@ def test_a_declared_mapping_date_is_recorded_verbatim(local_tmp: Path) -> None:
 
 def _flat(output: str) -> str:
     """把 CLI 的方框排版压成一行，好让断言只关心内容、不关心换行位置。"""
-    return " ".join(output.split())
+    return " ".join(strip_ansi(output).split())
 
 
 def test_a_mapping_date_without_a_timezone_is_refused(local_tmp: Path) -> None:

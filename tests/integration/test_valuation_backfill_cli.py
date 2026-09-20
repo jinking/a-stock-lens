@@ -30,6 +30,7 @@ from astock_lens.data.contracts import (
 )
 from astock_lens.data.providers.neodata import PAYLOAD_COLUMNS
 from astock_lens.domain.enums import DataStatus
+from tests.support import strip_ansi
 
 AS_OF = datetime(2026, 9, 17, 15, 0, tzinfo=UTC)
 DAY = "2026-09-17"
@@ -262,7 +263,7 @@ def test_a_non_positive_batch_size_is_refused(
     )
 
     assert result.exit_code == 2
-    assert "batch-size" in result.output
+    assert "batch-size" in strip_ansi(result.output)
 
 
 def test_the_coverage_command_reports_the_universe_as_the_denominator(

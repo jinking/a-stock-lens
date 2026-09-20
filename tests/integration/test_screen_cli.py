@@ -24,6 +24,7 @@ from astock_lens.data.snapshots.store import JsonSnapshotStore
 from astock_lens.domain.enums import SnapshotKind
 from astock_lens.domain.models import SnapshotLineage
 from astock_lens.strategies.contracts import StrategyResult
+from tests.support import strip_ansi
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 DAY = "2026-09-17"
@@ -86,10 +87,11 @@ def test_screen_cli_help() -> None:
     runner = CliRunner()
     result = runner.invoke(app, ["screen", "--help"])
     assert result.exit_code == 0
-    assert "--as-of" in result.stdout
-    assert "--top" in result.stdout
-    assert "--min-percentile" in result.stdout
-    assert "--all-results" in result.stdout
+    help_text = strip_ansi(result.stdout)
+    assert "--as-of" in help_text
+    assert "--top" in help_text
+    assert "--min-percentile" in help_text
+    assert "--all-results" in help_text
 
 
 def test_screen_mixed_strategy_snapshot_top_limit(tmp_path: Path) -> None:

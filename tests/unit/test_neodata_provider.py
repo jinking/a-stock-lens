@@ -19,6 +19,7 @@ import pytest
 
 from astock_lens.data.contracts import FetchRequest
 from astock_lens.data.providers.neodata import (
+    LEGACY_TOKEN_FILE,
     PAYLOAD_COLUMNS,
     QUERY_TEMPLATES,
     TOKEN_ENV,
@@ -259,12 +260,39 @@ def test_the_environment_token_wins(monkeypatch: pytest.MonkeyPatch) -> None:
     assert load_token() == ("from-env", "ok")
 
 
-def test_the_plugin_directory_is_searched_before_the_legacy_path() -> None:
-    """v1.6.0 把凭证迁到插件目录，旧路径只是兜底。"""
+def test_the_plugin_directory_is_searched_before_the_legacy_path(
+    local_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v1.6.0 把凭证迁到插件目录，旧路径只是兜底。
+
+    这里必须自造一个假的插件目录：真机上确实存在插件凭证，CI 上没有，
+    靠机器状态断言的测试在别处会直接变红。
+    """
+    plugin_token = (
+        local_tmp
+        / ".workbuddy"
+        / "plugins"
+        / "cache"
+        / "v1.6.0"
+        / "finance-data"
+        / "neodata"
+        / "skills"
+        / ".neodata_token"
+    )
+    plugin_token.parent.mkdir(parents=True)
+    plugin_token.write_text(json.dumps({"token": "from-plugin"}), encoding="utf-8")
+    monkeypatch.delenv(TOKEN_FILE_ENV, raising=False)
+    monkeypatch.setenv("HOME", str(local_tmp))
+
     candidates = token_candidates()
 
     assert candidates[-1].as_posix().endswith(".workbuddy/.neodata_token")
-    assert any("plugins/cache" in path.as_posix() for path in candidates)
+    plugin_index = next(
+        index
+        for index, path in enumerate(candidates)
+        if "plugins/cache" in path.as_posix()
+    )
+    assert plugin_index < candidates.index(LEGACY_TOKEN_FILE)
 
 
 def test_batch_size_and_attempts_must_be_positive() -> None:

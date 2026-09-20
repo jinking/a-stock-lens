@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 
 from astock_lens.calibration.candidate_report import CALIBRATION_WARNING
 from astock_lens.cli.app import app
+from tests.support import strip_ansi
 
 ROOT = Path(__file__).resolve().parents[2]
 CSV_ROOT = ROOT / "tests" / "fixtures" / "csv"
@@ -43,9 +44,10 @@ def test_calibrate_cli_help() -> None:
 
     res2 = runner.invoke(app, ["calibrate", "candidates", "--help"])
     assert res2.exit_code == 0
-    assert "--as-of" in res2.stdout
-    assert "--industry-map" in res2.stdout
-    assert "--output-dir" in res2.stdout
+    help_text = strip_ansi(res2.stdout)
+    assert "--as-of" in help_text
+    assert "--industry-map" in help_text
+    assert "--output-dir" in help_text
 
 
 def test_calibrate_candidates_generates_reports_without_production_mutation(
