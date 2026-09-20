@@ -12,7 +12,7 @@ would create a second definition of the same quantity.
 """
 
 from collections.abc import Callable, Mapping, Sequence
-from datetime import datetime
+from datetime import date, datetime
 
 from astock_lens.domain.enums import DataStatus
 from astock_lens.domain.models import DailyBar, SecurityProfile, SnapshotLineage
@@ -139,7 +139,17 @@ class UniverseBuilder:
 
         # Presence is judged on the as-of date itself. A bar dated later does
         # not tell us anything about whether a symbol traded on this day.
-        traded = {bar.symbol for bar in bars if bar.trade_date == as_of.date()}
+        # If as_of is a non-trading day (whole market has no bar), align with
+        # the latest effective trade date on or before as_of.
+        available_dates = {
+            bar.trade_date for bar in bars if bar.trade_date <= as_of.date()
+        }
+        target_trade_date = (
+            as_of.date()
+            if as_of.date() in available_dates
+            else (max(available_dates) if available_dates else as_of.date())
+        )
+        traded = {bar.symbol for bar in bars if bar.trade_date == target_trade_date}
 
         included: list[str] = []
         exclusions: list[UniverseExclusion] = []
@@ -159,7 +169,11 @@ class UniverseBuilder:
             seen.add(profile.symbol)
 
             found = self._evaluate(
-                profile, as_of=as_of, traded=traded, liquidity=liquidity
+                profile,
+                as_of=as_of,
+                target_trade_date=target_trade_date,
+                traded=traded,
+                liquidity=liquidity,
             )
             if found:
                 exclusions.extend(found)
@@ -181,6 +195,7 @@ class UniverseBuilder:
         profile: SecurityProfile,
         *,
         as_of: datetime,
+        target_trade_date: date,
         traded: set[str],
         liquidity: Mapping[str, FactorResult],
     ) -> list[UniverseExclusion]:
@@ -200,7 +215,7 @@ class UniverseBuilder:
                 _exclusion(
                     symbol,
                     UniverseRule.NO_MARKET_DATA,
-                    f"no daily bar dated {as_of.date().isoformat()}",
+                    f"no daily bar dated {target_trade_date.isoformat()}",
                 )
             )
 

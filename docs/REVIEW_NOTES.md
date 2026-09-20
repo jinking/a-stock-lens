@@ -1705,3 +1705,35 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
   - 验证 `as_of=2026-09-17` 严格只读取 `2026-09-17.csv`，指标值为 5.18；
   - 验证 `as_of=2026-09-19` 读取 `2026-09-19.csv`，指标值为 6.25；
   - 冻结基线 `data/raw/neodata/valuation/2026-09-17.csv` 零变动。
+
+### 33.3 估值补齐后的只读研究分析基线固化（任务 2）与休市日对齐修复
+
+- **休市日对齐修复**：
+  - 发现事实：当 `as_of` 为休市日（如周六 2026-09-19），全市场当天无日线 bar。原 `UniverseBuilder.build` 中 `traded = {bar.symbol for bar in bars if bar.trade_date == as_of.date()}` 会将休市误判为全市场停牌，排除全部股票（`research_count: 0`）。
+  - 修复方案：在 `src/astock_lens/universe/builder.py` 中，当 `as_of.date()` 当天全市场无 bar 时，自动对齐不晚于 `as_of` 的最近有效交易日；并增加 `test_a_non_trading_day_as_of_aligns_with_latest_effective_trade_date` 单元测试。
+  - **所有者要求备忘**：后续需单独列出休市日日历，并在休市日当天直接跳过获取股市行情数据。
+- **产物固化与层级统计**（`var/acceptance/post-valuation-20260919/analysis/`）：
+  - 研究池基线：**2,303 只**（`research_count: 2303`）；
+  - 因子层：55,272 条（2,303 × 24）；
+  - 策略层：13,818 条（2,303 × 6）；
+  - 六策略打分数量：
+    - growth: evaluable=2,302, ranked=2,302
+    - momentum: evaluable=2,281, ranked=2,281
+    - quality: evaluable=1,697, ranked=1,697
+    - dividend: evaluable=1,612, ranked=1,612
+    - value: evaluable=**1,578**, ranked=**1,578**（旧基线为 2）
+    - garp: evaluable=**849**, ranked=**849**（旧基线为 1）
+  - 估值因子 DataStatus 分布：
+    - `pe_ttm`: VALUE 1,958, NOT_APPLICABLE 62, NULL 283
+    - `pb`: VALUE 1,958, NOT_APPLICABLE 62, NULL 283
+    - `ps_ttm`: VALUE 2,239, NOT_APPLICABLE 64
+    - `pe_percentile`: VALUE 1,958, NOT_APPLICABLE 62, NULL 283
+    - `pcf_operating_ttm`: VALUE 1,794, NOT_APPLICABLE 509
+    - `peg`: VALUE 957, NOT_APPLICABLE 977, NULL 369
+  - 产物 SHA256：
+    - `research-universe.json`: `6030cd9fe7573b31cc9e1abd2abf3ec44e9e0e08b40ad466b2a91ebd10404654`
+    - `factors.jsonl`: `66d299b293f92b28a1e6ef0220cd3b81b0e65d9bfb73059b905a3cfdd46b9a3e`
+    - `strategies.jsonl`: `867975da6cdba9e292cdd9b8ee363636b276c44d6da99ef0ec41cf28e0abd48e`
+    - `calibration.json`: `af9c5e91e510595304cc71cb31806cf9003ae6451591784537d6c963392fa09d`
+    - `calibration.md`: `e2550effa6c562e228208737c6cb8d51f47b0bfedc623b891d38af9858c1651f`
+

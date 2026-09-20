@@ -319,3 +319,17 @@ def _build_with(profiles: tuple[SecurityProfile, ...]) -> UniverseSnapshot:
             )
         },
     )
+
+
+def test_a_non_trading_day_as_of_aligns_with_latest_effective_trade_date() -> None:
+    """当 as_of 是休市日（当天全市场无 bar）时，对齐不晚于 as_of 的最新有效交易日。"""
+    builder = UniverseBuilder(_config())
+    saturday_as_of = datetime(2026, 9, 5, 15, 0, tzinfo=UTC)
+    snapshot = builder.build(
+        _profiles(),
+        as_of=saturday_as_of,
+        bars=_bars(),
+        liquidity=_liquidity(),
+    )
+    assert "600000.SH" in snapshot.included
+    assert UniverseRule.NO_MARKET_DATA not in _rules(snapshot, "600000.SH")
