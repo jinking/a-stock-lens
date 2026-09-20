@@ -8,11 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from astock_lens.qualifications.config import (
-    QualificationConfigInvalid,
+from astock_lens.qualifications.config import QualificationConfigInvalid
+from astock_lens.qualifications.rules import (
+    FactorThresholdRule,
     load_qualification_rule,
 )
-from astock_lens.qualifications.rules import FactorThresholdRule
 
 
 def _write(tmp_path: Path, text: str, name: str = "value.yaml") -> Path:
@@ -94,6 +94,50 @@ def test_blank_version_is_invalid(tmp_path: Path) -> None:
         "strategy_id: value\nversion: '   '\nthresholds:\n  pe_ttm:\n    max: 25.0\n",
     )
     with pytest.raises(QualificationConfigInvalid, match="version"):
+        load_qualification_rule(path)
+
+
+def test_null_version_is_invalid(tmp_path: Path) -> None:
+    """YAML 空值 ``version:`` 解析为 None，绝不能因 str(None)=='None' 而蒙混过关。"""
+    path = _write(
+        tmp_path,
+        "strategy_id: value\nversion:\nthresholds:\n  pe_ttm:\n    max: 25.0\n",
+    )
+    with pytest.raises(QualificationConfigInvalid, match="version"):
+        load_qualification_rule(path)
+
+
+def test_null_strategy_id_is_invalid(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        "strategy_id:\nversion: v1\nthresholds:\n  pe_ttm:\n    max: 25.0\n",
+    )
+    with pytest.raises(QualificationConfigInvalid, match="strategy_id"):
+        load_qualification_rule(path)
+
+
+def test_non_string_version_is_invalid(tmp_path: Path) -> None:
+    """非字符串标量（如 version: 1）拒绝静默强转。"""
+    path = _write(
+        tmp_path,
+        "strategy_id: value\nversion: 1\nthresholds:\n  pe_ttm:\n    max: 25.0\n",
+    )
+    with pytest.raises(QualificationConfigInvalid, match="version"):
+        load_qualification_rule(path)
+
+
+def test_unknown_threshold_key_is_invalid(tmp_path: Path) -> None:
+    """键名拼错（maximum）会让边界被静默丢弃，属 fail-open，必须拒绝。"""
+    path = _write(
+        tmp_path,
+        "strategy_id: value\n"
+        "version: v1\n"
+        "thresholds:\n"
+        "  pe_ttm:\n"
+        "    min: 8.0\n"
+        "    maximum: 1.0\n",
+    )
+    with pytest.raises(QualificationConfigInvalid, match="maximum"):
         load_qualification_rule(path)
 
 

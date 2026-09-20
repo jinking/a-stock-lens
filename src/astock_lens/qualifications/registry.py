@@ -5,7 +5,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from astock_lens.qualifications.config import load_qualification_rule
 from astock_lens.qualifications.contracts import (
     AbsoluteQualificationRule,
     QualificationRuleNotConfigured,
@@ -16,6 +15,7 @@ from astock_lens.qualifications.garp import GARPQualifier
 from astock_lens.qualifications.growth import GrowthQualifier
 from astock_lens.qualifications.momentum import MomentumQualifier
 from astock_lens.qualifications.quality import QualityQualifier
+from astock_lens.qualifications.rules import load_qualification_rule
 from astock_lens.qualifications.value import ValueQualifier
 
 QUALIFIER_CLASSES: dict[str, type[Any]] = {
