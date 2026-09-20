@@ -120,6 +120,10 @@ ResearchRequest → DeepResearchAdapter` 逐项对照：
 - [ ] **板块清单来源未定**（同上）。
 - [ ] **测试里的网络打桩规范**：一次 36 秒的测试暴露出"没打桩就会真的抓全市场名单"；约定：任何触碰 Provider 的测试都必须注入桩。
 - [ ] **`astock daily` 的 `--sync` 目前只支持 AkShare 批量路径**，估值需要单独按标的落地。
+- [ ] **资格影响审计的 risk 聚合键命名空间混用（M2 Minor，2026-09-20 QA 复评遗留）**：
+  `src/astock_lens/calibration/qualification_impact.py` 的 `failure_reasons` 目前「能抠出因子名用因子名、
+  抠不出用 risk 原文」作聚合键，因子标识符与整句文案同表。当前生产 risk 均含因子名、只读审计零丢失，
+  非阻断；建议后续把 risk 结构化（携带 `factor` 字段）替代正则 + 原文兜底。
 
 ---
 
