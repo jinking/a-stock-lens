@@ -92,6 +92,9 @@ def test_screen_cli_help() -> None:
     assert "--top" in help_text
     assert "--min-percentile" in help_text
     assert "--all-results" in help_text
+    # Step 7 文案修复：screen 展示的是策略结果，不是 Candidate
+    assert "strategy results" in help_text
+    assert "candidates" not in help_text
 
 
 def test_screen_mixed_strategy_snapshot_top_limit(tmp_path: Path) -> None:

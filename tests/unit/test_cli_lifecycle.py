@@ -293,8 +293,8 @@ def test_stock_profile_reads_the_stored_evidence(local_tmp: Path) -> None:
     assert "included" in result.stdout
     assert "momentum" in result.stdout
     assert "ret_20d" in result.stdout
-    # 候选资格规则未批准，所以当天不会有 CANDIDATE 快照，Profile 必须直说。
-    assert "candidate: none stored" in result.stdout
+    # 当天没有发布 Candidate 快照，Profile 必须直说。
+    assert "candidate: not published for this date" in result.stdout
     assert "lineage" in result.stdout
 
 

@@ -267,11 +267,8 @@ def test_stock_discovery_workflow_seeded_growth(local_tmp: Path) -> None:
         "growth v1.0: score 92.50 rank_percentile 0.980 eligible=True"
         in res_stock.stdout
     )
-    # 明确标明 Candidate 阶段阻断而无候选
-    assert (
-        "candidate: none stored for this date "
-        "(no approved qualification policy, so BUILD_CANDIDATES is blocked)"
-    ) in res_stock.stdout
+    # 明确标明当天没有发布 Candidate（只陈述事实，不猜测原因）
+    assert "candidate: not published for this date" in res_stock.stdout
 
     # 断言 5: API 接口端点全量验证
     client = TestClient(
@@ -480,7 +477,7 @@ def test_daily_pipeline_to_discovery_workflow_end_to_end(local_tmp: Path) -> Non
     assert stock_res.exit_code == 0, stock_res.output
     assert f"300750.SZ ({DAY_2026_09_04})" in stock_res.stdout
     assert "universe: included" in stock_res.stdout
-    assert "candidate: none stored for this date" in stock_res.stdout
+    assert "candidate: not published for this date" in stock_res.stdout
 
     # 5. API 查询
     client = TestClient(

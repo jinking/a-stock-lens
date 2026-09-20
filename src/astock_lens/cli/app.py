@@ -74,7 +74,9 @@ from astock_lens.data.sync import (
     read_universe_symbols,
 )
 from astock_lens.discovery import (
+    QualifiedScreenQuery,
     StrategyScreenQuery,
+    screen_qualified,
     screen_strategy,
 )
 from astock_lens.domain.enums import SnapshotKind, WatchlistState
@@ -93,6 +95,7 @@ from astock_lens.pipelines.analysis import (
 )
 from astock_lens.pipelines.daily import DailyRunResult, run_daily
 from astock_lens.qualifications import (
+    QualificationConfigInvalid,
     QualificationRuleNotConfigured,
     load_canonical_qualifiers,
 )
@@ -794,12 +797,9 @@ def stock(symbol: str, as_of: Annotated[str, AS_OF_OPTION]) -> None:
         typer.echo(f"  candidate: {candidate.next_action}")
         lineage = candidate.lineage
     elif strategies:
-        # 有策略结果却没有候选，说明当天的 Candidate 阶段没有产出，而不是
-        # "这只股票没被任何 Scanner 看中"——后者是一句没人验证过的猜测。
-        typer.echo(
-            "  candidate: none stored for this date "
-            "(no approved qualification policy, so BUILD_CANDIDATES is blocked)"
-        )
+        # 有策略结果却没有候选：只陈述「当天没有发布 Candidate」这一事实，
+        # 不猜测也不宣称原因——资格配置是否获批不在这一行的判断范围内。
+        typer.echo("  candidate: not published for this date")
         lineage = strategies[0].lineage
     else:
         lineage = universe.lineage
@@ -818,7 +818,8 @@ def screen(
     strategy: Annotated[str, typer.Argument(help="Strategy id to screen.")],
     as_of: Annotated[str, AS_OF_OPTION],
     top: Annotated[
-        int, typer.Option("--top", help="Maximum number of candidates to show.")
+        int,
+        typer.Option("--top", help="Maximum number of strategy results to show."),
     ] = 20,
     min_percentile: Annotated[
         float | None,
@@ -891,6 +892,89 @@ def screen(
         )
         typer.echo(
             f"  {item.rank}  {item.symbol}  score={score_text}  percentile={percentile_text}"
+        )
+
+
+@app.command()
+def qualified(
+    strategy: Annotated[str, typer.Argument(help="Strategy id to qualify.")],
+    as_of: Annotated[str, AS_OF_OPTION],
+    top: Annotated[
+        int,
+        typer.Option("--top", help="Maximum number of strategy results to show."),
+    ] = 20,
+) -> None:
+    """双门槛合格股票查询（严格只读）。
+
+    只读取已存储的 FACTOR / STRATEGY 快照，严格加载已批准的资格配置
+    （目录可被 ``ASTOCK_QUALIFICATION_DIR`` 覆盖），把两者交给纯查询服务
+    ``screen_qualified`` 做「Top10% + 绝对门槛」双通过判定并展示结果。
+
+    不调用 Provider，不重算因子或策略，不写任何 Snapshot / Watchlist / Job
+    记录。资格配置缺失或非法时 fail-closed 报错退出，绝不降级为零合格
+    正常屏；零合格时展示服务给出的数据健康 warning。
+    """
+    day = _as_of(as_of)
+    factors = _snapshot_records(SnapshotKind.FACTOR, day, FactorResult)
+    if not factors:
+        typer.echo(
+            f"no FACTOR snapshot for {as_of}\n"
+            f"run `astock daily --as-of {as_of} --allow-incomplete` first",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    strategies = _snapshot_records(SnapshotKind.STRATEGY, day, StrategyResult)
+    if not strategies:
+        typer.echo(
+            f"no STRATEGY snapshot for {as_of}\n"
+            f"run `astock daily --as-of {as_of} --allow-incomplete` first",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    factor_names = frozenset(config.name for config in _factor_configs())
+    try:
+        qualifiers = load_canonical_qualifiers(known_factor_names=factor_names)
+    except (QualificationRuleNotConfigured, QualificationConfigInvalid) as error:
+        # fail-closed：配置未批准或已损坏都不是「零合格」，必须显式报错
+        typer.echo(f"qualification configuration is invalid: {error}", err=True)
+        raise typer.Exit(code=1) from error
+
+    try:
+        screened = screen_qualified(
+            factor_results=factors,
+            strategy_results=strategies,
+            qualifiers=qualifiers,
+            query=QualifiedScreenQuery(strategy_id=strategy, limit=top),
+        )
+    except KeyError as error:
+        approved = ", ".join(sorted(qualifiers))
+        typer.echo(
+            f"strategy {strategy!r} has no approved qualification rule; "
+            f"approved strategies are {approved}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from error
+    except ValueError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"{strategy} — {as_of}")
+    c = screened.coverage
+    typer.echo(
+        f"coverage: eligible={c.strategy_eligible_count} ranked={c.ranked_count} "
+        f"percentile_pass={c.percentile_pass_count} "
+        f"absolute_pass={c.absolute_pass_count} qualified={c.qualified_count}"
+    )
+    typer.echo(f"qualified: {c.qualified_count}")
+    for warning in screened.warnings:
+        typer.echo(f"warning: {warning}")
+    typer.echo(f"showing: {len(screened.items)}")
+    for item in screened.items:
+        score_text = f"{item.score:.2f}" if item.score is not None else "None"
+        typer.echo(
+            f"  {item.rank}  {item.symbol}  score={score_text}  "
+            f"percentile={item.rank_percentile:.4f}"
         )
 
 
