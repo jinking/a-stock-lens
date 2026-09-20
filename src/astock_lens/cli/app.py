@@ -47,6 +47,7 @@ from astock_lens.calibration.qualification_impact import (
 from astock_lens.calibration.render import render_json, render_markdown
 from astock_lens.calibration.valuation_coverage import valuation_coverage
 from astock_lens.candidates.models import Candidate
+from astock_lens.candidates.policy import RepresentativeCandidatePolicy
 from astock_lens.data.bootstrap import (
     bootstrap_liquidity_history,
     bootstrap_strategy_history,
@@ -1166,6 +1167,9 @@ def _run_daily(day: datetime, *, land: bool) -> DailyRunResult:
         qualifiers = load_canonical_qualifiers(known_factor_names=factor_names)
     except QualificationRuleNotConfigured:
         qualifiers = None
+    candidate_policy = (
+        RepresentativeCandidatePolicy(version="v1") if qualifiers else None
+    )
     return run_daily(
         csv_root=_csv_root(),
         as_of=day,
@@ -1179,6 +1183,7 @@ def _run_daily(day: datetime, *, land: bool) -> DailyRunResult:
         securities_dataset=_securities_dataset(),
         sync=_sync_stage(day) if land else None,
         qualifiers=qualifiers,
+        candidate_policy=candidate_policy,
     )
 
 

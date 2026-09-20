@@ -3,6 +3,8 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from astock_lens.candidates.policy import (
     RepresentativeCandidatePolicy,
 )
@@ -110,7 +112,17 @@ def test_canonical_qualifiers_removes_unconfigured_reason() -> None:
     )
 
 
-def test_missing_upstream_layers_blocks_build_candidates() -> None:
+def test_missing_upstream_layers_blocks_build_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "astock_lens.pipelines.daily.BLOCKED_REASONS",
+        {
+            JobStage.DETECT_REGIME: "test reason",
+            JobStage.MARKET_VALIDATE: "test reason",
+            JobStage.RUN_SIGNALS: "test reason",
+        },
+    )
     context = _Context(
         csv_root=Path("/fake"),
         as_of=AS_OF,

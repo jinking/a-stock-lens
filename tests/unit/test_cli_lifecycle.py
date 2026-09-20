@@ -28,7 +28,7 @@ from astock_lens.data.contracts import (
     RawDataset,
     RawPayload,
 )
-from astock_lens.domain.enums import DataStatus
+from astock_lens.domain.enums import DataStatus, SnapshotKind
 
 ROOT = Path(__file__).resolve().parents[2]
 CSV_ROOT = ROOT / "tests" / "fixtures" / "csv"
@@ -293,9 +293,24 @@ def test_stock_profile_reads_the_stored_evidence(local_tmp: Path) -> None:
     assert "included" in result.stdout
     assert "momentum" in result.stdout
     assert "ret_20d" in result.stdout
-    # 当天没有发布 Candidate 快照，Profile 必须直说。
-    assert "candidate: not published for this date" in result.stdout
+    assert "candidate: WATCH" in result.stdout
     assert "lineage" in result.stdout
+
+
+def test_stock_profile_reports_not_published_when_no_candidate_snapshot(
+    local_tmp: Path,
+) -> None:
+    _formal_run(local_tmp)
+    candidate_file = (
+        local_tmp / "snapshots" / SnapshotKind.CANDIDATE.value / f"{DAY}.json"
+    )
+    if candidate_file.exists():
+        candidate_file.unlink()
+
+    result = _invoke(local_tmp, "stock", "300750.SZ", "--as-of", DAY)
+
+    assert result.exit_code == 0, result.output
+    assert "candidate: not published for this date" in result.stdout
 
 
 def test_stock_profile_names_the_rule_that_excluded_a_symbol(

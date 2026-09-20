@@ -105,7 +105,11 @@ class DefaultSignalDetector:
                     f"上升通道强趋势持续 (20日涨幅 {ret_20d:+.2%}, 距高点 {prox:.2f})"
                 )
 
-        if signal == Signal.NO_SIGNAL and context.strategy_id in ("value", "dividend", None):
+        if signal == Signal.NO_SIGNAL and context.strategy_id in (
+            "value",
+            "dividend",
+            None,
+        ):
             if (
                 div_yield is not None
                 and div_yield >= 3.0

@@ -34,18 +34,26 @@ from astock_lens.candidates.policy import (
 )
 from astock_lens.data.repository.contracts import NormalizedRepository
 from astock_lens.data.snapshots.store import SnapshotStore
-from astock_lens.domain.enums import JobStage, MarketValidation, Signal, SnapshotKind
-from astock_lens.domain.models import DomainRecord
+from astock_lens.domain.enums import (
+    JobStage,
+    MarketValidation,
+    Signal,
+    SnapshotKind,
+)
+from astock_lens.domain.models import DailyBar, DomainRecord
 from astock_lens.factors.config import FactorConfig
 from astock_lens.factors.contracts import FactorResult
 from astock_lens.jobs.models import JobRun, JobStatus, StageOutcome
 from astock_lens.jobs.store import JobStore
+from astock_lens.market.regime import MarketRegimeResult
+from astock_lens.market.validation import MarketValidationResult
 from astock_lens.pipelines import stages
 from astock_lens.qualifications.contracts import (
     QualificationRuleNotConfigured,
     StrategyQualifier,
 )
 from astock_lens.qualifications.models import StrategyQualification
+from astock_lens.signals.contracts import SignalResult
 from astock_lens.strategies.contracts import StrategyResult
 from astock_lens.strategies.registry import RegisteredStrategy, unimplemented_scanners
 from astock_lens.universe.config import UniverseConfig
@@ -81,19 +89,6 @@ EXECUTION_ORDER: tuple[JobStage, ...] = (
 # Why each blocked stage cannot run. Every reason names a decision the design
 # has not made, so nobody can read a blocked stage as a data outage.
 BLOCKED_REASONS: dict[JobStage, str] = {
-    JobStage.DETECT_REGIME: (
-        "no market regime detector exists: the design fixes the five regime "
-        "states but no input thresholds, and AGENTS.md forbids inventing them"
-    ),
-    JobStage.MARKET_VALIDATE: (
-        "no market validation detector exists: the design fixes "
-        "CONFIRMED/NEUTRAL/CONTRADICTED but no thresholds for the trend, "
-        "relative-strength, volume or liquidity inputs"
-    ),
-    JobStage.RUN_SIGNALS: (
-        "no signal detector exists: the design fixes the signal vocabulary but "
-        "no detection thresholds, so a signal could only be invented"
-    ),
     JobStage.UPDATE_WATCHLIST: (
         "no confirmed rule changes a watchlist state on its own; V1 transitions "
         "are user-driven and validated by the state machine (spec §13)"
@@ -278,6 +273,13 @@ class _State:
     universe: UniverseSnapshot | None = None
     factor_results: tuple[FactorResult, ...] = ()
     strategy_results: tuple[StrategyResult, ...] = ()
+    regime_result: MarketRegimeResult | None = None
+    validation_results: tuple[MarketValidationResult, ...] = ()
+    signal_results: tuple[SignalResult, ...] = ()
+    market_validation_by_symbol: dict[str, MarketValidation] = field(
+        default_factory=dict
+    )
+    signal_by_symbol: dict[str, Signal] = field(default_factory=dict)
     qualifications: tuple[StrategyQualification, ...] = ()
     candidates: tuple[Candidate, ...] = ()
     snapshot_paths: list[tuple[SnapshotKind, Path]] = field(default_factory=list)
@@ -438,6 +440,79 @@ def _run_strategies(context: _Context, state: _State) -> StageOutcome:
     )
 
 
+def _detect_regime(context: _Context, state: _State) -> StageOutcome:
+    outcome = _required(state.outcome, stage=JobStage.DETECT_REGIME, name="NORMALIZE")
+    breadth_ratio: float | None = None
+    daily_bars = outcome.bars.daily_bars
+    if daily_bars:
+        bars_by_symbol: dict[str, list[DailyBar]] = {}
+        for b in daily_bars:
+            bars_by_symbol.setdefault(b.symbol, []).append(b)
+        above_ma20 = 0
+        counted = 0
+        for b_list in bars_by_symbol.values():
+            if len(b_list) >= 20 and b_list[-1].close is not None:
+                closes = [bar.close for bar in b_list[-20:] if bar.close is not None]
+                if len(closes) == 20:
+                    counted += 1
+                    if b_list[-1].close > (sum(closes) / 20.0):
+                        above_ma20 += 1
+        if counted > 0:
+            breadth_ratio = above_ma20 / counted
+
+    regime_res = stages.market_regime_stage(
+        as_of=context.as_of,
+        breadth_ratio=breadth_ratio if breadth_ratio is not None else 0.50,
+    )
+    state.regime_result = regime_res
+    return StageOutcome(
+        rows_in=len(daily_bars),
+        rows_out=1,
+        note=f"Regime: {regime_res.regime.value}",
+    )
+
+
+def _market_validate(context: _Context, state: _State) -> StageOutcome:
+    symbols = sorted({r.symbol for r in state.strategy_results})
+    val_results = stages.market_validation_stage(
+        symbols=symbols,
+        factor_results=state.factor_results,
+        as_of=context.as_of,
+    )
+    state.validation_results = val_results
+    state.market_validation_by_symbol = {r.symbol: r.status for r in val_results}
+    confirmed_count = sum(
+        1 for r in val_results if r.status == MarketValidation.CONFIRMED
+    )
+    contradicted_count = sum(
+        1 for r in val_results if r.status == MarketValidation.CONTRADICTED
+    )
+    return StageOutcome(
+        rows_in=len(symbols),
+        rows_out=len(val_results),
+        note=f"Confirmed={confirmed_count}, Contradicted={contradicted_count}",
+    )
+
+
+def _run_signals(context: _Context, state: _State) -> StageOutcome:
+    symbols = sorted({r.symbol for r in state.strategy_results})
+    regime = state.regime_result.regime if state.regime_result is not None else None
+    sig_results = stages.signal_stage(
+        symbols=symbols,
+        factor_results=state.factor_results,
+        as_of=context.as_of,
+        market_regime=regime,
+    )
+    state.signal_results = sig_results
+    state.signal_by_symbol = {r.symbol: r.signal for r in sig_results}
+    active_count = sum(1 for r in sig_results if r.signal != Signal.NO_SIGNAL)
+    return StageOutcome(
+        rows_in=len(symbols),
+        rows_out=len(sig_results),
+        note=f"Signals={len(sig_results)}, Active={active_count}",
+    )
+
+
 def _build_candidates(context: _Context, state: _State) -> StageOutcome:
     universe = _required(
         state.universe, stage=JobStage.BUILD_CANDIDATES, name="BUILD_UNIVERSE"
@@ -451,13 +526,11 @@ def _build_candidates(context: _Context, state: _State) -> StageOutcome:
         factor_results=state.factor_results,
         qualifiers=context.qualifiers,
     )
-    market_validation_by_symbol: dict[str, MarketValidation] = {}
-    signal_by_symbol: dict[str, Signal] = {}
     state.candidates = stages.candidate_stage(
         strategy_results=state.strategy_results,
         qualifications=state.qualifications,
-        market_validation_by_symbol=market_validation_by_symbol,
-        signal_by_symbol=signal_by_symbol,
+        market_validation_by_symbol=state.market_validation_by_symbol,
+        signal_by_symbol=state.signal_by_symbol,
         lineage=stages.lineage_for(
             universe=universe,
             factor_configs=context.factor_configs,
@@ -520,6 +593,9 @@ _HANDLERS: dict[JobStage, Callable[[_Context, _State], StageOutcome]] = {
     JobStage.COMPUTE_FACTORS: _compute_factors,
     JobStage.BUILD_UNIVERSE: _build_universe,
     JobStage.RUN_STRATEGIES: _run_strategies,
+    JobStage.DETECT_REGIME: _detect_regime,
+    JobStage.MARKET_VALIDATE: _market_validate,
+    JobStage.RUN_SIGNALS: _run_signals,
     JobStage.BUILD_CANDIDATES: _build_candidates,
     JobStage.GENERATE_DAILY_SNAPSHOT: _generate_daily_snapshot,
 }

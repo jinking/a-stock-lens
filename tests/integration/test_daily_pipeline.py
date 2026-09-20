@@ -33,15 +33,15 @@ IMPLEMENTED = (
     JobStage.COMPUTE_FACTORS,
     JobStage.BUILD_UNIVERSE,
     JobStage.RUN_STRATEGIES,
-    JobStage.GENERATE_DAILY_SNAPSHOT,
-)
-
-# The stages the design requires and this slice cannot run, because the
-# thresholds they need are deferred rather than decided.
-BLOCKED = (
     JobStage.DETECT_REGIME,
     JobStage.MARKET_VALIDATE,
     JobStage.RUN_SIGNALS,
+    JobStage.GENERATE_DAILY_SNAPSHOT,
+)
+
+# The stages the design requires and this slice cannot run without explicit policy
+# configuration.
+BLOCKED = (
     JobStage.BUILD_CANDIDATES,
     JobStage.UPDATE_WATCHLIST,
 )
@@ -134,7 +134,7 @@ def test_the_implemented_stages_succeed_and_count_their_rows(local_tmp: Path) ->
 def test_the_candidate_stage_is_blocked_while_its_layers_are_missing(
     local_tmp: Path,
 ) -> None:
-    """Market 与 Signal 还没有实现，Candidate 就不是"已完成的最终产物"。"""
+    """未配置资格门槛与候选政策时，BUILD_CANDIDATES 安全阻断。"""
     result = _run(local_tmp)
 
     run = next(
@@ -142,8 +142,8 @@ def test_the_candidate_stage_is_blocked_while_its_layers_are_missing(
     )
     assert run.status is JobStatus.BLOCKED
     assert run.error is not None
-    assert JobStage.DETECT_REGIME.value in run.error
-    assert JobStage.RUN_SIGNALS.value in run.error
+    assert "strategy qualification rules are not configured" in run.error
+    assert "candidate qualification policy is Deferred" in run.error
     # 没有任何候选被写出来冒充完整结果。
     assert result.candidates == ()
 
