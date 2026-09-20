@@ -33,6 +33,12 @@ from astock_lens.calibration.dividend_coverage import (
     render_dividend_coverage_markdown,
 )
 from astock_lens.calibration.factor_distribution import CalibrationPopulation
+from astock_lens.calibration.market_signal_readiness import (
+    build_market_signal_readiness,
+    compute_strategy_qualifications,
+    render_readiness_json,
+    render_readiness_markdown,
+)
 from astock_lens.calibration.qualification_impact import (
     build_qualification_impact,
     render_impact_json,
@@ -2574,5 +2580,77 @@ def calibrate_qualification_impact(
     md_path.write_text(render_impact_markdown(report), encoding="utf-8")
 
     typer.echo("Qualification impact audit written:")
+    typer.echo(f"  {json_path}")
+    typer.echo(f"  {md_path}")
+
+
+@calibrate_app.command("market-signal-readiness")
+def calibrate_market_signal_readiness(
+    as_of: Annotated[
+        str,
+        typer.Option(
+            "--as-of",
+            help="Trade date, YYYY-MM-DD.",
+        ),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option(
+            "--output-dir",
+            help="Directory where the market signal readiness report will be written.",
+        ),
+    ],
+) -> None:
+    """Audit market regime and signal readiness against stored snapshots.
+
+    Strictly read-only:
+    - reads stored FACTOR and STRATEGY snapshots;
+    - evaluates dual qualification using canonical approved qualifiers;
+    - calculates technical metric distributions for qualified stocks;
+    - writes market-signal-readiness-YYYY-MM-DD.json and .md under output_dir.
+    """
+    day = _as_of(as_of)
+    factor_results = _snapshot_records(SnapshotKind.FACTOR, day, FactorResult)
+    strategy_results = _snapshot_records(SnapshotKind.STRATEGY, day, StrategyResult)
+
+    if not factor_results:
+        typer.echo(
+            f"no FACTOR snapshot for {day.date().isoformat()}: run "
+            "`astock daily` to produce it first",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if not strategy_results:
+        typer.echo(
+            f"no STRATEGY snapshot for {day.date().isoformat()}: run "
+            "`astock daily` to produce it first",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    factor_names = frozenset(config.name for config in _factor_configs())
+    qualifiers = load_canonical_qualifiers(known_factor_names=factor_names)
+
+    qualifications = compute_strategy_qualifications(
+        strategy_results=strategy_results,
+        factor_results=factor_results,
+        qualifiers=qualifiers,
+    )
+
+    report = build_market_signal_readiness(
+        as_of=day,
+        qualifications=qualifications,
+        factor_results=factor_results,
+    )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    date_str = day.strftime("%Y-%m-%d")
+    json_path = output_dir / f"market-signal-readiness-{date_str}.json"
+    md_path = output_dir / f"market-signal-readiness-{date_str}.md"
+
+    json_path.write_text(render_readiness_json(report), encoding="utf-8")
+    md_path.write_text(render_readiness_markdown(report), encoding="utf-8")
+
+    typer.echo("Market & signal readiness report written:")
     typer.echo(f"  {json_path}")
     typer.echo(f"  {md_path}")

@@ -9,13 +9,15 @@
 """
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from astock_lens.domain.enums import DataStatus
 from astock_lens.domain.models import DomainRecord
 from astock_lens.factors.contracts import FactorResult
-from astock_lens.qualifications.models import StrategyQualification
+from astock_lens.qualifications.contracts import StrategyQualifier
+from astock_lens.qualifications.models import QualificationContext, StrategyQualification
+from astock_lens.strategies.contracts import StrategyResult
 
 TECHNICAL_METRICS: tuple[str, ...] = (
     "ret_20d",
@@ -23,6 +25,30 @@ TECHNICAL_METRICS: tuple[str, ...] = (
     "proximity_52w_high",
     "avg_amount_20d",
 )
+
+
+def compute_strategy_qualifications(
+    strategy_results: Sequence[StrategyResult],
+    factor_results: Sequence[FactorResult],
+    qualifiers: Mapping[str, StrategyQualifier],
+) -> tuple[StrategyQualification, ...]:
+    """计算各策略标的的双门槛合格结果。"""
+    factors_by_symbol: dict[str, list[FactorResult]] = {}
+    for factor in factor_results:
+        factors_by_symbol.setdefault(factor.symbol, []).append(factor)
+
+    quals: list[StrategyQualification] = []
+    for r in strategy_results:
+        if r.eligible and r.rank_percentile is not None and r.strategy_id in qualifiers:
+            qualifier = qualifiers[r.strategy_id]
+            q = qualifier.qualify(
+                QualificationContext(
+                    strategy_result=r,
+                    factors=tuple(factors_by_symbol.get(r.symbol, ())),
+                )
+            )
+            quals.append(q)
+    return tuple(quals)
 
 
 class MetricDistribution(DomainRecord):
