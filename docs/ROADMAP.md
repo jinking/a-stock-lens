@@ -18,10 +18,11 @@
 | --- | --- | --- |
 | **Stock Discovery** | **COMPLETE** | 基于含最新估值的正式快照（2026-09-19），六策略与单股画像均可用 |
 | **P1 估值补齐/正式重算** | **COMPLETE** | 2,241 / 2,303 覆盖（97.3%），残余 62 只缺口与语义不可算已明确记录 |
-| **P2 候选资格校准证据** | **READY FOR OWNER DECISION** | 诊断校准包已生成，2~3 组备选门槛待所有者批准，绝不擅自落盘生产配置 |
-| **P3 市场机制/验证/信号** | **BLOCKED** | Market Regime / Validation / Signal 阈值与逻辑待所有者定义与开发 |
-| **P4 候选发布 (Candidate)** | **BLOCKED** | 门槛未批、上游未成，BUILD_CANDIDATES 依法严格阻断 |
+| **P2 候选资格校准证据** | **APPROVED BY OWNER** | 所有者已批准稳健平衡型规则（2026-09-20）；待 100% 行业覆盖与休市日日历就绪后写入配置 |
+| **P3 市场机制/验证/信号** | **BLOCKED** | Market Regime / Validation / Signal 阈值与逻辑待设计与开发 |
+| **P4 候选发布 (Candidate)** | **BLOCKED** | 需前置模块完成且 100% 行业覆盖，BUILD_CANDIDATES 依法保持阻断 |
 | **P5 展现层 (Today/Web)** | **NOT STARTED** | 待候选生成体系全链路就绪后启动 |
+
 
 | 层 | 现状 |
 | --- | --- |
