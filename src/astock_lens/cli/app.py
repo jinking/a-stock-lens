@@ -27,6 +27,11 @@ from astock_lens.calibration.candidate_report import (
     generate_calibration_report,
 )
 from astock_lens.calibration.factor_distribution import CalibrationPopulation
+from astock_lens.calibration.qualification_impact import (
+    build_qualification_impact,
+    render_impact_json,
+    render_impact_markdown,
+)
 from astock_lens.calibration.render import render_json, render_markdown
 from astock_lens.calibration.valuation_coverage import valuation_coverage
 from astock_lens.candidates.models import Candidate
@@ -2158,5 +2163,77 @@ def calibrate_candidates(
     md_path.write_text(render_markdown(report), encoding="utf-8")
 
     typer.echo("Calibration report written:")
+    typer.echo(f"  {json_path}")
+    typer.echo(f"  {md_path}")
+
+
+@calibrate_app.command("qualification-impact")
+def calibrate_qualification_impact(
+    as_of: Annotated[
+        str,
+        typer.Option(
+            "--as-of",
+            help="Trade date, YYYY-MM-DD.",
+        ),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option(
+            "--output-dir",
+            help="Directory where the qualification impact audit will be written.",
+        ),
+    ],
+) -> None:
+    """Audit the six production qualification rules against stored snapshots.
+
+    This command is strictly read-only:
+
+    - reads the stored FACTOR and STRATEGY snapshots;
+    - loads the strict canonical qualifiers;
+    - never calls a provider, never recomputes factors/strategies, and never
+      writes a Snapshot / Watchlist / Job / Candidate record.
+
+    It writes only ``qualification-impact-YYYY-MM-DD.json`` and
+    ``qualification-impact-YYYY-MM-DD.md`` under ``--output-dir``. A missing
+    snapshot fails loudly instead of producing an empty report.
+    """
+    day = _as_of(as_of)
+    factor_results = _snapshot_records(SnapshotKind.FACTOR, day, FactorResult)
+    strategy_results = _snapshot_records(SnapshotKind.STRATEGY, day, StrategyResult)
+
+    if not factor_results:
+        typer.echo(
+            f"no FACTOR snapshot for {day.date().isoformat()}: run "
+            "`astock daily` to produce it first",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if not strategy_results:
+        typer.echo(
+            f"no STRATEGY snapshot for {day.date().isoformat()}: run "
+            "`astock daily` to produce it first",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    factor_names = frozenset(config.name for config in _factor_configs())
+    qualifiers = load_canonical_qualifiers(known_factor_names=factor_names)
+
+    report = build_qualification_impact(
+        factor_results=factor_results,
+        strategy_results=strategy_results,
+        qualifiers=qualifiers,
+        as_of=day,
+    )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    date_str = day.strftime("%Y-%m-%d")
+    json_path = output_dir / f"qualification-impact-{date_str}.json"
+    md_path = output_dir / f"qualification-impact-{date_str}.md"
+
+    json_path.write_text(render_impact_json(report), encoding="utf-8")
+    md_path.write_text(render_impact_markdown(report), encoding="utf-8")
+
+    typer.echo("Qualification impact audit written:")
     typer.echo(f"  {json_path}")
     typer.echo(f"  {md_path}")
