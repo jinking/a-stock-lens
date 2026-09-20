@@ -112,6 +112,8 @@ class SnapshotLineage(DomainRecord):
     strategy_version: str | None = None
     qualification_version: str | None = None
     candidate_policy_version: str | None = None
+    regime_version: str | None = None
+    signal_version: str | None = None
 
     def factor_versions(self) -> frozenset[str]:
         """Return the distinct factor versions this lineage declares."""
@@ -128,6 +130,14 @@ class SnapshotLineage(DomainRecord):
     def candidate_policy_versions(self) -> frozenset[str]:
         """Return the distinct candidate policy versions this lineage declares."""
         return _versions(self.candidate_policy_version)
+
+    def regime_versions(self) -> frozenset[str]:
+        """Return the distinct regime versions this lineage declares."""
+        return _versions(self.regime_version)
+
+    def signal_versions(self) -> frozenset[str]:
+        """Return the distinct signal versions this lineage declares."""
+        return _versions(self.signal_version)
 
 
 class ValuationObservation(DomainRecord):
