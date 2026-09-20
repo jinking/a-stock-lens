@@ -1985,3 +1985,46 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
 - 计划 **Task 5** 的 Modify 清单列了 `tests/unit/test_candidate_routing.py`，但该文件在 `44e3e15..HEAD` **零改动**——它不依赖本轮变更的签名（`evaluate(context)`），实际无需修改（属台账未同步，非缺陷）。
 - `tests/integration/test_candidate_qualification_pipeline.py` 同理只到本轮 **m5** 才补齐测试替身签名；此前其 `_DummyPassRule`/`_DummyFailRule` 的旧签名因未被触发而未被发现。
 - 多出一次**未映射到 Task 编号**的修复提交 **`674baef`**（«修复：堵住资格配置空值与未知阈值键的失败关闭绕过»，堵住 `str(None)` 强转与未知阈值键的 fail-closed 绕过），属 Task 3/Task 4 的补丁。
+
+## 三十五、双门槛合格股票发现上线与 2026-09-19 验收（Plan A，2026-09-20）
+
+### 35.1 发现语义三层分层（Strict Vocabulary Distinction）
+
+系统明确区分并固化三层不同的发现与研究产物，禁止任何模糊或将合格标的描述为"买入推荐"：
+
+1. **`screen`（纯横截面排名）**：
+   - 对应命令：`astock screen <strategy> [--as-of] [--top] [--min-percentile] [--all-results]`
+   - 对应 API：`GET /strategies/{strategy_id}/results`
+   - 语义：纯策略横截面打分与百分位排名（ranking）。只反映股票在特定策略因子加权体系下的相对优劣，不作绝对质量过滤；`--top` 参数文案修正为 "Maximum number of strategy results to show"（非 candidates）。
+2. **`qualified`（双门槛合格标的）**：
+   - 对应命令：`astock qualified <strategy> --as-of YYYY-MM-DD [--top N]`
+   - 对应 API：`GET /qualifications/{strategy_id}/results?as_of=YYYY-MM-DD&limit=20`
+   - 语义：在策略横截面排名的基础上，同时执行「相对分位数底线（Top 10%）+ 独立绝对质量门槛」双门槛（dual gate）严格过滤。只返回双通过标的；零合格时必须输出确定性数据健康 warning，绝不静默返回空结果；严格只读，零 Snapshot / Watchlist / Job 突变。
+3. **`candidate`（候选研究对象）**：
+   - 语义：后续在双门槛合格标的基础上，经市场环境（Market Regime）、市场验证（Market Validation）与技术信号（Signal）多重确认后发布的候选研究对象（research candidate，非买入结论）。未发布候选快照时，单股画像如实陈述 `"candidate: not published for this date"`，绝不宣称或猜测原因。
+
+### 35.2 交付物与架构硬约束
+
+- **纯函数发现服务**：`src/astock_lens/discovery/qualified.py`（`screen_qualified`、`QualifiedScreenQuery`、`QualifiedScreenResult`），纯内存操作，严禁导入 `astock_lens.pipelines` 模块；
+- **只读 CLI 命令**：`astock qualified`（`src/astock_lens/cli/app.py`），只读已存储的 FACTOR 与 STRATEGY 快照，严格加载已批准的生产资格配置；若配置非法立即 fail-closed 报错，绝不降级；
+- **只读 API 路由**：`GET /qualifications/{strategy_id}/results`（`src/astock_lens/api/app.py`），支持 `limit` 参数边界校验（1-500，非法返回 422），未知策略返回 404，配置非法 fail loudly 返回 500；架构边界测试保证 API 模块无管道与分析模块导入；
+- **只读保证**：测试中对 Snapshot / Watchlist / Job 根目录做 SHA-256 全量指纹比对，命令执行前后逐字节相同。
+
+### 35.3 2026-09-19 全量真实数据实测验收（PASS）
+
+基于 2026-09-19 正式快照（Research Universe 2,303 只、FACTOR 120,192 条、STRATEGY 13,818 条），运行 6 大策略只读合格查询实测验收：
+
+| 策略 | 策略合格条数 (eligible) | 排名条数 (ranked) | 分位数通过 (Top 10%) | 绝对门槛通过 (absolute) | 双门槛通过 (qualified) | 验收结论 |
+|---|---|---|---|---|---|---|
+| **Value** | 1,578 | 1,578 | 158 | 320 | **132** | 吻合预期 (132) |
+| **Growth** | 2,302 | 2,302 | 231 | 445 | **151** | 吻合预期 (151) |
+| **GARP** | 849 | 849 | 85 | 196 | **61** | 吻合预期 (61) |
+| **Quality** | 1,697 | 1,697 | 170 | 324 | **111** | 吻合预期 (111) |
+| **Momentum** | 2,281 | 2,281 | 229 | 303 | **166** | 吻合预期 (166) |
+| **Dividend** | 1,612 | 1,612 | 162 | 0 | **0** | 吻合预期 (0，带数据健康 warning) |
+
+- **Dividend 零合格数据健康 warning**：
+  `warning: 策略 dividend 在当前快照中无任何双门槛通过标的（eligible=1612，ranked=1612，percentile_pass=162，absolute_pass=0）；请检查因子与策略快照的覆盖度及数据质量。`
+- **真实 API Smoke 验证**：
+  Value (qualified=132, 200 OK)、Growth (qualified=151, 200 OK)、Dividend (qualified=0, 200 OK) 路由均准确返回相应数据结构，无任何运行时异常。
+

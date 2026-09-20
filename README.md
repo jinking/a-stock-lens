@@ -6,9 +6,13 @@
 
 `全市场发现 → 策略解释 → 市场验证 → 交易状态 → 观察池 → 深度研究 → 持续跟踪`
 
-## Candidate ≠ Recommendation
+## 发现与候选语义分层（Candidate ≠ Recommendation）
 
-系统输出 Candidate、Research Priority 与 Signal State，不输出"强烈买入"这类结论。Candidate 是一个**研究对象**，不是推荐；`next_action` 只允许 `IGNORE`、`WATCH`、`DEEP_RESEARCH`、`TRACK_SIGNAL`。
+系统严格区分三层不同的发现与研究产物，禁止混淆或将合格标的描述为"买卖推荐"：
+
+- **`screen`（横截面排名）**：纯策略横截面打分与百分位排名（ranking）。只反映股票在特定策略因子加权体系下的相对位次，不作绝对质量拦截；
+- **`qualified`（双门槛合格标的）**：在排名基础上执行「相对分位数底线（Top 10%）+ 独立绝对质量门槛」双门槛（dual gate）过滤。未通过绝对门槛的标的被剔除；零合格时给出确定性数据健康警告；严格只读，绝不写快照，绝不当作买卖推荐；
+- **`candidate`（候选研究对象）**：后续在双门槛合格基础上，经市场环境（Market Regime）、市场验证（Market Validation）与技术信号（Signal）多重确认后发布的候选研究对象（research candidate，非买入推荐）。`next_action` 只允许 `IGNORE`、`WATCH`、`DEEP_RESEARCH`、`TRACK_SIGNAL`。
 
 ## 与 a-share-deep-research 的关系
 
@@ -64,7 +68,7 @@ V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学�
 | 全市场财报同步已验证（5,576 只 × 三大表，37 分钟，缺口 4–6 只且有名有姓） | AkShare 全市场日线（5564 只 × 全history，尚未跑过） |
 | 评分机器（`strategies/percentile_scorer.py` 共享组件，支持极性）+ 权重评审工具（真实全市场数据）；每个策略一个独立 Scanner 类 | 重跑一次权重评审以确认现行数字 |
 | neodata 一等 Provider（估值 / 行业 / 单季财报查询模板、批量、缺口补抓、凭证状态进 doctor）+ 估值归一化 | 行业数据归一化、Industry Trend |
-| Job Run 记录与 Manifest（每阶段独立可重跑）、`astock daily`；CLI `sync` / `stock` / `screen` / `watch` / `research` / `strategy run`；API `/health` `/universe` `/factors` `/candidates` `/watchlist` `/strategies` `/strategies/{strategy_id}/results` `/stocks/{symbol}` | |
+| Job Run 记录与 Manifest（每阶段独立可重跑）、`astock daily`；CLI `sync` / `stock` / `screen` / `qualified` / `watch` / `research` / `strategy run`；API `/health` `/universe` `/factors` `/candidates` `/watchlist` `/strategies` `/strategies/{strategy_id}/results` `/qualifications/{strategy_id}/results` `/stocks/{symbol}` | |
 | 独立 Artifact Validator（快照 + Job Manifest，不导入生产代码） | |
 
 包结构已按 `docs/ARCHITECTURE.md` 建立，`src/astock_lens/` 下的 `backtest`、`portfolio`、`events` 等目录只是预留边界，没有 V1 实现。

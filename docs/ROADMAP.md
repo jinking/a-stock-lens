@@ -8,9 +8,10 @@
 
 本行基线由 `PYTHONPATH= .venv/bin/python -m pytest` 于提交前实测得出（结果见 Task 8 门禁）。
 已发布 2026-09-19 正式快照：Research Universe = 2,303 只，FactorResult = 120,192 条（**全市场口径** 5,008 × 24；研究池投影为 55,272 条），StrategyResult = 13,818 条。
-六策略选股榜与单股画像正式上线，Value 达 1,578 只、GARP 达 849 只，历史旧限制彻底解除：
-- CLI 提供只读策略选股命令 `astock screen <strategy> [--as-of] [--top] [--min-percentile] [--all-results]`；
-- API 提供只读策略榜单 `/strategies/{id}/results`、策略覆盖概览 `/strategies` 与单股研究画像 `/stocks/{symbol}`；
+六策略选股榜、双门槛合格发现与单股画像正式上线，Value 达 1,578 只、GARP 达 849 只，历史旧限制彻底解除：
+- CLI 提供只读策略排名选股命令 `astock screen` 与双门槛合格股票查询 `astock qualified`；
+- API 提供只读策略榜单 `/strategies/{id}/results`、双门槛合格结果 `/qualifications/{strategy_id}/results`、策略覆盖概览 `/strategies` 与单股研究画像 `/stocks/{symbol}`；
+- 明确澄清三层发现语义：`screen`（纯横截面打分排名）、`qualified`（Top 10% + 绝对质量门槛双通过过滤）、`candidate`（后续经 Market/Signal 验证的研究候选对象，非买入推荐）；
 - 架构与数据契约严格遵守只读隔离，绝不重算因子或策略，零状态突变；单股画像中的 `candidate_status` 严格如实呈现（未发布快照时显式返回 `"not_published"`，`/candidates` 严格返回 404，绝不捏造假候选）。
 生产资格规则已恢复为所有者批准口径，并完成全研究池只读审计（见 `docs/decision-packets/2026-09-20-qualification-repair-audit.md`）。
 当前严格执行停机门禁（Stop Gate），Candidate 发布前的 Market/Signal 模块与候选政策未就绪，`BUILD_CANDIDATES` 保持 BLOCKED。
@@ -18,6 +19,7 @@
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
 | Stock Discovery | COMPLETE | 基于含最新估值的正式快照（2026-09-19），六策略与单股画像均可用 |
+| Qualified Stock Discovery (Plan A) | COMPLETE | CLI `astock qualified` 与 API `/qualifications/{strategy_id}/results` 上线；2026-09-19 实测（Value 132 / Growth 151 / GARP 61 / Quality 111 / Momentum 166 / Dividend 0 显式 warning） |
 | P1 Valuation | COMPLETE | 2,241 / 2,303 覆盖（97.3%），残余 62 只缺口与语义不可算已明确记录 |
 | P2 Owner Qualification Decision | COMPLETE | 所有者已批准稳健平衡型六策略规则（2026-09-20） |
 | P2 Qualification Implementation | REPAIRED + AUDITED | 六份生产 YAML 已恢复批准原文；资格改用完整股票因子证据；非法配置 fail-closed；已全研究池只读审计 |
@@ -33,9 +35,9 @@
 | 因子 | 24 个配置（技术/流动性 + 基本面 + 估值） |
 | 策略 | 7 个配置，**6 个在打分**（等权，均已评审，各自独立 Scanner 类），1 个待行业数据 |
 | 执行链 | 唯一分析执行链 `pipelines/analysis.py`；正式快照只有 `astock daily` 能写 |
-| 发现 | **股票发现 MVP 已完成**（服务层、CLI `screen` 命令、API 策略榜单与单股画像已打通，只读无副作用） |
+| 发现 | **股票发现已完成**（排名 `screen` + 双门槛合格 `qualified` 纯查询服务、CLI 与 API 已打通，只读无副作用） |
 | 候选 | `BUILD_CANDIDATES` 保持 `BLOCKED`：上游 Market/Signal 未实现（入选规则已批准并落地 REPAIRED + AUDITED） |
-| 接口 | CLI 11 条命令；API 8 个路由；Web 只有 `web/README.md` |
+| 接口 | CLI 12 条命令；API 9 个路由；Web 只有 `web/README.md` |
 
 ---
 
