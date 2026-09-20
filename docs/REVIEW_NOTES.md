@@ -1952,3 +1952,20 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
   - **quality**：与批准一致（`roe_ttm>=12`、`gross_margin>=20`、`debt_to_asset<=65`），PASSED。
   - **momentum**：与批准一致（仅 `proximity_52w_high {min: 0.80}`），PASSED；流动性由 canonical Universe `min_average_turnover_20d = 150,000,000` 承担，专项用例 PASSED。
 - **结论**：生产资格规则存在 4 个策略的审批漂移（value/growth/garp/dividend），其中 2 个同时含单位错误（garp/dividend）。本契约测试即为后续 Task 4 必须达成的目标，RED 证据已留存。
+
+### 33.12 六策略资格规则全研究池修复审计完成（2026-09-20）
+
+- **范围**：Qualification Correctness Hardening 实施计划 Task 1–7。生产资格规则与所有者批准口径逐字一致；资格判定改为读取该股票完整 Factor 证据；非法配置失败关闭；并在正式全研究池基线上完成只读审计。
+- **关键提交**：`0686d31`（契约测试）、`540ec0b`（QualificationContext）、`de3f18b`（严格 fail-closed 配置）、`3b28a6e`（恢复六份生产 YAML）、`674baef`（堵住空值/未知阈值键绕过）、`5182673`（管线接入完整因子证据）、`ba0430d`（只读资格影响审计 CLI）。
+- **审计基线（读实际存储）**：Research Universe 2,303；FACTOR 快照 **120,192 = 5,008 × 24（全市场口径）**；STRATEGY 快照 **13,818 = 2,303 × 6**；无 CANDIDATE 快照。
+- **六策略分布**（`astock calibrate qualification-impact --as-of 2026-09-19`）：value 158/320/132、growth 231/445/151、garp 85/196/61、quality 170/324/111、momentum 229/303/166、**dividend top10=162 但 absolute-pass=0、dual-pass=0**（dual÷ranked 0.0000）。
+- **安全复核（触发 `dual_pass_count == 0`）**：`dividend` 全灭系**上游股息率数据缺口**，非阈值/单位缺陷：
+  - FACTOR 快照 `dividend_yield_ttm`：`VALUE=0`、`NULL=2241`、`NOT_APPLICABLE=2767`，`unit=%`；
+  - 上游 `data/raw/neodata/valuation/2026-09-19.csv`（2241 只）的「静态股息率（%）」「滚动股息率（%）」两列，**24,619 个单元格非空值为 0**（全 `--`）；
+  - 对照 `dividend_payout_ttm` 有 `VALUE=1622`（其中 1309 在 `[0.10,0.80]`）。
+  - 抽样 22 只边界样本：`dividend_yield_ttm` 全部 `NULL`；`dividend_payout_ttm` 18/22 达标。
+  - **裁定：规则正确、数据缺失。严禁改已批准阈值**；已作为上游阻塞记入 `docs/REMAINING_PRODUCT_BLOCKERS.md`，需所有者决定补数据源或重新审批 Dividend 门槛。
+- **三策略直接验证**：Growth 合格样本 5 只全部满足 `npyoy>=15 / revenue_yoy>=5 / roe_ttm>=8`（`roe_ttm` 不在评分快照内）；GARP 合格样本全部满足 `pe_ttm<=35 / npyoy>=15 / roe_ttm>=10`，阈值键不含 `pe_percentile`；Dividend 合格样本为空（见上）。
+- **无 Candidate 发布证明**：审计命令只读（执行前后 Snapshot/Watchlist/Job 指纹逐字节相等）；`data/snapshots/CANDIDATE/` 不存在；`astock daily` 仍在 `BUILD_CANDIDATES` 阻断（`5 blocked, 0 failed`, `candidates: 0`）。
+- **不改产出的独立佐证**：修复后重跑 `astock daily --as-of 2026-09-19` 未产生快照冲突，`FACTOR/UNIVERSE/STRATEGY` 的 `2026-09-19.json` mtime 仍为 `09:49:45/46/58` → 重跑产出与正式快照逐字节一致，即本次修复未改变 FACTOR/STRATEGY 产出。
+- **完整审计文档**：`docs/decision-packets/2026-09-20-qualification-repair-audit.md`。产物：`var/calibration/qualification-repair/qualification-impact-2026-09-19.{json,md}`。
