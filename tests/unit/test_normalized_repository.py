@@ -402,14 +402,9 @@ def test_valuation_inputs_point_in_time_isolation(local_tmp: Path) -> None:
     assert older.source_file.name == "2026-09-17.csv"
     assert newer.source_file.name == "2026-09-19.csv"
 
-    older_obs = {
-        (item.symbol, item.metric): item.value for item in older.observations
-    }
-    newer_obs = {
-        (item.symbol, item.metric): item.value for item in newer.observations
-    }
+    older_obs = {(item.symbol, item.metric): item.value for item in older.observations}
+    newer_obs = {(item.symbol, item.metric): item.value for item in newer.observations}
 
     assert older_obs[("000001.SZ", "pe_ttm")] == 5.18
     assert newer_obs[("000001.SZ", "pe_ttm")] == 6.25
     assert older_obs[("000001.SZ", "pe_ttm")] != newer_obs[("000001.SZ", "pe_ttm")]
-

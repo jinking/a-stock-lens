@@ -14,6 +14,15 @@
 - 架构与数据契约严格遵守只读隔离，绝不重算因子或策略，零状态突变；单股画像中的 `candidate_status` 严格如实呈现（未发布快照时显式返回 `"not_published"`，`/candidates` 严格返回 404，绝不捏造假候选）。
 当前严格执行停机门禁（Stop Gate），Candidate 绝对门槛审定前保持 BLOCKED。
 
+| 阶段 | 状态 | 说明 |
+| --- | --- | --- |
+| **Stock Discovery** | **COMPLETE** | 基于含最新估值的正式快照（2026-09-19），六策略与单股画像均可用 |
+| **P1 估值补齐/正式重算** | **COMPLETE** | 2,241 / 2,303 覆盖（97.3%），残余 62 只缺口与语义不可算已明确记录 |
+| **P2 候选资格校准证据** | **READY FOR OWNER DECISION** | 诊断校准包已生成，2~3 组备选门槛待所有者批准，绝不擅自落盘生产配置 |
+| **P3 市场机制/验证/信号** | **BLOCKED** | Market Regime / Validation / Signal 阈值与逻辑待所有者定义与开发 |
+| **P4 候选发布 (Candidate)** | **BLOCKED** | 门槛未批、上游未成，BUILD_CANDIDATES 依法严格阻断 |
+| **P5 展现层 (Today/Web)** | **NOT STARTED** | 待候选生成体系全链路就绪后启动 |
+
 | 层 | 现状 |
 | --- | --- |
 | 数据源 | AkShare（名单/日线）、WeStock（三大表，带公告日）、neodata（估值/行业/语义）三个 Provider 全部接入 |

@@ -1808,3 +1808,30 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
   - 依据设计规格与校准契约，决策级 Candidate 审定要求 100% 行业覆盖；当 Canonical 存在 9 只缺口时，系统依法抛出并保持 `IndustryCoverageUnavailable` 阻断。
   - 此 Blocker 为**产品安全预期行为**，在获得完备行业全源或所有者正式豁免前，绝对禁止在正式状态中假装完整。
   - 任务 7 的校准分析将通过显式标记的诊断链路（`--industry-map` + `diagnostic_only=True`）产出分布建议包，绝不破坏正式状态。
+
+### 33.7 绝对资格门槛诊断校准包与全量验证门禁（任务 7 与任务 8）
+
+- **诊断级校准包产出（任务 7）**：
+  - 显式导出诊断用行业映射：`var/calibration/industry-2026-09-18.csv`（覆盖 2,294 只，SHA256: `c22a8595dbd59c708539682346d95185e8e6db8ba79dd4fa2bfb70fec2f50e67`）；
+  - 运行校准分析（`--industry-map var/calibration/industry-2026-09-18.csv --diagnostic-only`），产出完整诊断校准包：
+    - `var/calibration/2026-09-19-candidate-calibration.json`
+    - `var/calibration/2026-09-19-candidate-calibration.md`
+  - 编写并固化正式决策材料：
+    - `docs/decision-packets/2026-09-20-candidate-qualification-diagnostic-packet.md`
+  - 将 `var/calibration/` 纳入 `.gitignore`，防止大型校准运行时产物污染 Git 树。
+- **四大核心因子异象深度剖析（产品所有者决策关键输入）**：
+  - **成长极值基数异象**：`net_profit_parent_yoy` 极大值达 415,612.12%（超 4,100 倍），因微利基数引起，纯相对分位数无法识别不可持续性，必须由 3 年 CAGR 与营收增速交叉过滤；
+  - **红利超额支付异象**：`dividend_payout_ttm` 最大值达 92.82（9282%），存在大额清仓式派息，需在绝对门槛中设置支付率上限（建议 <= 80% 或 100%）；
+  - **GARP 策略源端 PEG 量纲异象**：`peg` 中位数高达 166.27，极大值达 407,402.50，上游口径可能为非标准百分比，在确定清洗换算前暂不宜直接套用传统经典门槛（如 <= 1.5）；
+  - **价值榜首金融保险高度集中**：Top 5 全部为头部保险央国企（新华保险、中国人寿、中国人保、中国太保、中国平安），低 PE/PB 特征鲜明。
+- **全量代码质量与测试验证（任务 8）**：
+  - `ruff check .`：通过，0 errors；
+  - `ruff format --check .`：通过，全部代码符合格式；
+  - `mypy`：通过，116 个源文件类型检查无错误；
+  - `make test-fast PYTHONPATH=`：通过，977 passed, 10 warnings；
+  - `git diff --check`：通过，无空白异常。
+- **安全红线与状态机完整性核验**：
+  - `configs/qualifications/` 严格保持不存在（0 个文件），未获所有者审批前绝不伪造任何资格配置文件；
+  - 代码库中不存在任何跨策略伪合成评分字段（无 `global_score` / `combined_strategy_score` / `cross_strategy_score`）；
+  - `GET /candidates?as_of=2026-09-19` 严格返回 404；调度作业 `BUILD_CANDIDATES` 状态严格保持 `BLOCKED`；
+  - 升级包第一阶段准备工作全部闭环，进入项目所有者决策审批门禁（Owner Stop Gate）。
