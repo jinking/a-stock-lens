@@ -80,7 +80,7 @@ class DefaultSignalDetector:
             )
 
         # 3. 策略特定技术特征判定
-        elif context.strategy_id == "momentum":
+        elif context.strategy_id in ("momentum", None):
             if prox is not None and prox >= 0.95:
                 signal = Signal.BREAKOUT
                 reasons.append(f"向上突破一年新高区域 (距52周最高点 {prox:.2f})")
@@ -105,7 +105,7 @@ class DefaultSignalDetector:
                     f"上升通道强趋势持续 (20日涨幅 {ret_20d:+.2%}, 距高点 {prox:.2f})"
                 )
 
-        elif context.strategy_id in ("value", "dividend"):
+        if signal == Signal.NO_SIGNAL and context.strategy_id in ("value", "dividend", None):
             if (
                 div_yield is not None
                 and div_yield >= 3.0

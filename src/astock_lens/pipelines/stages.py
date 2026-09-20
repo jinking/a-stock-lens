@@ -33,11 +33,21 @@ from astock_lens.data.repository.models import (
     NormalizeOutcome,
     ValuationInputs,
 )
-from astock_lens.domain.enums import MarketValidation, Signal
+from astock_lens.domain.enums import MarketRegime, MarketValidation, Signal
 from astock_lens.domain.models import SnapshotLineage
 from astock_lens.factors.config import FactorConfig
 from astock_lens.factors.contracts import FactorContext, FactorResult
 from astock_lens.factors.registry import build_registry
+from astock_lens.market.regime import (
+    MarketRegimeContext,
+    MarketRegimeDetector,
+    MarketRegimeResult,
+)
+from astock_lens.market.validation import (
+    MarketValidationContext,
+    MarketValidationResult,
+    MarketValidator,
+)
 from astock_lens.qualifications.contracts import (
     QualificationRuleNotConfigured,
     StrategyQualifier,
@@ -46,6 +56,8 @@ from astock_lens.qualifications.models import (
     QualificationContext,
     StrategyQualification,
 )
+from astock_lens.signals.contracts import SignalContext, SignalDetector, SignalResult
+from astock_lens.signals.detector import DefaultSignalDetector
 from astock_lens.strategies.contracts import StrategyContext, StrategyResult
 from astock_lens.strategies.registry import RegisteredStrategy
 from astock_lens.universe.builder import LIQUIDITY_FACTOR, UniverseBuilder
@@ -69,8 +81,11 @@ __all__ = [
     "financial_inputs",
     "lineage_for",
     "liquidity_by_symbol",
+    "market_regime_stage",
+    "market_validation_stage",
     "normalize_stage",
     "qualification_stage",
+    "signal_stage",
     "strategy_stage",
     "symbols_of",
     "universe_stage",
@@ -403,3 +418,78 @@ def liquidity_by_symbol(
 def symbols_of(dataset: NormalizedDataset) -> tuple[str, ...]:
     """Return the dataset's symbols in a stable order."""
     return tuple(sorted({bar.symbol for bar in dataset.daily_bars}))
+
+
+def market_regime_stage(
+    *,
+    as_of: datetime,
+    breadth_ratio: float | None = None,
+    index_trend: float | None = None,
+    extreme_volatility: bool = False,
+    detector: MarketRegimeDetector | None = None,
+) -> MarketRegimeResult:
+    """Detect market regime state."""
+    active_detector = detector or MarketRegimeDetector()
+    context = MarketRegimeContext(
+        as_of=as_of,
+        breadth_ratio=breadth_ratio,
+        index_trend=index_trend,
+        extreme_volatility=extreme_volatility,
+    )
+    return active_detector.detect(context)
+
+
+def market_validation_stage(
+    *,
+    symbols: Sequence[str],
+    factor_results: Sequence[FactorResult],
+    as_of: datetime,
+    strategy_id: str = "momentum",
+    validator: MarketValidator | None = None,
+) -> tuple[MarketValidationResult, ...]:
+    """Validate candidate market behavior against the 5-dimension matrix."""
+    active_validator = validator or MarketValidator()
+    index = FactorResultIndex(factor_results)
+    results: list[MarketValidationResult] = []
+    for sym in symbols:
+        factors = index.for_symbol(sym)
+        context = MarketValidationContext(
+            symbol=sym,
+            strategy_id=strategy_id,
+            as_of=as_of,
+            factors=factors,
+        )
+        results.append(active_validator.validate(context))
+    return tuple(results)
+
+
+def signal_stage(
+    *,
+    symbols: Sequence[str],
+    factor_results: Sequence[FactorResult],
+    as_of: datetime,
+    strategy_id: str | None = None,
+    strategy_by_symbol: Mapping[str, str] | None = None,
+    market_regime: MarketRegime | None = None,
+    detector: SignalDetector | None = None,
+) -> tuple[SignalResult, ...]:
+    """Detect technical market state signals."""
+    active_detector = detector or DefaultSignalDetector()
+    index = FactorResultIndex(factor_results)
+    results: list[SignalResult] = []
+    for sym in symbols:
+        factors = index.for_symbol(sym)
+        sid = (
+            strategy_by_symbol.get(sym)
+            if strategy_by_symbol is not None
+            else strategy_id
+        )
+        context = SignalContext(
+            symbol=sym,
+            as_of=as_of,
+            factors=factors,
+            market_regime=market_regime,
+            strategy_id=sid,
+        )
+        results.append(active_detector.detect(context))
+    return tuple(results)
