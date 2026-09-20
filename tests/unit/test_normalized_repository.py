@@ -371,3 +371,45 @@ def test_the_data_layer_never_imports_the_pipeline_layer() -> None:
     ]
 
     assert offenders == []
+
+
+def test_valuation_inputs_point_in_time_isolation(local_tmp: Path) -> None:
+    """证明时点早的 as_of 绝不泄漏使用晚于该时点的估值文件，且同一指标在两日取值各异。"""
+    raw_root = local_tmp / "raw"
+    val_dir = raw_root / "neodata" / "valuation"
+    val_dir.mkdir(parents=True, exist_ok=True)
+
+    def _make_csv(pe_value: float) -> str:
+        block = (
+            "**标的代码（统一输出字段名）**: 000001.SZ\n\n"
+            "  **标的名称**: 平安银行\n\n"
+            f"  **滚动市盈率（倍）**: {pe_value}\n\n"
+            "  **市盈率历史分位数（%）**: 50.0\n\n"
+            "  **市净率（倍）**: 0.5\n"
+        )
+        escaped = block.replace('"', '""')
+        return f'type,desc,content\n统一估值查询,统一估值查询,"{escaped}"\n'
+
+    (val_dir / "2026-09-17.csv").write_text(_make_csv(5.18), encoding="utf-8")
+    (val_dir / "2026-09-19.csv").write_text(_make_csv(6.25), encoding="utf-8")
+
+    repo = CsvNormalizedRepository(raw_root)
+    older = repo.valuation_inputs(as_of=datetime(2026, 9, 17, 15, 0, tzinfo=UTC))
+    newer = repo.valuation_inputs(as_of=datetime(2026, 9, 19, 15, 0, tzinfo=UTC))
+
+    assert older.source_file is not None
+    assert newer.source_file is not None
+    assert older.source_file.name == "2026-09-17.csv"
+    assert newer.source_file.name == "2026-09-19.csv"
+
+    older_obs = {
+        (item.symbol, item.metric): item.value for item in older.observations
+    }
+    newer_obs = {
+        (item.symbol, item.metric): item.value for item in newer.observations
+    }
+
+    assert older_obs[("000001.SZ", "pe_ttm")] == 5.18
+    assert newer_obs[("000001.SZ", "pe_ttm")] == 6.25
+    assert older_obs[("000001.SZ", "pe_ttm")] != newer_obs[("000001.SZ", "pe_ttm")]
+

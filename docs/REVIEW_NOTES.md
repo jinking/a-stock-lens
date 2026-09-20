@@ -1689,3 +1689,19 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
 同时把因子层从"每次调用喂全池数据集"改成按 symbol 分组喂入：`ValuationFactor.compute`
 是按 symbol 线性过滤的，喂全池会让 2,241 × 7 次调用各扫 25.7 万条。语义等价，
 原因是因子只读属于该 symbol 的行（含"从没有过该指标"与"晚于 as_of"两种区分）。
+
+## 三十三、Candidate Readiness 升级：估值时点可见性与基线钉住（2026-09-20）
+
+### 33.1 基线状态
+
+- 启动 HEAD：`dd45d1de77b80229447822b57d4f8de5b104c87b`
+- 全量测试基线：977 passed, 10 warnings, 0 failed
+- 类型与代码检查：`ruff check .` 全部通过，`mypy` 116 个源文件全部通过
+
+### 33.2 估值时点可见性（PIT）隔离回归
+
+- 在 `tests/unit/test_normalized_repository.py` 中新增 `test_valuation_inputs_point_in_time_isolation`：
+  - 构造包含 `2026-09-17.csv` 和 `2026-09-19.csv` 且同一标的（000001.SZ）指标不同的临时 Raw 树；
+  - 验证 `as_of=2026-09-17` 严格只读取 `2026-09-17.csv`，指标值为 5.18；
+  - 验证 `as_of=2026-09-19` 读取 `2026-09-19.csv`，指标值为 6.25；
+  - 冻结基线 `data/raw/neodata/valuation/2026-09-17.csv` 零变动。
