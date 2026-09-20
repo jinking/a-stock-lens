@@ -714,3 +714,271 @@ def test_stock_profile_unknown_symbol_not_in_universe(local_tmp: Path) -> None:
     assert payload["factors"] == []
     assert payload["strategies"] == []
     assert payload["candidate_status"] == "not_published"
+
+
+def test_qualification_results_dual_pass_only(local_tmp: Path) -> None:
+    store = JsonSnapshotStore(local_tmp)
+    # growth 已批准门槛：net_profit_parent_yoy>=15, revenue_yoy>=5, roe_ttm>=8
+    factors = [
+        FactorResult(
+            symbol="600000.SH",
+            factor="net_profit_parent_yoy",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(factor_version="v1"),
+            raw_value=20.0,
+        ),
+        FactorResult(
+            symbol="600000.SH",
+            factor="revenue_yoy",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(factor_version="v1"),
+            raw_value=8.0,
+        ),
+        FactorResult(
+            symbol="600000.SH",
+            factor="roe_ttm",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(factor_version="v1"),
+            raw_value=9.0,
+        ),
+        FactorResult(
+            symbol="600001.SH",
+            factor="net_profit_parent_yoy",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(factor_version="v1"),
+            raw_value=10.0,
+        ),
+        FactorResult(
+            symbol="600001.SH",
+            factor="revenue_yoy",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(factor_version="v1"),
+            raw_value=8.0,
+        ),
+        FactorResult(
+            symbol="600001.SH",
+            factor="roe_ttm",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(factor_version="v1"),
+            raw_value=9.0,
+        ),
+        FactorResult(
+            symbol="600002.SH",
+            factor="net_profit_parent_yoy",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(factor_version="v1"),
+            raw_value=25.0,
+        ),
+        FactorResult(
+            symbol="600002.SH",
+            factor="revenue_yoy",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(factor_version="v1"),
+            raw_value=12.0,
+        ),
+        FactorResult(
+            symbol="600002.SH",
+            factor="roe_ttm",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(factor_version="v1"),
+            raw_value=10.0,
+        ),
+        FactorResult(
+            symbol="600003.SH",
+            factor="net_profit_parent_yoy",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(factor_version="v1"),
+            raw_value=30.0,
+        ),
+        FactorResult(
+            symbol="600003.SH",
+            factor="revenue_yoy",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(factor_version="v1"),
+            raw_value=15.0,
+        ),
+        FactorResult(
+            symbol="600003.SH",
+            factor="roe_ttm",
+            as_of=AS_OF,
+            status=DataStatus.VALUE,
+            factor_version="v1",
+            lineage=SnapshotLineage(factor_version="v1"),
+            raw_value=11.0,
+        ),
+    ]
+    store.write(SnapshotKind.FACTOR, AS_OF, factors)
+
+    strategies = [
+        StrategyResult(
+            symbol="600000.SH",
+            strategy_id="growth",
+            strategy_version="v1",
+            as_of=AS_OF,
+            eligible=True,
+            lineage=SnapshotLineage(strategy_version="v1"),
+            score=80.0,
+            rank_percentile=0.95,
+        ),
+        StrategyResult(
+            symbol="600001.SH",
+            strategy_id="growth",
+            strategy_version="v1",
+            as_of=AS_OF,
+            eligible=True,
+            lineage=SnapshotLineage(strategy_version="v1"),
+            score=75.0,
+            rank_percentile=0.95,
+        ),
+        StrategyResult(
+            symbol="600002.SH",
+            strategy_id="growth",
+            strategy_version="v1",
+            as_of=AS_OF,
+            eligible=True,
+            lineage=SnapshotLineage(strategy_version="v1"),
+            score=70.0,
+            rank_percentile=0.50,
+        ),
+        StrategyResult(
+            symbol="600003.SH",
+            strategy_id="growth",
+            strategy_version="v1",
+            as_of=AS_OF,
+            eligible=True,
+            lineage=SnapshotLineage(strategy_version="v1"),
+            score=88.0,
+            rank_percentile=0.98,
+        ),
+        StrategyResult(
+            symbol="601398.SH",
+            strategy_id="momentum",
+            strategy_version="v1",
+            as_of=AS_OF,
+            eligible=True,
+            lineage=SnapshotLineage(strategy_version="v1"),
+            score=99.0,
+            rank_percentile=0.99,
+        ),
+    ]
+    store.write(SnapshotKind.STRATEGY, AS_OF, strategies)
+
+    client = TestClient(create_app(snapshot_root=local_tmp))
+    response = client.get(
+        "/qualifications/growth/results", params={"as_of": DAY, "limit": 10}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["strategy_id"] == "growth"
+    assert data["coverage"]["strategy_eligible_count"] == 4
+    assert data["coverage"]["ranked_count"] == 4
+    assert data["coverage"]["percentile_pass_count"] == 3
+    assert data["coverage"]["absolute_pass_count"] == 3
+    assert data["coverage"]["qualified_count"] == 2
+    items = data["items"]
+    assert len(items) == 2
+    assert items[0]["symbol"] == "600003.SH"
+    assert items[0]["rank"] == 1
+    assert items[1]["symbol"] == "600000.SH"
+    assert items[1]["rank"] == 2
+
+
+def test_qualification_results_limit_validation(local_tmp: Path) -> None:
+    _seed(local_tmp)
+    client = TestClient(create_app(snapshot_root=local_tmp))
+    res_zero = client.get(
+        "/qualifications/growth/results", params={"as_of": DAY, "limit": 0}
+    )
+    assert res_zero.status_code == 422
+    res_neg = client.get(
+        "/qualifications/growth/results", params={"as_of": DAY, "limit": -5}
+    )
+    assert res_neg.status_code == 422
+    res_large = client.get(
+        "/qualifications/growth/results", params={"as_of": DAY, "limit": 501}
+    )
+    assert res_large.status_code == 422
+
+
+def test_qualification_results_unknown_strategy_returns_404(
+    local_tmp: Path,
+) -> None:
+    _seed(local_tmp)
+    client = TestClient(create_app(snapshot_root=local_tmp))
+    res = client.get(
+        "/qualifications/non_existent_strategy/results", params={"as_of": DAY}
+    )
+    assert res.status_code == 404
+
+
+def test_qualification_results_invalid_config_fails_loudly(
+    local_tmp: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _seed(local_tmp)
+    bad_dir = tmp_path / "bad_qualifications"
+    bad_dir.mkdir()
+    monkeypatch.setenv("ASTOCK_QUALIFICATION_DIR", str(bad_dir))
+
+    client = TestClient(create_app(snapshot_root=local_tmp))
+    res = client.get("/qualifications/growth/results", params={"as_of": DAY})
+    assert res.status_code >= 400
+    assert res.status_code != 200
+
+
+def test_qualification_results_missing_snapshot_returns_404(
+    local_tmp: Path,
+) -> None:
+    client = TestClient(create_app(snapshot_root=local_tmp))
+    res = client.get("/qualifications/growth/results", params={"as_of": DAY})
+    assert res.status_code == 404
+    assert DAY in res.json()["detail"]
+
+
+def test_api_module_imports_strictly_bounded() -> None:
+    import ast
+
+    api_file = Path("src/astock_lens/api/app.py")
+    tree = ast.parse(api_file.read_text("utf-8"), filename=str(api_file))
+
+    forbidden = {
+        "astock_lens.pipelines",
+        "run_analysis",
+        "factor_stage",
+        "strategy_stage",
+    }
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                for f in forbidden:
+                    assert f not in alias.name, f"Forbidden import found: {alias.name}"
+        elif isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            for f in forbidden:
+                assert f not in mod, f"Forbidden from-import module found: {mod}"
+            for alias in node.names:
+                for f in forbidden:
+                    assert f != alias.name, (
+                        f"Forbidden from-import name found: {alias.name}"
+                    )

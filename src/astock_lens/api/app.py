@@ -15,15 +15,24 @@ from fastapi import FastAPI, HTTPException, Query
 from astock_lens.data.snapshots.resolve import resolve_snapshot_store
 from astock_lens.data.storage.paths import StoragePaths, resolve_storage_paths
 from astock_lens.discovery import (
+    QualifiedScreenQuery,
+    QualifiedScreenResult,
     StockProfileResponse,
     StockProfileUniverse,
     StrategyCoverage,
     StrategyScreenQuery,
     StrategyScreenResult,
+    screen_qualified,
     screen_strategy,
     summarize_strategies,
 )
 from astock_lens.domain.enums import SnapshotKind
+from astock_lens.factors.contracts import FactorResult
+from astock_lens.qualifications import (
+    QualificationConfigInvalid,
+    QualificationRuleNotConfigured,
+    load_canonical_qualifiers,
+)
 from astock_lens.strategies.contracts import StrategyResult
 from astock_lens.watchlist.store import resolve_watchlist_store
 
@@ -155,6 +164,62 @@ def create_app(
                 detail=f"strategy '{strategy_id}' has no stored results for {as_of}",
             )
         return screened
+
+    @application.get(
+        "/qualifications/{strategy_id}/results",
+        response_model=QualifiedScreenResult,
+    )
+    def qualification_results(
+        strategy_id: str,
+        as_of: str,
+        limit: int = Query(default=20, gt=0, le=500),
+    ) -> QualifiedScreenResult:
+        """Screen and qualify strategy results for one strategy on one date."""
+        factor_records = _read(
+            root(), SnapshotKind.FACTOR, as_of, database=snapshot_database()
+        )
+        factor_results = [FactorResult.model_validate(r) for r in factor_records]
+
+        strategy_records = _read(
+            root(), SnapshotKind.STRATEGY, as_of, database=snapshot_database()
+        )
+        strategy_results = [StrategyResult.model_validate(r) for r in strategy_records]
+
+        if not any(r.strategy_id == strategy_id for r in strategy_results):
+            raise HTTPException(
+                status_code=404,
+                detail=f"strategy '{strategy_id}' has no stored results for {as_of}",
+            )
+
+        try:
+            qualifiers = load_canonical_qualifiers()
+        except (QualificationRuleNotConfigured, QualificationConfigInvalid) as error:
+            raise HTTPException(
+                status_code=500,
+                detail=f"qualification configuration is invalid: {error}",
+            ) from error
+
+        if strategy_id not in qualifiers:
+            approved = ", ".join(sorted(qualifiers))
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"strategy {strategy_id!r} has no approved qualification rule; "
+                    f"approved strategies are {approved}"
+                ),
+            )
+
+        try:
+            return screen_qualified(
+                factor_results=factor_results,
+                strategy_results=strategy_results,
+                qualifiers=qualifiers,
+                query=QualifiedScreenQuery(strategy_id=strategy_id, limit=limit),
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
     @application.get("/stocks/{symbol}", response_model=StockProfileResponse)
     def stock_profile(symbol: str, as_of: str) -> StockProfileResponse:
