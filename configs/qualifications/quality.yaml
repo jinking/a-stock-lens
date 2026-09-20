@@ -1,7 +1,6 @@
-# 质量策略绝对质量门槛（所有者审批 2026-09-20 方案 1）
 strategy_id: quality
 version: v1
-description: 优质盈利与健康资产负债门槛：要求ROE TTM>=12%、毛利率>=20%、资产负债率<=65%
+description: 质量门槛：ROE TTM>=12%、毛利率>=20%、资产负债率<=65%
 thresholds:
   roe_ttm:
     min: 12.0

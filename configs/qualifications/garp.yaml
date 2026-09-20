@@ -1,11 +1,10 @@
-# 合理估值成长策略绝对质量门槛（所有者审批 2026-09-20 方案 1）
 strategy_id: garp
 version: v1
-description: 合理估值成长门槛：历史估值分位<=60%、3年净利复合增速>=15%、ROE TTM>=10%
+description: 合理估值成长门槛：PE TTM<=35、净利同比>=15%、ROE TTM>=10%
 thresholds:
-  pe_percentile:
-    max: 0.60
-  net_profit_parent_cagr_3y:
+  pe_ttm:
+    max: 35.0
+  net_profit_parent_yoy:
     min: 15.0
   roe_ttm:
     min: 10.0

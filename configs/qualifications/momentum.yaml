@@ -1,7 +1,6 @@
-# 动量策略绝对质量门槛（所有者审批 2026-09-20 方案 1）
 strategy_id: momentum
 version: v1
-description: 动量价格强度门槛：要求现价处于近一年最高价的80%以上
+description: 动量门槛：现价处于近一年最高价80%以上；流动性由Research Universe准入门槛负责
 thresholds:
   proximity_52w_high:
     min: 0.80

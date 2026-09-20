@@ -1,13 +1,10 @@
-# 稳健价值策略绝对质量门槛（所有者审批 2026-09-20 方案 1）
 strategy_id: value
 version: v1
-description: 稳健价值门槛：市盈率<=25倍、市净率<=2.5倍且ROE TTM>=5%
+description: 稳健价值门槛：PE<=25、PB<=2.5、ROE TTM>=5%
 thresholds:
   pe_ttm:
-    min: 0.0001
     max: 25.0
   pb:
-    min: 0.0001
     max: 2.5
   roe_ttm:
     min: 5.0
