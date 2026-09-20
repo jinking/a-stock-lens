@@ -4,15 +4,15 @@
 每完成一项就勾掉并补上提交号；每次出现新的未决事项，先记到这里或
 `docs/REVIEW_NOTES.md`，不要留在对话里。
 
-**状态快照（2026-09-19 股票发现 MVP 完成与候选停机门禁锁定，959 tests 全绿）**
+**状态快照（2026-09-20 估值补齐与正式快照发布完成，六策略选股榜全量上线）**
 
-本行基线由 `PYTHONPATH= uv run --no-sync pytest -q` 于提交前实测得出（`959 passed, 10 warnings in 131.69s`，含 4 项全市场压力属性测试全部通过）。
-已固化研究分析基线证据：Research Universe = 2,303 只，FactorResult = 55,272 条，StrategyResult = 13,818 条。
-股票发现 MVP 现已完整实现并验收通过：
+本行基线由 `PYTHONPATH= uv run --no-sync pytest -q` 于提交前实测得出（977 passed, 10 warnings）。
+已发布 2026-09-19 正式快照：Research Universe = 2,303 只，FactorResult = 55,272 条，StrategyResult = 13,818 条。
+六策略选股榜与单股画像正式上线，Value 达 1,578 只、GARP 达 849 只，历史旧限制彻底解除：
 - CLI 提供只读策略选股命令 `astock screen <strategy> [--as-of] [--top] [--min-percentile] [--all-results]`；
 - API 提供只读策略榜单 `/strategies/{id}/results`、策略覆盖概览 `/strategies` 与单股研究画像 `/stocks/{symbol}`；
 - 架构与数据契约严格遵守只读隔离，绝不重算因子或策略，零状态突变；单股画像中的 `candidate_status` 严格如实呈现（未发布快照时显式返回 `"not_published"`，`/candidates` 严格返回 404，绝不捏造假候选）。
-当前严格执行停机门禁（Stop Gate），后续按 P1–P5 严格分阶段推进。
+当前严格执行停机门禁（Stop Gate），Candidate 绝对门槛审定前保持 BLOCKED。
 
 | 层 | 现状 |
 | --- | --- |
@@ -93,8 +93,8 @@ ResearchRequest → DeepResearchAdapter` 逐项对照：
   涨到 **4,935 只**。证据见 `docs/REVIEW_NOTES.md` 第十五~十七节。
   遗留：293 只北交所（`920xxx.BJ`）腾讯日线接口不支持，当前显式记为 `source_error` 并被排除
   出研究池，是否换端点待所有者决策。
-- [x] **研究池的策略长度历史**（252 根 bar，`astock sync-research`）：2026-09-18 已对 2,303 只研究池完成落地（satisfied 2,281 只），Growth / Momentum / Quality / Dividend 已具备全池/大规模策略排序能力（Growth 2,302、Momentum 2,281、Quality 1,697、Dividend 1,612 只可打分），“目前全市场只有 5 只能被策略打分”的旧限制已解除。
-- [ ] **全市场估值批量路径**：实测估值批量覆盖极低（10 只一批只回 1–2 只），单标的可靠但全市场要 5,500 次调用。可行路径是**按板块迭代**（板块成分明细一次给出整板块每只股票的总市值与 PE TTM），需要先解决板块清单来源。
+- [x] **全市场估值批量路径与研究池覆盖**（2026-09-19/20）：已通过加固后的 `sync-valuation` 多轮补抓（落地 2,241 / 2,303 只，覆盖率 97.3%），并在 2026-09-20 正式写入 `2026-09-19` 日常快照（`astock daily`）。正式快照中六策略全部具备大规模排名能力：Value 达 1,578 只、GARP 达 849 只、Growth 达 2,302 只、Momentum 达 2,281 只、Quality 达 1,697 只、Dividend 达 1,612 只。剩余未打分标的系非正指标等业务语义判定（`NOT_APPLICABLE`），非数据接入缺陷。
+- [ ] **休市日日历与数据抓取跳过**（用户明确需求，2026-09-20）：将休市日单独列出交易日历表；在休市日当天直接跳过获取股市行情及相关时效数据，防止空 bar 误判及无效网络开销。
 - [ ] **全市场财报的定期刷新节奏**：37 分钟/次的季度任务，尚未定"多久跑一次、失败如何补"的节奏（`Deferred`）。
 - [ ] **neodata 财务单季与 WeStock 累计口径的对齐规则**：两者数值一致（实测茅台 H1 完全相同），但单季 vs 累计需要一层对齐才能交叉验证。
 - [ ] **Data Health 扩展**：`doctor` 现在报 provider 状态与数据集行数/日期区间，还缺 neodata 各数据集的"最后成功取数日"与失败原因汇总。

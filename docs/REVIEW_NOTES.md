@@ -1764,3 +1764,22 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
 - **Candidate 绝对隔离性与 API 契约验证**：
   - API 端点 `GET /candidates?as_of=2026-09-19` 返回 `404 {"detail": "no CANDIDATE snapshot for 2026-09-19"}`；
   - `GET /strategies?as_of=2026-09-19` 正常返回六策略覆盖汇总，Value 达 1,578，GARP 达 849。
+
+### 33.5 六策略选股榜正式快照验收与单股画像抽查（任务 5）
+
+- **六策略 CLI 只读选股榜实测（`astock screen <strategy> --as-of 2026-09-19 --top 20`）**：
+  - `growth`：total=2303, eligible=2302, scored=2302, ranked=2302, returned=20, 耗时 8.91s（榜首 `001309.SZ` score=99.60）；
+  - `momentum`：total=2303, eligible=2281, scored=2281, ranked=2281, returned=20, 耗时 8.31s（榜首 `300741.SZ` score=99.76）；
+  - `quality`：total=2303, eligible=1697, scored=1697, ranked=1697, returned=20, 耗时 8.34s（榜首 `600519.SH` score=85.56）；
+  - `dividend`：total=2303, eligible=1612, scored=1612, ranked=1612, returned=20, 耗时 8.31s（榜首 `002271.SZ` score=99.35）；
+  - `value`：total=2303, eligible=1578, scored=1578, ranked=1578, returned=20, 耗时 8.35s（榜首 `601336.SH` score=93.68）；
+  - `garp`：total=2303, eligible=849, scored=849, ranked=849, returned=20, 耗时 8.68s（榜首 `000688.SZ` score=96.24）。
+- **只读零突变核验**：
+  - 在执行 6 个 screen 查询前后，对 `data/snapshots`、`data/watchlist`、`var/jobs` 全部文件状态与哈希进行严格比对：**零变动（Zero Mutation）**。
+- **单股画像抽查（`GET /stocks/{symbol}?as_of=2026-09-19`）**：
+  - Value 榜首 `601336.SH`（新华保险）：`universe.included=True`，`candidate_status="not_published"`，`candidate=None`；6 个估值因子状态全为 `VALUE`，Value 策略得分 93.68，分位数 1.0；
+  - GARP 榜首 `000688.SZ`（国城矿业）：`universe.included=True`，`candidate_status="not_published"`，`candidate=None`；6 个估值因子状态全为 `VALUE`，GARP 策略得分 96.24，分位数 1.0；
+  - 因子层数据与策略层打分无缝衔接，且绝对未产生伪造候选。
+- **产品状态文档订正**：
+  - 更新 `docs/ROADMAP.md` 与 `docs/REMAINING_PRODUCT_BLOCKERS.md`，彻底移除“估值仅覆盖个位数”的过时结论，明确 Value 1,578 只与 GARP 849 只的打分基准；
+  - 在 `ROADMAP.md` 中立项记录用户关于“单独列出休市日并在休市日跳过股市数据抓取”的后续待做项。
