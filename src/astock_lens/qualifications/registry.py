@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from astock_lens.qualifications.config import load_qualification_rule
 from astock_lens.qualifications.contracts import (
     AbsoluteQualificationRule,
     QualificationRuleNotConfigured,
@@ -15,7 +16,6 @@ from astock_lens.qualifications.garp import GARPQualifier
 from astock_lens.qualifications.growth import GrowthQualifier
 from astock_lens.qualifications.momentum import MomentumQualifier
 from astock_lens.qualifications.quality import QualityQualifier
-from astock_lens.qualifications.rules import load_qualification_rule
 from astock_lens.qualifications.value import ValueQualifier
 
 QUALIFIER_CLASSES: dict[str, type[Any]] = {
@@ -74,10 +74,15 @@ def load_canonical_qualifiers(
     config_dir: Path | None = None,
     *,
     enabled_strategy_ids: tuple[str, ...] = CANONICAL_STRATEGY_IDS,
+    known_factor_names: frozenset[str] | None = None,
 ) -> dict[str, StrategyQualifier]:
     """Load canonical qualifiers for enabled strategies from configuration directory.
 
-    Raises QualificationRuleNotConfigured if any enabled strategy lacks an approved rule.
+    每个文件以严格模式加载：``expected_strategy_id`` 校验文件名与内容一致，
+    ``known_factor_names``（若非 None）校验因子目录。
+
+    - 任一启用策略缺少配置文件 → ``QualificationRuleNotConfigured``（= 未配置）；
+    - 配置文件畸形或非法 → ``QualificationConfigInvalid``（= 配置损坏，向上抛出，绝不降级）。
     """
     if config_dir is not None:
         target_dir = config_dir
@@ -93,6 +98,10 @@ def load_canonical_qualifiers(
                 f"Missing approved absolute qualification rule for strategy '{strat_id}': "
                 f"expected file {cfg_file}"
             )
-        rules[strat_id] = load_qualification_rule(cfg_file)
+        rules[strat_id] = load_qualification_rule(
+            cfg_file,
+            expected_strategy_id=strat_id,
+            known_factor_names=known_factor_names,
+        )
 
     return build_qualifiers(rules, enabled_strategy_ids=enabled_strategy_ids)

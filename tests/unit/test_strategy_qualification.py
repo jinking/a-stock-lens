@@ -27,6 +27,17 @@ from astock_lens.strategies.contracts import StrategyResult
 
 AS_OF = datetime(2026, 9, 4, 15, 0, tzinfo=UTC)
 
+# 每个策略一条真实合法阈值：空 thresholds 现已被严格校验拒绝，测试夹具必须给出
+# 真实边界；因子名与各策略获批因子保持一致。
+_VALID_THRESHOLD: dict[str, str] = {
+    "value": "  pe_ttm:\n    max: 25.0\n",
+    "growth": "  net_profit_parent_yoy:\n    min: 15.0\n",
+    "garp": "  pe_ttm:\n    max: 35.0\n",
+    "quality": "  roe_ttm:\n    min: 12.0\n",
+    "dividend": "  dividend_yield_ttm:\n    min: 3.0\n",
+    "momentum": "  proximity_52w_high:\n    min: 0.80\n",
+}
+
 
 def _strategy_result(
     *,
@@ -287,7 +298,9 @@ def test_load_canonical_qualifiers_succeeds_when_all_present(tmp_path: Path) -> 
     for strat_id in CANONICAL_STRATEGY_IDS:
         yaml_file = tmp_path / f"{strat_id}.yaml"
         yaml_file.write_text(
-            f"strategy_id: {strat_id}\nversion: v1\nthresholds: {{}}\n",
+            f"strategy_id: {strat_id}\n"
+            f"version: v1\n"
+            f"thresholds:\n{_VALID_THRESHOLD[strat_id]}",
             encoding="utf-8",
         )
 

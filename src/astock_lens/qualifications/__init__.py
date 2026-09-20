@@ -5,6 +5,10 @@ from astock_lens.qualifications.common import (
     build_qualification,
     passes_percentile,
 )
+from astock_lens.qualifications.config import (
+    QualificationConfigInvalid,
+    QualificationRuleConfig,
+)
 from astock_lens.qualifications.contracts import (
     AbsoluteQualificationRule,
     QualificationRuleNotConfigured,
@@ -45,7 +49,9 @@ __all__ = [
     "GARPQualifier",
     "GrowthQualifier",
     "MomentumQualifier",
+    "QualificationConfigInvalid",
     "QualificationContext",
+    "QualificationRuleConfig",
     "QualificationRuleNotConfigured",
     "QualityQualifier",
     "StrategyQualification",

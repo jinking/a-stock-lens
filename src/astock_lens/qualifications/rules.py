@@ -1,23 +1,22 @@
-"""Factor-based absolute qualification rules and loaders."""
+"""Factor-based absolute qualification rules.
+
+``FactorThreshold`` 与严格加载器 ``load_qualification_rule`` 现由
+``astock_lens.qualifications.config`` 提供（fail-closed，见该模块）；本模块保留
+``FactorThresholdRule``（读取 ``QualificationContext`` 完整因子证据的评估逻辑），
+并重新导出配置类型，以保持既有导入路径稳定。
+"""
 
 from collections.abc import Mapping
-from pathlib import Path
-
-import yaml
 
 from astock_lens.domain.enums import DataStatus
-from astock_lens.domain.models import DomainRecord
+from astock_lens.qualifications.config import (
+    FactorThreshold,
+    load_qualification_rule,
+)
 from astock_lens.qualifications.models import (
     AbsoluteQualificationVerdict,
     QualificationContext,
 )
-
-
-class FactorThreshold(DomainRecord):
-    """Threshold range [min, max] for a specific factor."""
-
-    min: float | None = None
-    max: float | None = None
 
 
 class FactorThresholdRule:
@@ -84,44 +83,4 @@ class FactorThresholdRule:
         )
 
 
-def load_qualification_rule(path: Path) -> FactorThresholdRule:
-    """Load a FactorThresholdRule from a YAML configuration file."""
-    if not path.is_file():
-        raise FileNotFoundError(f"Qualification rule file not found: {path}")
-
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
-        raise TypeError(
-            f"Invalid YAML content in {path}: expected a dictionary mapping"
-        )
-
-    strategy_id = str(raw.get("strategy_id", path.stem))
-    version = str(raw.get("version", "v1"))
-    description = str(raw.get("description", ""))
-
-    thresholds_raw = raw.get("thresholds", {})
-    if not isinstance(thresholds_raw, dict):
-        raise TypeError(f"Invalid thresholds in {path}: expected a dictionary")
-
-    thresholds: dict[str, FactorThreshold] = {}
-    for factor_name, bounds in thresholds_raw.items():
-        if not isinstance(bounds, dict):
-            continue
-        min_val = (
-            float(bounds["min"])
-            if "min" in bounds and bounds["min"] is not None
-            else None
-        )
-        max_val = (
-            float(bounds["max"])
-            if "max" in bounds and bounds["max"] is not None
-            else None
-        )
-        thresholds[factor_name] = FactorThreshold(min=min_val, max=max_val)
-
-    return FactorThresholdRule(
-        strategy_id=strategy_id,
-        version=version,
-        thresholds=thresholds,
-        description=description,
-    )
+__all__ = ["FactorThreshold", "FactorThresholdRule", "load_qualification_rule"]
