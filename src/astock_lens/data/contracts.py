@@ -5,6 +5,7 @@ from typing import Protocol, Self
 
 from pydantic import model_validator
 
+from astock_lens.data.dividends.models import DividendEvent
 from astock_lens.domain.enums import DataStatus
 from astock_lens.domain.models import (
     DailyBar,
@@ -113,6 +114,7 @@ class NormalizedDataset(DomainRecord):
     observations: tuple[FinancialObservation, ...] = ()
     valuations: tuple[ValuationObservation, ...] = ()
     securities: tuple[SecurityProfile, ...] = ()
+    dividend_events: tuple[DividendEvent, ...] = ()
     parse_failures: tuple[ParseFailure, ...] = ()
 
 
