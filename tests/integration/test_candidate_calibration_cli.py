@@ -203,3 +203,69 @@ def test_calibrate_candidates_fails_on_missing_header_in_industry_csv(
     )
     assert result.exit_code != 0
     assert "columns" in result.output.lower()
+
+
+def test_calibrate_candidates_canonical_merges_supplement(tmp_path: Path) -> None:
+    import json
+    import shutil
+
+    # 1. Arrange csv root with securities and bars from fixtures
+    csv_root = tmp_path / "csv"
+    csv_root.mkdir(parents=True)
+    shutil.copy(CSV_ROOT / "securities.csv", csv_root / "securities.csv")
+    shutil.copy(CSV_ROOT / "daily_bars_long.csv", csv_root / "daily_bars_long.csv")
+
+    # 2. Canonical industry file has 5 of the 6 universe symbols (missing 900948.SH)
+    industry_dir = csv_root / "westock" / "industry"
+    industry_dir.mkdir(parents=True)
+    canonical_csv = industry_dir / f"{DAY}.csv"
+    canonical_csv.write_text(
+        "symbol,industry_id,industry_name,as_of,provider,source_ref\n"
+        "600000.SH,pt01,银行,2026-09-04T15:00:00+08:00,westock-cli,\n"
+        "000001.SZ,pt01,银行,2026-09-04T15:00:00+08:00,westock-cli,\n"
+        "600519.SH,pt02,饮料,2026-09-04T15:00:00+08:00,westock-cli,\n"
+        "300750.SZ,pt03,电力设备,2026-09-04T15:00:00+08:00,westock-cli,\n"
+        "000006.SZ,pt04,房地产,2026-09-04T15:00:00+08:00,westock-cli,\n",
+        encoding="utf-8",
+    )
+
+    # 3. Supplemental config supplies 900948.SH
+    supplement_yaml = tmp_path / "supplement.yaml"
+    supplement_yaml.write_text(
+        "supplements:\n"
+        "  - symbol: 900948.SH\n"
+        "    industry_id: sw2_coal\n"
+        "    industry_name: 煤炭开采\n"
+        "    provider: sws-official\n",
+        encoding="utf-8",
+    )
+
+    output_dir = tmp_path / "out"
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "calibrate",
+            "candidates",
+            "--as-of",
+            DAY,
+            "--output-dir",
+            str(output_dir),
+        ],
+        env={
+            "ASTOCK_CSV_ROOT": str(csv_root),
+            "ASTOCK_DATASET": LONG_DATASET,
+            "ASTOCK_INDUSTRY_SUPPLEMENT_PATH": str(supplement_yaml),
+        },
+    )
+    assert result.exit_code == 0, result.output
+    report = json.loads(
+        (output_dir / f"{DAY}-candidate-calibration.json").read_text(encoding="utf-8")
+    )
+    assert report["industry_evidence"]["origin"] == "canonical"
+    assert report["industry_coverage"]["ratio"] == 1.0
+    assert len(report["industry_coverage"]["missing_symbols"]) == 0
+    assert (
+        report["industry_coverage"]["known_count"]
+        == report["industry_coverage"]["total_count"]
+    )

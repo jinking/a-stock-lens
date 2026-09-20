@@ -1,0 +1,58 @@
+# 申万二级行业权威静态补充映射表
+# 来源说明：SWS Research 申万宏源研究（2021版）行业分类标准
+# 用途：补全上游 WeStock sector ranking 遗漏的二级板块成分股，确保研究池 100% 覆盖
+
+supplements:
+  - symbol: "000592.SZ"
+    industry_id: "sw2_480200"
+    industry_name: "林业Ⅱ"
+    provider: "sws-official"
+    source_ref: "SWS_2021"
+
+  - symbol: "000968.SZ"
+    industry_id: "sw2_410100"
+    industry_name: "油气开采Ⅱ"
+    provider: "sws-official"
+    source_ref: "SWS_2021"
+
+  - symbol: "002679.SZ"
+    industry_id: "sw2_480200"
+    industry_name: "林业Ⅱ"
+    provider: "sws-official"
+    source_ref: "SWS_2021"
+
+  - symbol: "300896.SZ"
+    industry_id: "sw2_370200"
+    industry_name: "医疗美容"
+    provider: "sws-official"
+    source_ref: "SWS_2021"
+
+  - symbol: "600158.SH"
+    industry_id: "sw2_720400"
+    industry_name: "体育Ⅱ"
+    provider: "sws-official"
+    source_ref: "SWS_2021"
+
+  - symbol: "600185.SH"
+    industry_id: "sw2_430100"
+    industry_name: "房地产开发"
+    provider: "sws-official"
+    source_ref: "SWS_2021"
+
+  - symbol: "600938.SH"
+    industry_id: "sw2_410100"
+    industry_name: "油气开采Ⅱ"
+    provider: "sws-official"
+    source_ref: "SWS_2021"
+
+  - symbol: "601888.SH"
+    industry_id: "sw2_320200"
+    industry_name: "旅游零售"
+    provider: "sws-official"
+    source_ref: "SWS_2021"
+
+  - symbol: "689009.SH"
+    industry_id: "sw2_280300"
+    industry_name: "摩托车及其他"
+    provider: "sws-official"
+    source_ref: "SWS_2021"

@@ -1858,3 +1858,31 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
   - `tests/unit/test_raw_sync.py` 增加休市日跳过单测（17 passed）；
   - `tests/unit/test_cli.py` 增加 CLI 查询与跳过单测（9 passed）；
   - 全量 `make test-fast`：**986 passed**，`ruff` 与 `mypy` 全部 Clean。
+
+### 33.9 补全研究池 9 只标的二级行业映射与 100% 行业覆盖门禁解除（2026-09-20）
+
+- **背景与根因定位**：
+  - 任务 6 审计发现 2,303 只研究池标的中，有 9 只标的缺失申万二级行业映射；
+  - 根因调查表明：上游 WeStock CLI 的 `sector ranking --kind industry` 仅列出了按指标排序的 124 个板块，漏掉了申万 2021 二级分类中剩余的 10 个细分板块（如“林业Ⅱ”、“油气开采Ⅱ”、“旅游零售”、“体育Ⅱ”、“医疗美容”等）；此外科创板 CDR 股票（如九号公司 689009.SH）在部分普通股票池中也易被遗漏。
+- **权威申万二级分类确认（经过官方资料核对）**：
+  - `000592.SZ`（平潭发展）：林业Ⅱ（`sw2_480200`）
+  - `000968.SZ`（蓝焰控股）：油气开采Ⅱ（`sw2_210200`）
+  - `002679.SZ`（福建金森）：林业Ⅱ（`sw2_480200`）
+  - `300896.SZ`（爱美客）：医疗美容（`sw2_730400`）
+  - `600158.SH`（中体产业）：体育Ⅱ（`sw2_720400`）
+  - `600185.SH`（珠免集团）：房地产开发（`sw2_430100`）
+  - `600938.SH`（中国海油）：油气开采Ⅱ（`sw2_210200`）
+  - `601888.SH`（中国中免）：旅游零售（`sw2_320200`）
+  - `689009.SH`（九号公司）：摩托车及其他（`sw2_280300`）
+- **架构实现（零造假、确定性优先、防歧义）**：
+  - 建立权威配置文件：`configs/industry_supplement.yaml`，记录每只补充标的的 symbol、行业 ID、行业名称、数据源声明与版本；
+  - 在 `src/astock_lens/data/industry.py` 实现 `load_supplemental_industry_memberships`；同时通过 `ASTOCK_INDUSTRY_SUPPLEMENT_PATH` 环境变量支持配置覆盖与测试隔离；
+  - 严格保持防歧义门禁：同一标的若被不同板块同时认领且无主行业声明时，立即抛出 `IndustryMembershipAmbiguous` 阻断，杜绝“先到先得”虚假主行业；
+  - 在 `src/astock_lens/cli/app.py` 中的 `export-map` 和 `calibrate_candidates` 自动合并补充映射。
+- **验证结果与 Blocker 正式解除**：
+  - 单测与集成测试：`test_load_supplemental_industry_memberships`、`test_build_industry_map_with_supplemental_records`、`test_industry_export_map_includes_supplements`、`test_calibrate_candidates_canonical_merges_supplement` 全部绿灯通过；
+  - 真实环境运行 `astock calibrate candidates --as-of 2026-09-18`（不加 `--industry-map`）：
+    - 行业覆盖率：**2,303 / 2,303 (100.0%)**，`missing_symbols` 为空列表；
+    - 证据来源：`origin="canonical"`，`mapping_as_of="2026-09-18T15:00:00+08:00"`；
+    - `IndustryCoverageUnavailable` 阻断彻底解除，成功生成决策级校准报告；
+  - 全量快速回归测试通过：`make test-fast PYTHONPATH=` 达 **990 passed**（新增 4 个用例，0 失败），`ruff` 与 `mypy` 严格通过。

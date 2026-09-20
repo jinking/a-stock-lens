@@ -43,6 +43,7 @@ from astock_lens.data.health import raw_datasets
 from astock_lens.data.industry import (
     WestockSectorSource,
     build_industry_map,
+    load_supplemental_industry_memberships,
 )
 from astock_lens.data.normalize.csv_securities import CsvSecurityNormalizer
 from astock_lens.data.providers.akshare_provider import AkShareProvider
@@ -1188,7 +1189,8 @@ def industry_export_map(
         )
         raise typer.Exit(code=1)
 
-    mapping = build_industry_map(memberships, as_of=day)
+    supplements = load_supplemental_industry_memberships(as_of=day)
+    mapping = build_industry_map((*memberships, *supplements), as_of=day)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.writer(stream)
@@ -2089,12 +2091,14 @@ def calibrate_candidates(
                 err=True,
             )
             raise typer.Exit(code=1)
-        mapping = build_industry_map(canonical, as_of=day)
+        supplements = load_supplemental_industry_memberships(as_of=day)
+        all_canonical = (*canonical, *supplements)
+        mapping = build_industry_map(all_canonical, as_of=day)
         requires_full_coverage = True
         # 日期取**可见**成员自己声明的取数时点：晚于分析时点的记录已经被
         # `build_industry_map` 过滤掉，所以这里不可能把一个未来日期当成历史口径。
         visible_dates = [
-            membership.as_of for membership in canonical if membership.as_of <= day
+            membership.as_of for membership in all_canonical if membership.as_of <= day
         ]
         evidence = IndustryEvidence(
             origin="canonical",

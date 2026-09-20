@@ -19,6 +19,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+import yaml
+
 from astock_lens.data.providers.westock import BINARY_ENV, DEFAULT_BINARY
 from astock_lens.domain.models import DomainRecord
 
@@ -166,3 +168,50 @@ def build_industry_map(
         ids[membership.symbol] = membership.industry_id
         mapping[membership.symbol] = membership.industry_name
     return mapping
+
+
+INDUSTRY_SUPPLEMENT_ENV = "ASTOCK_INDUSTRY_SUPPLEMENT_PATH"
+DEFAULT_INDUSTRY_SUPPLEMENT_PATH = Path("configs/industry_supplement.yaml")
+
+
+def load_supplemental_industry_memberships(
+    path: Path | None = None,
+    *,
+    as_of: datetime,
+) -> tuple[IndustryMembership, ...]:
+    """Load authoritative supplemental industry memberships from YAML configuration.
+
+    Used to fill gaps where upstream bulk ranking omitted smaller sub-sectors.
+    """
+    if path is not None:
+        cfg_path = path
+    else:
+        env_val = os.getenv(INDUSTRY_SUPPLEMENT_ENV)
+        cfg_path = Path(env_val) if env_val else DEFAULT_INDUSTRY_SUPPLEMENT_PATH
+
+    if not cfg_path.is_file():
+        return ()
+
+    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or "supplements" not in raw:
+        return ()
+
+    supplements_list = raw.get("supplements", [])
+    if not isinstance(supplements_list, list):
+        return ()
+
+    items: list[IndustryMembership] = []
+    for item in supplements_list:
+        if not isinstance(item, dict):
+            continue
+        items.append(
+            IndustryMembership(
+                symbol=str(item["symbol"]).strip(),
+                industry_id=str(item["industry_id"]).strip(),
+                industry_name=str(item["industry_name"]).strip(),
+                as_of=as_of,
+                provider=str(item.get("provider", "sws-official")),
+                source_ref=item.get("source_ref"),
+            )
+        )
+    return tuple(items)

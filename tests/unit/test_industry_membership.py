@@ -183,6 +183,7 @@ def test_export_map_writes_exactly_symbol_and_industry(
         encoding="utf-8",
     )
     monkeypatch.setenv("ASTOCK_CSV_ROOT", str(csv_root))
+    monkeypatch.setenv("ASTOCK_INDUSTRY_SUPPLEMENT_PATH", str(local_tmp / "empty.yaml"))
     output = local_tmp / "map.csv"
 
     result = CliRunner().invoke(
@@ -203,3 +204,95 @@ def test_export_map_writes_exactly_symbol_and_industry(
         "000001.SZ,股份制银行Ⅱ",
         "600015.SH,股份制银行Ⅱ",
     ]
+
+
+def test_industry_export_map_includes_supplements(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local_tmp = tmp_path / "local"
+    csv_root = local_tmp / "csv"
+    landed = csv_root / "westock" / "industry" / "2026-09-18.csv"
+    landed.parent.mkdir(parents=True)
+    landed.write_text(
+        "symbol,industry_id,industry_name,as_of,provider,name,source_ref\n"
+        "000001.SZ,pt01801783,股份制银行Ⅱ,2026-09-18T15:00:00+08:00,"
+        "westock-cli,平安银行,\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ASTOCK_CSV_ROOT", str(csv_root))
+    output = local_tmp / "map.csv"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "industry",
+            "export-map",
+            "--as-of",
+            "2026-09-18",
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    lines = output.read_text(encoding="utf-8").splitlines()
+    assert "symbol,industry" in lines
+    assert "000001.SZ,股份制银行Ⅱ" in lines
+    # 000592.SZ (平潭发展) 来自 configs/industry_supplement.yaml (林业Ⅱ)
+    assert "000592.SZ,林业Ⅱ" in lines
+
+
+def test_load_supplemental_industry_memberships(tmp_path: Path) -> None:
+    """验证权威补充行业映射配置文件的解析与领域对象转换。"""
+    from astock_lens.data.industry import load_supplemental_industry_memberships
+
+    yaml_content = """
+supplements:
+  - symbol: "000592.SZ"
+    industry_id: "sw2_480200"
+    industry_name: "林业Ⅱ"
+    provider: "sws-official"
+    source_ref: "SWS_2021"
+  - symbol: "601888.SH"
+    industry_id: "sw2_320200"
+    industry_name: "旅游零售"
+    provider: "sws-official"
+    source_ref: "SWS_2021"
+"""
+    cfg_file = tmp_path / "industry_supplement.yaml"
+    cfg_file.write_text(yaml_content, encoding="utf-8")
+
+    memberships = load_supplemental_industry_memberships(cfg_file, as_of=AS_OF)
+    assert len(memberships) == 2
+    assert memberships[0].symbol == "000592.SZ"
+    assert memberships[0].industry_name == "林业Ⅱ"
+    assert memberships[1].symbol == "601888.SH"
+    assert memberships[1].industry_name == "旅游零售"
+    assert all(m.as_of == AS_OF for m in memberships)
+    assert all(m.provider == "sws-official" for m in memberships)
+
+
+def test_build_industry_map_with_supplemental_records() -> None:
+    """验证主行业映射与补充行业映射合并后正确生效，并严格遵守防歧义规则。"""
+    base_memberships = (
+        IndustryMembership(
+            symbol="600000.SH",
+            industry_id="pt01801783",
+            industry_name="股份制银行Ⅱ",
+            as_of=AS_OF,
+            provider="westock-cli",
+        ),
+    )
+    supplements = (
+        IndustryMembership(
+            symbol="000592.SZ",
+            industry_id="sw2_480200",
+            industry_name="林业Ⅱ",
+            as_of=AS_OF,
+            provider="sws-official",
+        ),
+    )
+    combined = (*base_memberships, *supplements)
+    mapping = build_industry_map(combined, as_of=AS_OF)
+    assert mapping["600000.SH"] == "股份制银行Ⅱ"
+    assert mapping["000592.SZ"] == "林业Ⅱ"
