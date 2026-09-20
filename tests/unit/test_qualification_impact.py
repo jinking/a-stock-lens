@@ -2,11 +2,20 @@
 
 from datetime import UTC, datetime
 
-from astock_lens.calibration.qualification_impact import build_qualification_impact
+import pytest
+
+from astock_lens.calibration.qualification_impact import (
+    QualificationImpactUnsupportedQualifier,
+    build_qualification_impact,
+)
 from astock_lens.domain.enums import DataStatus
 from astock_lens.domain.models import SnapshotLineage
 from astock_lens.factors.contracts import FactorResult
 from astock_lens.qualifications.growth import GrowthQualifier
+from astock_lens.qualifications.models import (
+    QualificationContext,
+    StrategyQualification,
+)
 from astock_lens.qualifications.rules import FactorThreshold, FactorThresholdRule
 from astock_lens.strategies.contracts import StrategyResult
 
@@ -140,3 +149,85 @@ def test_boundary_samples_are_deterministic() -> None:
     # 两个绝对失败样本：000003.SZ 的 margin 更小（roe 9 贴近 8），故排在前；
     # 000004.SZ 缺 roe 时该边界不产生 margin，仍由其可用因子得出 margin，故入列。
     assert impact.closest_absolute_fail_symbols == ("000003.SZ", "000004.SZ")
+
+
+class _ProtocolOnlyQualifier:
+    """只满足公开 ``StrategyQualifier`` 协议，不暴露 ``absolute_rule``。"""
+
+    strategy_id = "growth"
+    qualification_version = "v1"
+
+    def qualify(self, context: QualificationContext) -> StrategyQualification:
+        return StrategyQualification(
+            symbol=context.strategy_result.symbol,
+            strategy_id=self.strategy_id,
+            strategy_version=context.strategy_result.strategy_version,
+            qualification_version=self.qualification_version,
+            qualified=True,
+            percentile_pass=True,
+            absolute_pass=True,
+            rank_percentile=context.strategy_result.rank_percentile,
+        )
+
+
+class _RawRiskQualifier:
+    """qualify 产出一条不含 ``factor '<name>'`` 的 risk（模拟文案变形）。"""
+
+    strategy_id = "growth"
+    qualification_version = "v1"
+
+    def __init__(self) -> None:
+        self.absolute_rule = FactorThresholdRule(
+            strategy_id="growth",
+            version="v1",
+            thresholds={"net_profit_parent_yoy": FactorThreshold(min=15.0)},
+        )
+
+    def qualify(self, context: QualificationContext) -> StrategyQualification:
+        return StrategyQualification(
+            symbol=context.strategy_result.symbol,
+            strategy_id=self.strategy_id,
+            strategy_version=context.strategy_result.strategy_version,
+            qualification_version=self.qualification_version,
+            qualified=False,
+            percentile_pass=True,
+            absolute_pass=False,
+            rank_percentile=context.strategy_result.rank_percentile,
+            risks=("absolute quality not met",),
+        )
+
+
+def test_qualifier_without_absolute_rule_fails_loudly() -> None:
+    """M1：只满足公开协议的 qualifier 必须抛具名异常，而不是裸 AttributeError。"""
+    strategy_results = (_result("000001.SZ"),)
+    factor_results = (
+        _factor("000001.SZ", "net_profit_parent_yoy", 20.0),
+        _factor("000001.SZ", "revenue_yoy", 8.0),
+        _factor("000001.SZ", "roe_ttm", 9.0),
+    )
+    with pytest.raises(QualificationImpactUnsupportedQualifier) as excinfo:
+        build_qualification_impact(
+            factor_results=factor_results,
+            strategy_results=strategy_results,
+            qualifiers={"growth": _ProtocolOnlyQualifier()},
+            as_of=AS_OF,
+        )
+    message = str(excinfo.value)
+    # 不是 AttributeError（pytest.raises 已限定类型）；消息点名 strategy_id 与类型。
+    assert "growth" in message
+    assert "_ProtocolOnlyQualifier" in message
+
+
+def test_unrecognized_risk_text_is_not_dropped() -> None:
+    """M2：抠不出因子名的 risk 必须以原文出现在 failure_reasons（不得静默丢弃）。"""
+    strategy_results = (_result("000001.SZ"),)
+    factor_results = (_factor("000001.SZ", "net_profit_parent_yoy", 20.0),)
+    report = build_qualification_impact(
+        factor_results=factor_results,
+        strategy_results=strategy_results,
+        qualifiers={"growth": _RawRiskQualifier()},
+        as_of=AS_OF,
+    )
+    impact = report.strategies[0]
+    assert ("absolute quality not met", 1) in impact.failure_reasons
+    assert impact.dual_pass_count == 0

@@ -176,3 +176,48 @@ def test_valid_rule_loads_with_expected_fields(tmp_path: Path) -> None:
     assert rule.version == "v1"
     assert rule.thresholds["pe_ttm"].max == 25.0
     assert rule.thresholds["pe_ttm"].min is None
+
+
+def test_unknown_root_key_is_invalid(tmp_path: Path) -> None:
+    """根级多余键（如 weight）会让配置被静默忽略，属 fail-open，必须拒绝。"""
+    path = _write(
+        tmp_path,
+        "strategy_id: value\n"
+        "version: v1\n"
+        "weight: 0.5\n"
+        "thresholds:\n"
+        "  pe_ttm:\n"
+        "    max: 25.0\n",
+    )
+    with pytest.raises(QualificationConfigInvalid, match="weight"):
+        load_qualification_rule(path)
+
+
+def test_misspelled_root_key_is_invalid(tmp_path: Path) -> None:
+    """根级键名拼错（descripton）应被根级未知键校验抓住。"""
+    path = _write(
+        tmp_path,
+        "strategy_id: value\n"
+        "version: v1\n"
+        "descripton: 拼错了\n"
+        "thresholds:\n"
+        "  pe_ttm:\n"
+        "    max: 25.0\n",
+    )
+    with pytest.raises(QualificationConfigInvalid, match="descripton"):
+        load_qualification_rule(path)
+
+
+def test_allowed_root_keys_still_load(tmp_path: Path) -> None:
+    """四个允许的根级键必须继续通过（生产 YAML 只有这四键）。"""
+    path = _write(
+        tmp_path,
+        "strategy_id: value\n"
+        "version: v1\n"
+        "description: 允许的说明\n"
+        "thresholds:\n"
+        "  pe_ttm:\n"
+        "    max: 25.0\n",
+    )
+    rule = load_qualification_rule(path)
+    assert rule.strategy_id == "value"

@@ -12,6 +12,7 @@ from astock_lens.pipelines import stages
 from astock_lens.pipelines.daily import _blocked_reasons, _Context
 from astock_lens.qualifications.models import (
     AbsoluteQualificationVerdict,
+    QualificationContext,
     StrategyQualification,
 )
 from astock_lens.qualifications.registry import build_qualifiers
@@ -29,14 +30,14 @@ LINEAGE = SnapshotLineage(
 class _DummyPassRule:
     version = "v1"
 
-    def evaluate(self, result: StrategyResult) -> AbsoluteQualificationVerdict:
+    def evaluate(self, context: QualificationContext) -> AbsoluteQualificationVerdict:
         return AbsoluteQualificationVerdict(passed=True, reasons=("passed absolute",))
 
 
 class _DummyFailRule:
     version = "v1"
 
-    def evaluate(self, result: StrategyResult) -> AbsoluteQualificationVerdict:
+    def evaluate(self, context: QualificationContext) -> AbsoluteQualificationVerdict:
         return AbsoluteQualificationVerdict(passed=False, risks=("failed absolute",))
 
 

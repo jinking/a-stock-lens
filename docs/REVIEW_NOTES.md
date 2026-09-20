@@ -1969,3 +1969,19 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
 - **无 Candidate 发布证明**：审计命令只读（执行前后 Snapshot/Watchlist/Job 指纹逐字节相等）；`data/snapshots/CANDIDATE/` 不存在；`astock daily` 仍在 `BUILD_CANDIDATES` 阻断（`5 blocked, 0 failed`, `candidates: 0`）。
 - **不改产出的独立佐证**：修复后重跑 `astock daily --as-of 2026-09-19` 未产生快照冲突，`FACTOR/UNIVERSE/STRATEGY` 的 `2026-09-19.json` mtime 仍为 `09:49:45/46/58` → 重跑产出与正式快照逐字节一致，即本次修复未改变 FACTOR/STRATEGY 产出。
 - **完整审计文档**：`docs/decision-packets/2026-09-20-qualification-repair-audit.md`。产物：`var/calibration/qualification-repair/qualification-impact-2026-09-19.{json,md}`。
+
+## 三十四、资格审计硬化（M1/M2/m1/m5）与实施计划台账偏差（2026-09-20）
+
+### 34.1 硬化项（QA 两段式评审遗留 Major/Minor）
+
+- **M1（去无检查 cast，失败响亮可诊断）**：`src/astock_lens/calibration/qualification_impact.py` 删除 `_ThresholdBearingQualifier` / `_AbsoluteThresholds` 两个结构性 Protocol 与 `cast` 导入，改为 `_absolute_thresholds()` 显式运行时校验 `getattr(qualifier, "absolute_rule", None).thresholds` 是否为 `Mapping`，否则抛新增的具名异常 `QualificationImpactUnsupportedQualifier`（消息点名 `strategy_id` 与 qualifier 类型）。旧行为：只满足公开 `StrategyQualifier` 协议的 qualifier 会抛裸 `AttributeError`；新行为：可诊断异常，且绝不把"读不到阈值"降级为"边界样本为空"。
+- **M2（不静默丢弃 risk）**：失败原因聚合键改为"能抠出因子名用因子名，抠不出用 risk 原文"，任何 risk 都不得被省略（`AGENTS.md` 禁止静默兜底）。排序规则不变（count 降序、同 count 键名升序）。
+- **m1（根级未知键拒绝）**：`src/astock_lens/qualifications/rules.py::load_qualification_rule` 把根级允许键收紧为 `{strategy_id, version, description, thresholds}`，出现其他键 → `QualificationConfigInvalid`（可抓 `descripton:` 拼写错误）。六份生产 YAML 只含这四键，仍严格加载通过。
+- **m5（测试替身签名过期）**：`tests/integration/test_candidate_qualification_pipeline.py` 的 `_DummyPassRule` / `_DummyFailRule`.`evaluate` 由旧签名 `(result: StrategyResult)` 改为契约新签名 `(context: QualificationContext)`（原断言未改弱）。
+- **回归门禁**：审计产物与已提交产物**逐字节一致**（`diff` MD/JSON 均无差异，M2 未改变聚合口径）；聚焦 4 文件 31 passed；`mypy` 0 errors；`ruff check`/`format --check` 全过。
+
+### 34.2 实施计划台账偏差（如实记录，非缺陷）
+
+- 计划 **Task 5** 的 Modify 清单列了 `tests/unit/test_candidate_routing.py`，但该文件在 `44e3e15..HEAD` **零改动**——它不依赖本轮变更的签名（`evaluate(context)`），实际无需修改（属台账未同步，非缺陷）。
+- `tests/integration/test_candidate_qualification_pipeline.py` 同理只到本轮 **m5** 才补齐测试替身签名；此前其 `_DummyPassRule`/`_DummyFailRule` 的旧签名因未被触发而未被发现。
+- 多出一次**未映射到 Task 编号**的修复提交 **`674baef`**（«修复：堵住资格配置空值与未知阈值键的失败关闭绕过»，堵住 `str(None)` 强转与未知阈值键的 fail-closed 绕过），属 Task 3/Task 4 的补丁。

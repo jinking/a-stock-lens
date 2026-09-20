@@ -27,6 +27,9 @@ from astock_lens.qualifications.models import (
 )
 
 _THRESHOLD_KEYS: frozenset[str] = frozenset({"min", "max"})
+_ROOT_KEYS: frozenset[str] = frozenset(
+    {"strategy_id", "version", "description", "thresholds"}
+)
 
 
 class FactorThresholdRule:
@@ -103,6 +106,9 @@ def load_qualification_rule(
 
     - 文件缺失 → ``FileNotFoundError``（保留"未配置"语义）；
     - YAML 根 / ``thresholds`` / 单条 threshold 非映射 → ``QualificationConfigInvalid``；
+    - 根级出现 ``strategy_id`` / ``version`` / ``description`` / ``thresholds``
+      之外的键 → ``QualificationConfigInvalid``（键名拼错会让配置被静默忽略，属
+      fail-open；可顺带抓住 ``descripton:`` 这类拼写错误）；
     - 缺 ``strategy_id`` / ``version`` 键，或值为非字符串标量（含 YAML 空值 ``null``），
       或 strip 后为空 → ``QualificationConfigInvalid``；
     - 单条 threshold 出现 ``min`` / ``max`` 之外的键 → ``QualificationConfigInvalid``
@@ -122,6 +128,13 @@ def load_qualification_rule(
     if not isinstance(raw, Mapping):
         raise QualificationConfigInvalid(
             f"Invalid YAML content in {path}: expected a mapping"
+        )
+
+    unknown_root_keys = set(raw) - _ROOT_KEYS
+    if unknown_root_keys:
+        raise QualificationConfigInvalid(
+            f"Unknown root key(s) in {path}: "
+            f"{sorted(str(key) for key in unknown_root_keys)}"
         )
 
     if "strategy_id" not in raw or "version" not in raw:

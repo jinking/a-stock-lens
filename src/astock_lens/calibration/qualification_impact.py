@@ -22,7 +22,6 @@ import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from datetime import datetime
-from typing import Protocol, cast
 
 from astock_lens.domain.enums import DataStatus
 from astock_lens.domain.models import DomainRecord
@@ -39,21 +38,15 @@ _QUALIFIED_SYMBOL_LIMIT = 20
 _FACTOR_RISK_PATTERN = re.compile(r"factor '([^']+)'")
 
 
-class _AbsoluteThresholds(Protocol):
-    """结构性子类型：绝对规则暴露逐因子阈值。"""
+class QualificationImpactUnsupportedQualifier(RuntimeError):
+    """Raised when a qualifier cannot expose absolute thresholds for the audit.
 
-    thresholds: Mapping[str, FactorThreshold]
-
-
-class _ThresholdBearingQualifier(Protocol):
-    """结构性子类型：生产 qualifier 暴露 ``absolute_rule``。
-
-    ``StrategyQualifier`` 协议本身只声明 ``strategy_id`` / ``qualification_version``
-    / ``qualify``；边界样本需要读取阈值，因此这里按结构读取具体实现上的
-    ``absolute_rule.thresholds``（六个生产 qualifier 均暴露）。
+    只读审计为了挑选"最接近边界的样本"，需要每个策略 qualifier 的已批准绝对因子
+    阈值。一个只满足公开 ``StrategyQualifier`` 协议（没有可用的
+    ``absolute_rule.thresholds`` 映射）的 qualifier 无法被审计；此时**绝不**把
+    "读不到阈值"静默降级成"边界样本为空"，而是点名 ``strategy_id`` 与 qualifier
+    类型，响亮失败。
     """
-
-    absolute_rule: _AbsoluteThresholds
 
 
 class StrategyQualificationImpact(DomainRecord):
@@ -82,6 +75,29 @@ def _factor_of_risk(risk: str) -> str | None:
     """从 risk 串中提取因子名（``factor '<name>' ...``）。"""
     match = _FACTOR_RISK_PATTERN.search(risk)
     return match.group(1) if match else None
+
+
+def _absolute_thresholds(
+    qualifier: StrategyQualifier | None, strategy_id: str
+) -> Mapping[str, FactorThreshold]:
+    """Read a qualifier's approved absolute thresholds, or fail loudly.
+
+    ``StrategyQualifier`` 协议本身只声明 ``strategy_id`` / ``qualification_version``
+    / ``qualify``，并不声明 ``absolute_rule``；六个生产 qualifier 都在具体实现上
+    暴露 ``absolute_rule.thresholds``。这里做**显式运行时校验**而非无检查的
+    ``cast``：读不到阈值映射即抛 ``QualificationImpactUnsupportedQualifier``
+    （可诊断），绝不把"读不到阈值"静默降级成"边界样本为空"。
+    """
+    rule = getattr(qualifier, "absolute_rule", None)
+    thresholds = getattr(rule, "thresholds", None)
+    if not isinstance(thresholds, Mapping):
+        raise QualificationImpactUnsupportedQualifier(
+            f"Qualifier for strategy '{strategy_id}' "
+            f"(type={type(qualifier).__name__}) does not expose an "
+            f"'absolute_rule.thresholds' mapping; the read-only audit cannot "
+            f"select boundary samples without approved thresholds"
+        )
+    return thresholds
 
 
 def _symbol_margin(
@@ -169,8 +185,10 @@ def build_qualification_impact(
         for qualification in strategy_qualifications:
             for risk in qualification.risks:
                 factor_name = _factor_of_risk(risk)
-                if factor_name is not None:
-                    reason_counter[factor_name] += 1
+                # 抠得出因子名就用因子名；抠不出就用 risk 原文作键——任何一条
+                # risk 都不得被静默丢弃（AGENTS.md 禁止静默兜底）。这样文案一旦
+                # 变形，未识别的文案仍会以其原文出现在 failure_reasons 中。
+                reason_counter[factor_name if factor_name is not None else risk] += 1
         failure_reasons = tuple(
             sorted(reason_counter.items(), key=lambda item: (-item[1], item[0]))
         )
@@ -179,12 +197,7 @@ def build_qualification_impact(
             sorted({q.symbol for q in strategy_qualifications if q.qualified})
         )
 
-        qualifier = qualifiers.get(strategy_id)
-        thresholds: Mapping[str, FactorThreshold] = {}
-        if qualifier is not None:
-            thresholds = cast(
-                _ThresholdBearingQualifier, qualifier
-            ).absolute_rule.thresholds
+        thresholds = _absolute_thresholds(qualifiers.get(strategy_id), strategy_id)
 
         strategies.append(
             StrategyQualificationImpact(
