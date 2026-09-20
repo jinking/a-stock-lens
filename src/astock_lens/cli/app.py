@@ -27,6 +27,11 @@ from astock_lens.calibration.candidate_report import (
     IndustryEvidence,
     generate_calibration_report,
 )
+from astock_lens.calibration.dividend_coverage import (
+    audit_dividend_coverage,
+    render_dividend_coverage_json,
+    render_dividend_coverage_markdown,
+)
 from astock_lens.calibration.factor_distribution import CalibrationPopulation
 from astock_lens.calibration.qualification_impact import (
     build_qualification_impact,
@@ -45,6 +50,8 @@ from astock_lens.data.bootstrap import (
 from astock_lens.data.bootstrap_progress import BootstrapProgress, render_progress
 from astock_lens.data.bootstrap_sources import SymbolBarFallbackSource
 from astock_lens.data.contracts import DataProvider, FetchRequest
+from astock_lens.data.dividends.models import DividendEvent
+from astock_lens.data.dividends.normalize import normalize_dividend_events
 from astock_lens.data.health import raw_datasets
 from astock_lens.data.industry import (
     WestockSectorSource,
@@ -1706,6 +1713,88 @@ def sync_dividends(
 
     if missing_symbols:
         raise typer.Exit(code=1)
+
+
+def _load_dividend_events(
+    day: datetime, root: Path | None = None
+) -> tuple[DividendEvent, ...]:
+    """读取已落地的分红历史原始数据并归一化为分红事件列表。"""
+    csv_root = root if root is not None else _csv_root()
+    path = csv_root / "neodata" / "dividend_history" / f"{day.date().isoformat()}.csv"
+    if not path.is_file():
+        return ()
+    _, rows = read_raw_rows(path)
+    events: list[DividendEvent] = []
+    for row in rows:
+        if len(row) >= 3:
+            events.extend(normalize_dividend_events(row[2], default_as_of=day))
+    return tuple(events)
+
+
+@app.command("dividend-coverage")
+def dividend_coverage_command(
+    as_of: Annotated[str, AS_OF_OPTION],
+    universe: Annotated[
+        Path,
+        typer.Option(
+            "--universe",
+            help="研究池名单：JSON 的 research_symbols，或 CSV 的 symbol 列。",
+        ),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output", help="把报告写入文件（.json 为 JSON，其它为 Markdown）。"
+        ),
+    ] = None,
+) -> None:
+    """核对分红事件在研究池上的覆盖情况（只读）。
+
+    分母是 `--universe` 给出的研究池名单。缺名单直接报错：拿'已有分红事件的标的'
+    当分母会把覆盖率算成 100%，那是假全覆盖。
+    """
+    day = _as_of(as_of)
+    try:
+        symbols = read_universe_symbols(universe)
+    except (OSError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+
+    events = _load_dividend_events(day)
+    try:
+        report = audit_dividend_coverage(events, symbols, day)
+    except ValueError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"as_of: {day.isoformat()}")
+    typer.echo(f"研究池: {report.universe_size} 只")
+    typer.echo(
+        f"有任意分红事件: {report.symbols_with_any_event} / {report.universe_size}"
+        f"（缺口 {len(report.missing_symbols)} 只）"
+    )
+    typer.echo(
+        f"有已实施现金分红: {report.symbols_with_implemented_cash_event} / {report.universe_size}"
+    )
+    typer.echo(
+        f"具备除权除息日: {report.symbols_with_ex_date} / {report.universe_size}"
+    )
+    typer.echo(
+        f"具备股权登记日: {report.symbols_with_registration_date} / {report.universe_size}"
+    )
+    typer.echo(
+        f"事件分布: 有效总计 {report.event_count} 条，"
+        f"实施 {report.implemented_count} 条，预案 {report.proposal_count} 条"
+    )
+
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        if output.suffix.lower() == ".json":
+            content = render_dividend_coverage_json(report)
+        else:
+            content = render_dividend_coverage_markdown(report)
+        output.write_text(content, encoding="utf-8")
+        typer.echo(f"report: {output}")
 
 
 @app.command("sync-research")
