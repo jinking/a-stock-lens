@@ -5,9 +5,17 @@ from astock_lens.market.regime import (
     MarketRegimeDetector,
     MarketRegimeResult,
 )
+from astock_lens.market.validation import (
+    MarketValidationContext,
+    MarketValidationResult,
+    MarketValidator,
+)
 
 __all__ = [
     "MarketRegimeContext",
     "MarketRegimeDetector",
     "MarketRegimeResult",
+    "MarketValidationContext",
+    "MarketValidationResult",
+    "MarketValidator",
 ]
