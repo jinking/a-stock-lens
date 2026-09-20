@@ -185,6 +185,7 @@ flowchart TD
 1. 在 `src/astock_lens/regime/` 下建立大盘指标提取与分类引擎；
 2. 依据大盘日线（MA20/MA60、成交量量比、上涨家数均线）输出每日唯一的 `MarketRegimeResult`；
 3. 接入管线阶段 `REGIME_STAGE`。
+4. **2026-09-20 决策准备状态**：已形成决策材料包 `docs/decision-packets/2026-09-20-market-signal-owner-decisions.md`，对比了单指数趋势法 (R1) 与多维复合输入 (R2) 方案，等待项目所有者审定。
 
 ---
 
@@ -219,6 +220,7 @@ flowchart TD
 1. 实现 `src/astock_lens/validation/` 验证模块，输入个股行情、行业行情与基准行情；
 2. 明确量化打分判定表：确定哪些属于硬违背（`CONTRADICTED`），哪些属于共振确认（`CONFIRMED`）；
 3. 单元测试覆盖一票否决、降权及中性情况，产出结构化的 `MarketValidationResult`。
+4. **2026-09-20 决策准备状态**：已交付基于 2026-09-19 真实合格标的分布的 5 维量化建议与状态映射矩阵，详见 `docs/decision-packets/2026-09-20-market-signal-owner-decisions.md`，等待所有者审定。
 
 ---
 
@@ -243,6 +245,7 @@ flowchart TD
 1. 实现价格形态识别器（基于 20/60 日均线拐点、支撑阻力位突破、量价背离等模式）；
 2. 输出无投资建议色彩的纯客观状态标记 `SignalResult`；
 3. 将其作为 `CandidateEvidence` 的第四大输入要素注入候选决策流程。
+4. **2026-09-20 决策准备状态**：已梳理策略到信号形态映射矩阵与真实分位数基线建议，详见 `docs/decision-packets/2026-09-20-market-signal-owner-decisions.md`，等待所有者审定。
 
 ---
 

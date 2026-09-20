@@ -2077,4 +2077,47 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
 - `configs/qualifications/dividend.yaml` 门槛配置未作任何修改；
 - Candidate 发布依然保持安全阻断，等待项目所有者审定签发后，另立开发计划实施。
 
+## 三十七、市场验证与技术信号决策就绪（Plan C，2026-09-20）
+
+### 37.1 建设目标与架构红线
+
+为打破 P3 阶段（Market Regime / Market Validation / Signal）的认知与数据黑盒，依规实施 Plan C，核心任务是为项目所有者审定规则与阈值提供真实全量分布证据与代表样本，同时确保：
+1. **严格只读**：报告引擎与 CLI 仅聚合已存储的快照，绝无状态副作用；
+2. **拒绝静默兜底**：因子缺失与非数值绝不填充为 0；
+3. **合格范围收敛**：严格限定在各策略已通过双门槛合格（StrategyQualification.qualified == True）的标的池内计算；
+4. **词表绝对隔离**：报告与模型中严禁出现任何未经授权的判决枚举（CONFIRMED/NEUTRAL/CONTRADICTED 等判决值），不包含任何 verdict 字段；
+5. **Mandatory OWNER STOP Gate**：严禁私自接线 Candidate 发布，`pipelines/daily.py` 中的 `BLOCKED_REASONS` 保持锁定。
+
+### 37.2 任务交付详情（Task 1~4）
+
+1. **分布报告引擎（Task 1，commit `8ea1172`）**：
+   - 实现 `src/astock_lens/calibration/market_signal_readiness.py`；
+   - 提取各策略合格标的，按最近秩法确定性计算 `ret_20d`、`ret_60d`、`proximity_52w_high`、`avg_amount_20d` 的 P10/P25/P50/P75/P90 分位数；
+   - 单元测试覆盖不同输入排序确定性、缺失值不退化为 0、严格限定合格标的。
+2. **只读校准 CLI（Task 2，commit `ae2ec4c`）**：
+   - 在 `src/astock_lens/cli/app.py` 挂载 `astock calibrate market-signal-readiness --as-of YYYY-MM-DD --output-dir PATH`；
+   - 自动生成对应日期的 Markdown 报告与 JSON 数据；
+   - 集成测试验证其对快照、自选与任务存储的严格只读性（SHA-256 全量对比通过）、缺少快照或配置损坏立即 fail-closed。
+3. **边界代表样本抽样（Task 3，commit `07c4488`）**：
+   - 在各策略合格标的中，确定性抽取 `ret_20d`（最高/最低）、`ret_60d`（最高/最低）、`proximity_52w_high`（最接近/最远）、`avg_amount_20d`（最高/最低）样本；
+   - 平局时按 `symbol` 升序稳定决胜；
+   - 附录增加未激活未来词表静态说明，严格通过词表边界测试（JSON payload 绝不含 verdict 字段）。
+4. **决策材料包交付与停机门禁（Task 4）**：
+   - 基于 2026-09-19 真实全量快照运行生成实测数据；
+   - 形成正式审批包：`docs/decision-packets/2026-09-20-market-signal-owner-decisions.md`；
+   - 呈报 5 大决策点：
+     1. 市场环境状态 (Regime)：R1 纯指数 vs R2 复合多维（推荐）；
+     2. 市场验证 (Validation)：5 维验证矩阵与 CONFIRMED/NEUTRAL/CONTRADICTED 触发规则；
+     3. 信号类型 (Signal)：策略到信号映射与分位数基准；
+     4. 发布模式 (Semantics)：Mode A（按策略单轨发布）vs Mode B（全系统全局阻塞，当前基线）；
+     5. 解锁授权：保持 `pipelines/daily.py` 阻塞。
+   - 同步更新 `docs/ROADMAP.md` 与 `docs/REMAINING_PRODUCT_BLOCKERS.md`。
+
+### 37.3 2026-09-19 全量真实数据特征事实
+
+- **Momentum 动量策略 (166 只)**：呈现典型主升浪特征，20日涨幅中位数高达 +13.75%，P90 达 +48.28%，最高（华宝新能 300741.SZ）达 +99.19%，距 52 周新高中位数 0.9049；
+- **Value / Quality / Growth 策略**：20日收益率中位数均在 -2.6% ~ -5.2% 区间，真实反映了结构性行情中的估值压制与震荡筑底，证明绝对阈值必须依策略属性差异化配置；
+- **流动性底线事实**：各策略合格池 20 日均成交额 P10 均在 1.7 亿元以上，为系统设定 1.5 亿/1.0 亿流动性安全底线提供了坚实数据依据。
+
+
 

@@ -1,0 +1,577 @@
+{
+  "as_of": "2026-09-19T15:00:00+08:00",
+  "strategies": [
+    {
+      "strategy_id": "dividend",
+      "qualified_count": 0,
+      "metrics": [
+        {
+          "metric": "ret_20d",
+          "count": 0,
+          "missing": 0,
+          "p10": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        {
+          "metric": "ret_60d",
+          "count": 0,
+          "missing": 0,
+          "p10": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        {
+          "metric": "proximity_52w_high",
+          "count": 0,
+          "missing": 0,
+          "p10": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        {
+          "metric": "avg_amount_20d",
+          "count": 0,
+          "missing": 0,
+          "p10": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      ],
+      "samples": []
+    },
+    {
+      "strategy_id": "garp",
+      "qualified_count": 61,
+      "metrics": [
+        {
+          "metric": "ret_20d",
+          "count": 61,
+          "missing": 0,
+          "p10": -0.10322580645161283,
+          "p25": -0.07318894697535472,
+          "p50": -0.027653880463871627,
+          "p75": 0.015089163237311354,
+          "p90": 0.050578034682080775
+        },
+        {
+          "metric": "ret_60d",
+          "count": 61,
+          "missing": 0,
+          "p10": -0.38839701770736257,
+          "p25": -0.22677352330068257,
+          "p50": -0.049090909090909185,
+          "p75": 0.036395147313691645,
+          "p90": 0.1934103551561832
+        },
+        {
+          "metric": "proximity_52w_high",
+          "count": 61,
+          "missing": 0,
+          "p10": 0.4622994652406417,
+          "p25": 0.5122977346278318,
+          "p50": 0.6229287953425885,
+          "p75": 0.7038974627256083,
+          "p90": 0.7726001863932898
+        },
+        {
+          "metric": "avg_amount_20d",
+          "count": 61,
+          "missing": 0,
+          "p10": 207761010.0,
+          "p25": 342216085.0,
+          "p50": 644784085.0,
+          "p75": 1246775955.0,
+          "p90": 3270131710.0
+        }
+      ],
+      "samples": [
+        {
+          "symbol": "603236.SH",
+          "metric": "ret_20d",
+          "sample_kind": "highest",
+          "raw_value": 0.2301269205076819,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "000973.SZ",
+          "metric": "ret_20d",
+          "sample_kind": "lowest",
+          "raw_value": -0.16666666666666674,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "600988.SH",
+          "metric": "ret_60d",
+          "sample_kind": "highest",
+          "raw_value": 0.6318557475582267,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "001309.SZ",
+          "metric": "ret_60d",
+          "sample_kind": "lowest",
+          "raw_value": -0.5545117845117845,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "002452.SZ",
+          "metric": "proximity_52w_high",
+          "sample_kind": "closest",
+          "raw_value": 0.8643578643578644,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "605499.SH",
+          "metric": "proximity_52w_high",
+          "sample_kind": "farthest",
+          "raw_value": 0.3536920033186547,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "603986.SH",
+          "metric": "avg_amount_20d",
+          "sample_kind": "highest",
+          "raw_value": 11735399645.0,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "000526.SZ",
+          "metric": "avg_amount_20d",
+          "sample_kind": "lowest",
+          "raw_value": 150804345.0,
+          "status": "VALUE"
+        }
+      ]
+    },
+    {
+      "strategy_id": "growth",
+      "qualified_count": 151,
+      "metrics": [
+        {
+          "metric": "ret_20d",
+          "count": 151,
+          "missing": 0,
+          "p10": -0.1280539174389217,
+          "p25": -0.07348406988694745,
+          "p50": -0.02635658914728689,
+          "p75": 0.035495849716033145,
+          "p90": 0.14796879203658841
+        },
+        {
+          "metric": "ret_60d",
+          "count": 151,
+          "missing": 0,
+          "p10": -0.43099089989888784,
+          "p25": -0.35419198055893075,
+          "p50": -0.203303438931544,
+          "p75": -0.04415011037527594,
+          "p90": 0.12297734627831725
+        },
+        {
+          "metric": "proximity_52w_high",
+          "count": 147,
+          "missing": 4,
+          "p10": 0.4622994652406417,
+          "p25": 0.5133711925658234,
+          "p50": 0.6383662968322882,
+          "p75": 0.7403188405797101,
+          "p90": 0.8477064220183487
+        },
+        {
+          "metric": "avg_amount_20d",
+          "count": 151,
+          "missing": 0,
+          "p10": 286749250.0,
+          "p25": 464881425.0,
+          "p50": 987241365.0,
+          "p75": 2660183110.0,
+          "p90": 4474521695.0
+        }
+      ],
+      "samples": [
+        {
+          "symbol": "603186.SH",
+          "metric": "ret_20d",
+          "sample_kind": "highest",
+          "raw_value": 0.4024390243902438,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "688266.SH",
+          "metric": "ret_20d",
+          "sample_kind": "lowest",
+          "raw_value": -0.2136764493277432,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "300765.SZ",
+          "metric": "ret_60d",
+          "sample_kind": "highest",
+          "raw_value": 0.6559510141599696,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "688525.SH",
+          "metric": "ret_60d",
+          "sample_kind": "lowest",
+          "raw_value": -0.5655007287112221,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "688758.SH",
+          "metric": "proximity_52w_high",
+          "sample_kind": "closest",
+          "raw_value": 0.9752893337503911,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "688307.SH",
+          "metric": "proximity_52w_high",
+          "sample_kind": "farthest",
+          "raw_value": 0.34629629629629627,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "300308.SZ",
+          "metric": "avg_amount_20d",
+          "sample_kind": "highest",
+          "raw_value": 23290023200.0,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "002289.SZ",
+          "metric": "avg_amount_20d",
+          "sample_kind": "lowest",
+          "raw_value": 154002215.0,
+          "status": "VALUE"
+        }
+      ]
+    },
+    {
+      "strategy_id": "momentum",
+      "qualified_count": 166,
+      "metrics": [
+        {
+          "metric": "ret_20d",
+          "count": 166,
+          "missing": 0,
+          "p10": 0.03419346637854326,
+          "p25": 0.06416382252559716,
+          "p50": 0.13746856663872586,
+          "p75": 0.30000000000000004,
+          "p90": 0.48275862068965525
+        },
+        {
+          "metric": "ret_60d",
+          "count": 166,
+          "missing": 0,
+          "p10": 0.06032195294533871,
+          "p25": 0.12435614422369379,
+          "p50": 0.2325581395348837,
+          "p75": 0.36301121968874406,
+          "p90": 0.7344827586206899
+        },
+        {
+          "metric": "proximity_52w_high",
+          "count": 166,
+          "missing": 0,
+          "p10": 0.823031880286272,
+          "p25": 0.8577277379733881,
+          "p50": 0.9049029285949325,
+          "p75": 0.9504919730709477,
+          "p90": 0.9724025974025973
+        },
+        {
+          "metric": "avg_amount_20d",
+          "count": 166,
+          "missing": 0,
+          "p10": 178735360.0,
+          "p25": 211694990.0,
+          "p50": 340564835.0,
+          "p75": 694314655.0,
+          "p90": 1500615495.0
+        }
+      ],
+      "samples": [
+        {
+          "symbol": "300741.SZ",
+          "metric": "ret_20d",
+          "sample_kind": "highest",
+          "raw_value": 0.9919354838709677,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "300434.SZ",
+          "metric": "ret_20d",
+          "sample_kind": "lowest",
+          "raw_value": 0.005636070853462183,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "301520.SZ",
+          "metric": "ret_60d",
+          "sample_kind": "highest",
+          "raw_value": 2.097853014037985,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "603328.SH",
+          "metric": "ret_60d",
+          "sample_kind": "lowest",
+          "raw_value": -0.03982930298719778,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "300741.SZ",
+          "metric": "proximity_52w_high",
+          "sample_kind": "closest",
+          "raw_value": 1.0,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "300761.SZ",
+          "metric": "proximity_52w_high",
+          "sample_kind": "farthest",
+          "raw_value": 0.8023622047244094,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "600150.SH",
+          "metric": "avg_amount_20d",
+          "sample_kind": "highest",
+          "raw_value": 4448247690.0,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "300865.SZ",
+          "metric": "avg_amount_20d",
+          "sample_kind": "lowest",
+          "raw_value": 154010500.0,
+          "status": "VALUE"
+        }
+      ]
+    },
+    {
+      "strategy_id": "quality",
+      "qualified_count": 111,
+      "metrics": [
+        {
+          "metric": "ret_20d",
+          "count": 111,
+          "missing": 0,
+          "p10": -0.16434916956353796,
+          "p25": -0.08750904019010242,
+          "p50": -0.05202797202797205,
+          "p75": -0.0050880626223092085,
+          "p90": 0.0688468158347677
+        },
+        {
+          "metric": "ret_60d",
+          "count": 111,
+          "missing": 0,
+          "p10": -0.2545835515976951,
+          "p25": -0.14354868739527094,
+          "p50": -0.019841269841269882,
+          "p75": 0.12148249828414559,
+          "p90": 0.3294573643410852
+        },
+        {
+          "metric": "proximity_52w_high",
+          "count": 108,
+          "missing": 3,
+          "p10": 0.4650421743205248,
+          "p25": 0.5374698795180723,
+          "p50": 0.6465095598043575,
+          "p75": 0.7416382252559727,
+          "p90": 0.8124652198107958
+        },
+        {
+          "metric": "avg_amount_20d",
+          "count": 111,
+          "missing": 0,
+          "p10": 191443660.0,
+          "p25": 263088565.0,
+          "p50": 598895050.0,
+          "p75": 1454685655.0,
+          "p90": 2660183110.0
+        }
+      ],
+      "samples": [
+        {
+          "symbol": "003006.SZ",
+          "metric": "ret_20d",
+          "sample_kind": "highest",
+          "raw_value": 0.48444444444444446,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "002437.SZ",
+          "metric": "ret_20d",
+          "sample_kind": "lowest",
+          "raw_value": -0.2748414376321353,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "600354.SH",
+          "metric": "ret_60d",
+          "sample_kind": "highest",
+          "raw_value": 0.9897959183673468,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "603986.SH",
+          "metric": "ret_60d",
+          "sample_kind": "lowest",
+          "raw_value": -0.5228647721262626,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "688758.SH",
+          "metric": "proximity_52w_high",
+          "sample_kind": "closest",
+          "raw_value": 0.9752893337503911,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "688615.SH",
+          "metric": "proximity_52w_high",
+          "sample_kind": "farthest",
+          "raw_value": 0.2395573396983834,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "300502.SZ",
+          "metric": "avg_amount_20d",
+          "sample_kind": "highest",
+          "raw_value": 14681816960.0,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "605305.SH",
+          "metric": "avg_amount_20d",
+          "sample_kind": "lowest",
+          "raw_value": 158753395.0,
+          "status": "VALUE"
+        }
+      ]
+    },
+    {
+      "strategy_id": "value",
+      "qualified_count": 132,
+      "metrics": [
+        {
+          "metric": "ret_20d",
+          "count": 132,
+          "missing": 0,
+          "p10": -0.11373320222877747,
+          "p25": -0.06426290580095795,
+          "p50": -0.02782608695652178,
+          "p75": 0.014659685863874117,
+          "p90": 0.05566218809980805
+        },
+        {
+          "metric": "ret_60d",
+          "count": 132,
+          "missing": 0,
+          "p10": -0.12817904374364186,
+          "p25": -0.08495145631067968,
+          "p50": -0.00454545454545463,
+          "p75": 0.08309455587392534,
+          "p90": 0.127746135069162
+        },
+        {
+          "metric": "proximity_52w_high",
+          "count": 132,
+          "missing": 0,
+          "p10": 0.5391040242976461,
+          "p25": 0.6201227531784306,
+          "p50": 0.7142857142857143,
+          "p75": 0.7821428571428571,
+          "p90": 0.8775510204081632
+        },
+        {
+          "metric": "avg_amount_20d",
+          "count": 132,
+          "missing": 0,
+          "p10": 176044180.0,
+          "p25": 199271050.0,
+          "p50": 306428440.0,
+          "p75": 575457320.0,
+          "p90": 1185224680.0
+        }
+      ],
+      "samples": [
+        {
+          "symbol": "601319.SH",
+          "metric": "ret_20d",
+          "sample_kind": "highest",
+          "raw_value": 0.1112716763005781,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "300970.SZ",
+          "metric": "ret_20d",
+          "sample_kind": "lowest",
+          "raw_value": -0.21159153633854633,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "600428.SH",
+          "metric": "ret_60d",
+          "sample_kind": "highest",
+          "raw_value": 0.3569682151589242,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "600909.SH",
+          "metric": "ret_60d",
+          "sample_kind": "lowest",
+          "raw_value": -0.35850622406639,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "600926.SH",
+          "metric": "proximity_52w_high",
+          "sample_kind": "closest",
+          "raw_value": 0.9667042889390519,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "300970.SZ",
+          "metric": "proximity_52w_high",
+          "sample_kind": "farthest",
+          "raw_value": 0.3400793650793651,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "601318.SH",
+          "metric": "avg_amount_20d",
+          "sample_kind": "highest",
+          "raw_value": 4117250155.0,
+          "status": "VALUE"
+        },
+        {
+          "symbol": "002839.SZ",
+          "metric": "avg_amount_20d",
+          "sample_kind": "lowest",
+          "raw_value": 150834045.0,
+          "status": "VALUE"
+        }
+      ]
+    }
+  ],
+  "missing_inputs": [
+    "market_breadth",
+    "market_volatility",
+    "benchmark_index_trend"
+  ]
+}
