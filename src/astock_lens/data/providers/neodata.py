@@ -63,10 +63,13 @@ QUERY_TEMPLATES: Mapping[str, str] = {
     "valuation": "{names} 最新市盈率PE 市净率PB 股息率 总市值 历史估值分位",
     "industry": "{names} 行业 最新营业收入 净利润 同比增速 板块估值 成分股",
     "financial_quarterly": "{names} 最近8期 营业收入 归母净利润 报告期 发布日期",
+    "dividend_history": "{names} 历史分红送配 每10股派息 股权登记日 除权日 实施状态",
 }
 
 # 按标的取数的数据集；行业数据集按板块名取数，因此不做标的覆盖核对。
-SYMBOL_DATASETS: frozenset[str] = frozenset({"valuation", "financial_quarterly"})
+SYMBOL_DATASETS: frozenset[str] = frozenset(
+    {"valuation", "financial_quarterly", "dividend_history"}
+)
 
 DEFAULT_BATCH_SIZE = 10
 DEFAULT_TIMEOUT_SECONDS = 60.0

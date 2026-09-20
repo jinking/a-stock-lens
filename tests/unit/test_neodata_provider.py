@@ -37,8 +37,14 @@ AS_OF = datetime(2026, 9, 17, 15, 0, tzinfo=UTC)
 SYMBOLS = ("600519.SH", "000858.SZ", "000568.SZ")
 
 
+from typing import cast
+
+
 def _fixture(dataset: str) -> dict[str, object]:
-    return json.loads((FIXTURES / f"{dataset}.json").read_text(encoding="utf-8"))
+    return cast(
+        "dict[str, object]",
+        json.loads((FIXTURES / f"{dataset}.json").read_text(encoding="utf-8")),
+    )
 
 
 class Replay:
@@ -90,7 +96,50 @@ def test_query_templates_are_pinned_not_improvised() -> None:
     assert provider.build_query("financial_quarterly", ("600519.SH", "000858.SZ")) == (
         "600519.SH、000858.SZ 最近8期 营业收入 归母净利润 报告期 发布日期"
     )
-    assert set(QUERY_TEMPLATES) == {"valuation", "industry", "financial_quarterly"}
+    assert provider.build_query("dividend_history", ("600519.SH",)) == (
+        "600519.SH 历史分红送配 每10股派息 股权登记日 除权日 实施状态"
+    )
+    assert set(QUERY_TEMPLATES) == {
+        "valuation",
+        "industry",
+        "financial_quarterly",
+        "dividend_history",
+    }
+
+
+def test_dividend_history_coverage_is_read_from_content() -> None:
+    """分红历史按内容判定覆盖度：请求两只，内容只有一只，缺口必须包含缺失的那只。"""
+    payload = {
+        "code": 200,
+        "suc": True,
+        "data": {
+            "apiData": {
+                "entity": ["600519.SH", "000858.SZ"],
+                "apiRecall": [
+                    {
+                        "type": "分红送配详细",
+                        "desc": "分红送配详细",
+                        "content": (
+                            "## 贵州茅台（标的代码：600519.SH）\n\n"
+                            "| 公告日期 | 分红方案 | 股权登记日 | 除权除息日 | 方案进度 |\n"
+                            "| --- | --- | --- | --- | --- |\n"
+                            "| 2026-06-20 | 10派300.00元 | 2026-07-05 | 2026-07-06 | 实施 |\n"
+                        ),
+                    }
+                ],
+            }
+        },
+    }
+    transport = Replay(payloads=[payload, {"data": {"apiData": {"apiRecall": []}}}])
+    raw = _provider(transport).fetch(
+        FetchRequest(
+            dataset="dividend_history",
+            as_of=AS_OF,
+            symbols=("600519.SH", "000858.SZ"),
+        )
+    )
+    assert raw.status is DataStatus.VALUE
+    assert raw.missing_symbols == ("000858.SZ",)
 
 
 def test_a_valuation_answer_is_landed_verbatim() -> None:
@@ -191,6 +240,7 @@ def test_the_request_carries_a_bearer_token() -> None:
     _provider(transport).fetch(_request("valuation"))
 
     assert transport.last_headers["Authorization"] == "Bearer test-token"
+    assert transport._body is not None
     assert json.loads(transport._body.decode("utf-8"))["sub_channel"] == "workbuddy"
 
 
