@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from astock_lens.calibration.market_signal_readiness import (
     build_market_signal_readiness,
+    render_readiness_markdown,
 )
 from astock_lens.domain.enums import DataStatus
 from astock_lens.domain.models import SnapshotLineage
@@ -164,3 +165,97 @@ def test_scope_strictly_restricted_to_qualified_stocks() -> None:
     assert dist.count == 1
     assert dist.p50 == 0.30
     assert -0.50 not in (dist.p10, dist.p25, dist.p50, dist.p75, dist.p90)
+
+
+def test_representative_sampling_deterministic_with_tie_breaking() -> None:
+    """Task 3 Step 1 & Step 2: 极值采样，平局按 symbol 升序，携带原始状态与数值。"""
+    strategy_id = "momentum"
+    qualifications = [
+        _sq("000001.SZ", strategy_id, qualified=True),
+        _sq("000002.SZ", strategy_id, qualified=True),
+        _sq("000003.SZ", strategy_id, qualified=True),
+    ]
+
+    # 000001.SZ 与 000002.SZ 平局具有相同最高的 ret_20d (0.50)
+    # 000003.SZ 具有最低的 ret_20d (-0.20)
+    factors = [
+        _fr("000001.SZ", "ret_20d", 0.50),
+        _fr("000002.SZ", "ret_20d", 0.50),
+        _fr("000003.SZ", "ret_20d", -0.20),
+        _fr("000001.SZ", "proximity_52w_high", 0.95),
+        _fr("000002.SZ", "proximity_52w_high", 0.70),
+    ]
+
+    report = build_market_signal_readiness(
+        as_of=AS_OF,
+        qualifications=qualifications,
+        factor_results=factors,
+    )
+
+    strat = next(s for s in report.strategies if s.strategy_id == strategy_id)
+    assert hasattr(strat, "samples")
+
+    highest_sample = next(
+        s for s in strat.samples if s.metric == "ret_20d" and s.sample_kind == "highest"
+    )
+    lowest_sample = next(
+        s for s in strat.samples if s.metric == "ret_20d" and s.sample_kind == "lowest"
+    )
+
+    # 平局时 symbol 升序：000001.SZ < 000002.SZ
+    assert highest_sample.symbol == "000001.SZ"
+    assert highest_sample.raw_value == 0.50
+    assert highest_sample.status == DataStatus.VALUE
+
+    assert lowest_sample.symbol == "000003.SZ"
+    assert lowest_sample.raw_value == -0.20
+    assert lowest_sample.status == DataStatus.VALUE
+
+    closest_sample = next(
+        s
+        for s in strat.samples
+        if s.metric == "proximity_52w_high" and s.sample_kind == "closest"
+    )
+    farthest_sample = next(
+        s
+        for s in strat.samples
+        if s.metric == "proximity_52w_high" and s.sample_kind == "farthest"
+    )
+    assert closest_sample.symbol == "000001.SZ"
+    assert closest_sample.raw_value == 0.95
+    assert farthest_sample.symbol == "000002.SZ"
+    assert farthest_sample.raw_value == 0.70
+
+    md = render_readiness_markdown(report)
+    assert "#### 代表性边界样本" in md
+    assert "附录：未来规则词表" in md
+    assert "CONFIRMED" in md
+    assert "BREAKOUT" in md
+
+    payload = report.to_payload()
+    strat_payload = payload["strategies"][0]  # type: ignore[index]
+    assert len(strat_payload["samples"]) > 0  # type: ignore[index]
+
+
+def test_assert_vocabulary_boundary_no_verdict_fields() -> None:
+    """Task 3 Step 3: 严禁在报告模型中出现判决字段或判决枚举。"""
+    strategy_id = "value"
+    qualifications = [_sq("000001.SZ", strategy_id, qualified=True)]
+    factors = [_fr("000001.SZ", "ret_20d", 0.10)]
+
+    report = build_market_signal_readiness(
+        as_of=AS_OF,
+        qualifications=qualifications,
+        factor_results=factors,
+    )
+
+    payload = report.to_payload()
+    # 转换为 JSON 字符串检查 key 与 value
+    json_str = str(payload)
+    for forbidden_verdict_key in (
+        "market_regime",
+        "market_validation",
+        "signal",
+        "verdict",
+    ):
+        assert forbidden_verdict_key not in json_str

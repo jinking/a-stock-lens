@@ -11,12 +11,16 @@
 import json
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from typing import cast
 
 from astock_lens.domain.enums import DataStatus
 from astock_lens.domain.models import DomainRecord
 from astock_lens.factors.contracts import FactorResult
 from astock_lens.qualifications.contracts import StrategyQualifier
-from astock_lens.qualifications.models import QualificationContext, StrategyQualification
+from astock_lens.qualifications.models import (
+    QualificationContext,
+    StrategyQualification,
+)
 from astock_lens.strategies.contracts import StrategyResult
 
 TECHNICAL_METRICS: tuple[str, ...] = (
@@ -64,12 +68,23 @@ class MetricDistribution(DomainRecord):
     p90: float | None
 
 
+class MetricSample(DomainRecord):
+    """技术指标的代表性边界样本。"""
+
+    symbol: str
+    metric: str
+    sample_kind: str
+    raw_value: float | None
+    status: DataStatus
+
+
 class StrategyTechnicalReadiness(DomainRecord):
     """单个策略合格标的的技术特征就绪度分布。"""
 
     strategy_id: str
     qualified_count: int
     metrics: tuple[MetricDistribution, ...]
+    samples: tuple[MetricSample, ...] = ()
 
 
 class MarketSignalReadinessReport(DomainRecord):
@@ -146,11 +161,58 @@ def build_market_signal_readiness(
                 )
             )
 
+        samples: list[MetricSample] = []
+        for metric in metrics:
+            valid_factors: list[FactorResult] = []
+            for sym in qualified_symbols:
+                fr = factor_map.get((sym, metric))
+                if (
+                    fr is not None
+                    and fr.status == DataStatus.VALUE
+                    and fr.raw_value is not None
+                ):
+                    valid_factors.append(fr)
+
+            if valid_factors:
+                # 最高/最近：数值降序，平局按 symbol 升序
+                best_high = min(
+                    valid_factors,
+                    key=lambda f: (-cast(float, f.raw_value), f.symbol),
+                )
+                # 最低/最远：数值升序，平局按 symbol 升序
+                best_low = min(
+                    valid_factors,
+                    key=lambda f: (cast(float, f.raw_value), f.symbol),
+                )
+
+                high_kind = "closest" if metric == "proximity_52w_high" else "highest"
+                low_kind = "farthest" if metric == "proximity_52w_high" else "lowest"
+
+                samples.append(
+                    MetricSample(
+                        symbol=best_high.symbol,
+                        metric=metric,
+                        sample_kind=high_kind,
+                        raw_value=best_high.raw_value,
+                        status=best_high.status,
+                    )
+                )
+                samples.append(
+                    MetricSample(
+                        symbol=best_low.symbol,
+                        metric=metric,
+                        sample_kind=low_kind,
+                        raw_value=best_low.raw_value,
+                        status=best_low.status,
+                    )
+                )
+
         strategies.append(
             StrategyTechnicalReadiness(
                 strategy_id=strat_id,
                 qualified_count=q_count,
                 metrics=tuple(dist_list),
+                samples=tuple(samples),
             )
         )
 
@@ -205,10 +267,37 @@ def render_readiness_markdown(report: MarketSignalReadinessReport) -> str:
             )
         lines.append("")
 
+        if strat.samples:
+            lines.append("#### 代表性边界样本")
+            lines.append("")
+            lines.append("| 因子/指标 | 样本类型 | 股票代码 | 数值 | 数据状态 |")
+            lines.append("| :--- | :---: | :---: | :---: | :---: |")
+            for s in strat.samples:
+                val_str = f"{s.raw_value:.4f}" if s.raw_value is not None else "N/A"
+                lines.append(
+                    f"| `{s.metric}` | `{s.sample_kind}` | `{s.symbol}` | {val_str} | `{s.status.value}` |"
+                )
+            lines.append("")
+
     lines.append("## 2. 缺失的宏观/市场输入项")
     lines.append("")
     for item in report.missing_inputs:
         lines.append(f"- `{item}`: 尚未纳入数据源或尚未定义计算")
+    lines.append("")
+
+    lines.append("## 附录：未来规则词表（当前未激活，仅作说明）")
+    lines.append("")
+    lines.append(
+        "以下词表仅为架构预留候选词汇，**当前未激活且未在代码中执行任何判决计算**："
+    )
+    lines.append(
+        "- **市场验证状态 (Market Validation)**: `CONFIRMED`, `NEUTRAL`, `CONTRADICTED`"
+    )
+    lines.append(
+        "- **信号类型 (Signal)**: `BREAKOUT`, `PULLBACK`, `TREND_CONTINUE`, `TREND_WEAKEN`, `BREAKDOWN`"
+    )
+    lines.append("")
+    lines.append("所有上述状态与信号必须由项目所有者明确审定阈值及规则后方可激活。")
     lines.append("")
 
     return "\n".join(lines)
