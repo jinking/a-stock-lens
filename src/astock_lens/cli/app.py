@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import sys
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -1519,6 +1520,171 @@ def sync_valuation(
             json.dumps(
                 {
                     "dataset": "valuation",
+                    "as_of": day.isoformat(),
+                    "requested_symbols": list(wanted),
+                    "covered_symbols": [
+                        symbol
+                        for symbol in wanted
+                        if symbol not in set(missing_symbols)
+                    ],
+                    "missing_symbols": list(missing_symbols),
+                    "stop_reason": stopped,
+                    "rounds": rounds,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        typer.echo(f"report: {output}")
+
+    if missing_symbols:
+        raise typer.Exit(code=1)
+
+
+def _covered_dividend_symbols(
+    day: datetime, root: Path | None = None
+) -> frozenset[str]:
+    """当前落地的分红事件数据里，真正出现的标的代码。"""
+    csv_root = root if root is not None else _csv_root()
+    path = csv_root / "neodata" / "dividend_history" / f"{day.date().isoformat()}.csv"
+    if not path.is_file():
+        return frozenset()
+    _, rows = read_raw_rows(path)
+    symbols: set[str] = set()
+    for row in rows:
+        if len(row) >= 3:
+            content = row[2]
+            for m in re.finditer(r"([0-9]{6}\.[A-Z]{2})", content):
+                symbols.add(m.group(1))
+    return frozenset(symbols)
+
+
+@app.command("sync-dividends")
+def sync_dividends(
+    as_of: Annotated[str, AS_OF_OPTION],
+    universe: Annotated[
+        Path,
+        typer.Option(
+            "--universe",
+            help="研究池名单：JSON 的 research_symbols，或 CSV 的 symbol 列。",
+        ),
+    ],
+    max_rounds: Annotated[
+        int,
+        typer.Option(
+            "--max-rounds",
+            help="最多补抓几轮；每轮只请求仍然缺的标的。技术上限，不是产品阈值。",
+        ),
+    ] = 2,
+    batch_size: Annotated[
+        int,
+        typer.Option(
+            "--batch-size",
+            help="一次请求最多带几只标的；默认 5。",
+        ),
+    ] = 5,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", help="只处理名单前 N 只，用于小规模探针。"),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", help="把本轮清单写成 JSON（含剩余缺口）。"),
+    ] = None,
+) -> None:
+    """按缺口批量补抓分红派息事件历史：多轮、可重跑、缺口显式。
+
+    落盘目标严格为 data/raw/neodata/dividend_history/YYYY-MM-DD.csv。
+    落地按块身份合并，后一轮不会冲掉前一轮。
+    一轮没有带来任何新标的就停下，并把剩余缺口原样报出。
+    """
+    day = _as_of(as_of)
+    if max_rounds <= 0:
+        raise typer.BadParameter("--max-rounds 必须为正")
+    if batch_size <= 0:
+        raise typer.BadParameter("--batch-size 必须为正")
+    if limit is not None and limit <= 0:
+        raise typer.BadParameter("--limit 必须为正")
+
+    try:
+        wanted = read_universe_symbols(universe)
+    except (OSError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    if limit is not None:
+        wanted = wanted[:limit]
+
+    provider = _neodata_provider(batch_size=batch_size)
+    health = provider.health()
+    if not health.healthy:
+        typer.echo(
+            f"provider {health.provider} is not usable: {health.message}", err=True
+        )
+        raise typer.Exit(code=1)
+
+    typer.echo(f"分红同步研究池: {len(wanted)} 只（as_of {day.date().isoformat()}）")
+    rounds: list[dict[str, object]] = []
+    stopped = "max_rounds"
+    for index in range(1, max_rounds + 1):
+        covered = _covered_dividend_symbols(day)
+        missing = tuple(symbol for symbol in wanted if symbol not in covered)
+        if not missing:
+            stopped = "covered"
+            typer.echo(f"round {index}: 已全覆盖，无需请求")
+            break
+
+        landing = land_neodata_blocks(
+            provider=provider,
+            root=_csv_root(),
+            dataset="dividend_history",
+            values=missing,
+            as_of=day,
+        )
+        after = _covered_dividend_symbols(day)
+        landed = tuple(symbol for symbol in missing if symbol in after)
+        still_missing = tuple(symbol for symbol in wanted if symbol not in after)
+        rounds.append(
+            {
+                "round": index,
+                "requested": len(missing),
+                "landed": len(landed),
+                "missing": len(still_missing),
+                "status": landing.status.value,
+                "note": landing.note,
+            }
+        )
+        typer.echo(
+            f"round {index}: 请求 {len(missing)} 只，落地 {len(landed)} 只，"
+            f"仍缺 {len(still_missing)} 只（{landing.status.value}）"
+        )
+        if landing.note:
+            typer.echo(f"  note: {landing.note}", err=True)
+        if not landed:
+            stopped = "no_progress"
+            typer.echo("本轮没有带来任何新标的，停止继续请求", err=True)
+            break
+    else:
+        stopped = "max_rounds"
+
+    covered = _covered_dividend_symbols(day)
+    missing_symbols = tuple(symbol for symbol in wanted if symbol not in covered)
+    typer.echo(
+        f"分红覆盖: {len(wanted) - len(missing_symbols)} / {len(wanted)}；"
+        f"缺口 {len(missing_symbols)} 只；停止原因 {stopped}"
+    )
+    if missing_symbols:
+        typer.echo(f"剩余缺口: {', '.join(missing_symbols[:20])}")
+        if len(missing_symbols) > 20:
+            typer.echo(f"  … 及其余 {len(missing_symbols) - 20} 只")
+
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            json.dumps(
+                {
+                    "dataset": "dividend_history",
                     "as_of": day.isoformat(),
                     "requested_symbols": list(wanted),
                     "covered_symbols": [
