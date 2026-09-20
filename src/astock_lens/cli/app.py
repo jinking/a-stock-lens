@@ -1057,15 +1057,17 @@ def daily(
 def _run_daily(day: datetime, *, land: bool) -> DailyRunResult:
     """Run the daily pipeline with the configured paths."""
     scanners = load_scanners(_strategy_dir())
+    factor_configs = _factor_configs()
+    factor_names = frozenset(config.name for config in factor_configs)
     try:
-        qualifiers = load_canonical_qualifiers()
+        qualifiers = load_canonical_qualifiers(known_factor_names=factor_names)
     except QualificationRuleNotConfigured:
         qualifiers = None
     return run_daily(
         csv_root=_csv_root(),
         as_of=day,
         universe_config=load_universe_config(_universe_config_path()),
-        factor_configs=_factor_configs(),
+        factor_configs=factor_configs,
         scanners=scanners,
         strategy_directory=_strategy_dir(),
         store=_store(),

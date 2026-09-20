@@ -448,6 +448,7 @@ def _build_candidates(context: _Context, state: _State) -> StageOutcome:
         )
     state.qualifications = stages.qualification_stage(
         strategy_results=state.strategy_results,
+        factor_results=state.factor_results,
         qualifiers=context.qualifiers,
     )
     market_validation_by_symbol: dict[str, MarketValidation] = {}

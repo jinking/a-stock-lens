@@ -42,7 +42,10 @@ from astock_lens.qualifications.contracts import (
     QualificationRuleNotConfigured,
     StrategyQualifier,
 )
-from astock_lens.qualifications.models import StrategyQualification
+from astock_lens.qualifications.models import (
+    QualificationContext,
+    StrategyQualification,
+)
 from astock_lens.strategies.contracts import StrategyContext, StrategyResult
 from astock_lens.strategies.registry import RegisteredStrategy
 from astock_lens.universe.builder import LIQUIDITY_FACTOR, UniverseBuilder
@@ -249,6 +252,7 @@ def strategy_stage(
 def qualification_stage(
     *,
     strategy_results: Sequence[StrategyResult],
+    factor_results: Sequence[FactorResult],
     qualifiers: Mapping[str, StrategyQualifier],
 ) -> tuple[StrategyQualification, ...]:
     """Evaluate eligible strategy results against their strategy's qualifier.
@@ -257,7 +261,14 @@ def qualification_stage(
     - Every eligible result's strategy_id must be in qualifiers.
     - Missing qualifier raises QualificationRuleNotConfigured.
     - No candidate objects are created here.
+
+    Qualification reads the symbol's **complete** Factor evidence
+    (``factor_results``), not just the strategy's scoring snapshot, so an
+    approved non-scoring factor stays available to the absolute rule. The
+    per-symbol index is built once to avoid rescanning the whole list.
     """
+    index = FactorResultIndex(factor_results)
+
     qualifications: list[StrategyQualification] = []
     for result in strategy_results:
         if not result.eligible:
@@ -267,7 +278,11 @@ def qualification_stage(
             raise QualificationRuleNotConfigured(
                 f"No qualifier configured for strategy '{result.strategy_id}'"
             )
-        qualifications.append(qualifier.qualify(result))
+        context = QualificationContext(
+            strategy_result=result,
+            factors=index.for_symbol(result.symbol),
+        )
+        qualifications.append(qualifier.qualify(context))
     return tuple(qualifications)
 
 
