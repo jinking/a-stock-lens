@@ -1737,3 +1737,30 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
     - `calibration.json`: `af9c5e91e510595304cc71cb31806cf9003ae6451591784537d6c963392fa09d`
     - `calibration.md`: `e2550effa6c562e228208737c6cb8d51f47b0bfedc623b891d38af9858c1651f`
 
+### 33.4 正式快照发布与等价性验证（任务 4）
+
+- **正式执行写入**：
+  - 运行 `astock daily --as-of 2026-09-19 --allow-incomplete`；
+  - 产出快照：
+    - `data/snapshots/FACTOR/2026-09-19.json` (80.5MB, 55,272 条记录)；
+    - `data/snapshots/UNIVERSE/2026-09-19.json` (774KB, 2,303 只研究池标的)；
+    - `data/snapshots/STRATEGY/2026-09-19.json` (290.6MB, 13,818 条策略评分)；
+  - `data/snapshots/CANDIDATE/2026-09-19.json` 依法未生成。
+- **调度阶段状态核验（`var/jobs/2026-09-19.json`）**：
+  - `NORMALIZE`：SUCCEEDED（1,675,723 行）；
+  - `COMPUTE_FACTORS`：SUCCEEDED（5,008 行入，120,192 行出）；
+  - `BUILD_UNIVERSE`：SUCCEEDED（5,565 行入，2,303 行出）；
+  - `RUN_STRATEGIES`：SUCCEEDED（2,303 行入，13,818 行出）；
+  - `GENERATE_DAILY_SNAPSHOT`：SUCCEEDED（写入 FACTOR, UNIVERSE, STRATEGY）；
+  - `DETECT_REGIME`：BLOCKED（缺少市场状态阈值，拒绝伪造）；
+  - `MARKET_VALIDATE`：BLOCKED（缺少技术/流动性验证阈值，拒绝伪造）；
+  - `RUN_SIGNALS`：BLOCKED（缺少买卖信号阈值，拒绝伪造）；
+  - `BUILD_CANDIDATES`：BLOCKED（无有效上游信号、未获所有者批准的绝对门槛，拒绝发布 Candidate）；
+  - `UPDATE_WATCHLIST`：BLOCKED（V1 状态流转需用户驱动与状态机验证）。
+- **与任务 2 只读分析全量逐条等价性比对**：
+  - STRATEGY：13,818 条记录完全等价；
+  - UNIVERSE：2,303 只研究池标的及字段完全等价；
+  - FACTOR：55,272 条记录完全等价。
+- **Candidate 绝对隔离性与 API 契约验证**：
+  - API 端点 `GET /candidates?as_of=2026-09-19` 返回 `404 {"detail": "no CANDIDATE snapshot for 2026-09-19"}`；
+  - `GET /strategies?as_of=2026-09-19` 正常返回六策略覆盖汇总，Value 达 1,578，GARP 达 849。
