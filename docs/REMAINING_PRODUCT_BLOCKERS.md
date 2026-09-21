@@ -385,3 +385,25 @@ PYTHONPATH= .venv/bin/python -m astock_lens.cli.app calibrate qualification-impa
    - 严禁修改已批准的 Dividend 门槛（`dividend_yield_ttm >= 3.0`）；
    - 严禁 Candidate 发布，待所有者批准因子定义后另立开发实施。
 
+### 9.7 Candidate v2 市场证据与信号发布审批进展（2026-09-21 更新）
+
+为彻底解决 Candidate 正确性与 5 维市场验证/环境信号发布语义，工程侧已严格按规范实施 Plan A 并推进 Plan B 前半段（Task 1~5）：
+1. **Plan A 正式完成并推送到远程**：
+   - 锁定确定性主策略绑定，杜绝跨策略指标污染与信号 fallback；
+   - 彻底删除 breadth 0.50 假兜底，市场证据缺失时 fail-closed；
+   - 快照不可变性（Immutability）强化锁定，严禁擦除生产快照绕过冲突。
+2. **Plan B 证据层已建立**：
+   - 完成个股量价证据 `StockMarketEvidence`（精确量比与排除未来数据）；
+   - 完成基准指数契约 `BenchmarkEvidence` 与安全阻断；
+   - 完成申万行业证据 `IndustryEvidence` 与层级安全边界（拒绝将 SW2 假装为 SW1）；
+   - 完成真实相对强弱 `relative_strength_60d`；
+   - 完成只读审计 CLI `astock calibrate candidate-v2-impact`。
+3. **决策包已呈报（Task 6）**：
+   - 决策材料包：[`docs/decision-packets/2026-09-21-candidate-v2-market-evidence-decision.md`](file:///Users/huangjinjin/Documents/ChatGPT/a-stock-lens/docs/decision-packets/2026-09-21-candidate-v2-market-evidence-decision.md)；
+   - 明确呈报 6 大核心决策（基准公式、极端波动率、行业层级、BREAKDOWN/TREND_WEAKEN/NO_SIGNAL 候选发布语义）；
+   - 基于 2026-09-19 真实全量快照 621 只合格股票给出确切分布数据；
+4. **Mandatory OWNER STOP Gate（强制停机等待批复）**：
+   - 保持 `pipelines/daily.py` 中 `BUILD_CANDIDATES` 阻断；
+   - 严禁在所有者正式签署批复前推进 Task 7 生产接线与 Candidate v2 发布。
+
+
