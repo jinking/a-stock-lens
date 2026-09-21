@@ -296,6 +296,71 @@ def test_stock_profile_reads_the_stored_evidence(local_tmp: Path) -> None:
     assert "lineage" in result.stdout
 
 
+def test_stock_profile_shows_candidate_explanation(local_tmp: Path) -> None:
+    """Task 3: 验证 stock profile 详细输出候选的主策略、合格策略、市场验证、信号及风险解释。"""
+    from astock_lens.candidates.models import Candidate
+    from astock_lens.data.snapshots.store import JsonSnapshotStore
+    from astock_lens.domain.enums import MarketValidation, NextAction, Signal
+    from astock_lens.domain.models import SnapshotLineage
+    from astock_lens.qualifications.models import StrategyQualification
+    from astock_lens.universe.models import UniverseSnapshot
+
+    snap_root = local_tmp / "snapshots"
+    as_of = datetime(2026, 9, 19, 15, 0, tzinfo=UTC)
+    store = JsonSnapshotStore(snap_root)
+    u_snap = UniverseSnapshot(
+        snapshot_id="2026-09-19:u1",
+        config_digest="digest123",
+        as_of=as_of,
+        included=("688617.SH",),
+        exclusions=(),
+        lineage=SnapshotLineage(universe_snapshot="2026-09-19:u1"),
+    )
+    store.write(SnapshotKind.UNIVERSE, as_of, [u_snap])
+    qual = StrategyQualification(
+        symbol="688617.SH",
+        strategy_id="growth",
+        strategy_version="v1",
+        qualification_version="v1",
+        qualified=True,
+        percentile_pass=True,
+        absolute_pass=True,
+        rank_percentile=0.96,
+        as_of=as_of,
+    )
+    cand = Candidate(
+        symbol="688617.SH",
+        as_of=as_of,
+        next_action=NextAction.WATCH,
+        primary_strategy_id="growth",
+        strategy_qualifications=(qual,),
+        market_validation=MarketValidation.NEUTRAL,
+        signal=Signal.TREND_WEAKEN,
+        reasons=("qualified for growth",),
+        risks=("技术信号提示走弱风险 (TREND_WEAKEN)",),
+        lineage=SnapshotLineage(
+            universe_snapshot="2026-09-19:u1",
+            factor_version="v1",
+            strategy_version="v1",
+            qualification_version="v1",
+            regime_version="v1",
+            market_validation_version="v1",
+            signal_version="v1",
+        ),
+    )
+    store.write(SnapshotKind.CANDIDATE, as_of, [cand])
+
+    result = _invoke(local_tmp, "stock", "688617.SH", "--as-of", "2026-09-19")
+    assert result.exit_code == 0, result.output
+    assert "primary_strategy: growth" in result.stdout
+    assert "qualified_strategies: growth" in result.stdout
+    assert "market_validation: NEUTRAL" in result.stdout
+    assert "signal: TREND_WEAKEN" in result.stdout
+    assert "risk: 技术信号提示走弱风险 (TREND_WEAKEN)" in result.stdout
+    assert "validation=v1" in result.stdout
+    assert "signal=v1" in result.stdout
+
+
 def test_stock_profile_reports_not_published_when_no_candidate_snapshot(
     local_tmp: Path,
 ) -> None:

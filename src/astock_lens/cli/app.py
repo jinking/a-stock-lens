@@ -803,6 +803,10 @@ def stock(symbol: str, as_of: Annotated[str, AS_OF_OPTION]) -> None:
         for reason in result.reasons:
             typer.echo(f"      {reason}")
 
+    date_str = day.date().isoformat()
+    store = _store()
+    is_candidate_snapshot_published = date_str in store.dates(SnapshotKind.CANDIDATE)
+
     candidates = [
         item
         for item in _snapshot_records(SnapshotKind.CANDIDATE, day, Candidate)
@@ -810,8 +814,32 @@ def stock(symbol: str, as_of: Annotated[str, AS_OF_OPTION]) -> None:
     ]
     if candidates:
         candidate = candidates[0]
-        typer.echo(f"  candidate: {candidate.next_action}")
+        typer.echo(f"  candidate: {candidate.next_action.value} (published)")
+        if candidate.primary_strategy_id:
+            typer.echo(f"    primary_strategy: {candidate.primary_strategy_id}")
+        qualified_ids = [
+            q.strategy_id for q in candidate.strategy_qualifications if q.qualified
+        ]
+        if not qualified_ids:
+            qualified_ids = [
+                r.strategy_id
+                for r in candidate.strategy_results
+                if r.rank_percentile is not None and r.rank_percentile >= 0.90
+            ]
+        if qualified_ids:
+            typer.echo(f"    qualified_strategies: {', '.join(qualified_ids)}")
+        if candidate.market_validation is not None:
+            typer.echo(f"    market_validation: {candidate.market_validation.value}")
+        if candidate.signal is not None:
+            typer.echo(f"    signal: {candidate.signal.value}")
+        for rsn in candidate.reasons:
+            typer.echo(f"    reason: {rsn}")
+        for rsk in candidate.risks:
+            typer.echo(f"    risk: {rsk}")
         lineage = candidate.lineage
+    elif is_candidate_snapshot_published:
+        typer.echo("  candidate: not selected for this date")
+        lineage = strategies[0].lineage if strategies else universe.lineage
     elif strategies:
         # 有策略结果却没有候选：只陈述「当天没有发布 Candidate」这一事实，
         # 不猜测也不宣称原因——资格配置是否获批不在这一行的判断范围内。
@@ -819,10 +847,21 @@ def stock(symbol: str, as_of: Annotated[str, AS_OF_OPTION]) -> None:
         lineage = strategies[0].lineage
     else:
         lineage = universe.lineage
-    typer.echo(
-        f"  lineage: universe={lineage.universe_snapshot} "
-        f"factor={lineage.factor_version} strategy={lineage.strategy_version}"
-    )
+
+    lineage_parts = [
+        f"universe={lineage.universe_snapshot}",
+        f"factor={lineage.factor_version}",
+        f"strategy={lineage.strategy_version}",
+    ]
+    if lineage.qualification_version:
+        lineage_parts.append(f"qualification={lineage.qualification_version}")
+    if lineage.regime_version:
+        lineage_parts.append(f"regime={lineage.regime_version}")
+    if lineage.market_validation_version:
+        lineage_parts.append(f"validation={lineage.market_validation_version}")
+    if lineage.signal_version:
+        lineage_parts.append(f"signal={lineage.signal_version}")
+    typer.echo(f"  lineage: {' '.join(lineage_parts)}")
 
     entry = _watchlist_store().read(symbol)
     if entry is not None:
