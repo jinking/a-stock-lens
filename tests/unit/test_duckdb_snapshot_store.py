@@ -93,6 +93,20 @@ def test_rewriting_the_same_key_with_different_content_is_refused(
     ]
 
 
+def test_candidate_snapshot_conflict_refused_across_both_stores(
+    store: SnapshotStore,
+) -> None:
+    """CANDIDATE 冲突在两种存储实现中均强制拒绝，不可覆写。"""
+    store.write(SnapshotKind.CANDIDATE, AS_OF, (_bar("600000.SH"),))
+
+    with pytest.raises(SnapshotConflictError):
+        store.write(SnapshotKind.CANDIDATE, AS_OF, (_bar("600519.SH"),))
+
+    assert [
+        record["symbol"] for record in store.read(SnapshotKind.CANDIDATE, AS_OF)
+    ] == ["600000.SH"]
+
+
 def test_dates_are_kept_apart(store: SnapshotStore) -> None:
     store.write(SnapshotKind.FACTOR, AS_OF, (_bar("600000.SH"),))
     store.write(SnapshotKind.FACTOR, NEXT_DAY, (_bar("600519.SH"),))

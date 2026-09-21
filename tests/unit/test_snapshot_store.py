@@ -141,3 +141,21 @@ def test_an_empty_snapshot_conflicts_with_a_measured_one(local_tmp: Path) -> Non
 
     with pytest.raises(SnapshotConflictError):
         store.write(SnapshotKind.FACTOR, AS_OF, [_factor_result()])
+
+
+def test_candidate_snapshot_conflict_cannot_be_overwritten_or_bypassed(
+    local_tmp: Path,
+) -> None:
+    """CANDIDATE 标准快照同一日期内容不同时必须坚决抛出 SnapshotConflictError，严禁就地覆写或绕过。"""
+    store = JsonSnapshotStore(local_tmp)
+    store.write(SnapshotKind.CANDIDATE, AS_OF, [_factor_result("600000.SH")])
+
+    with pytest.raises(SnapshotConflictError) as raised:
+        store.write(SnapshotKind.CANDIDATE, AS_OF, [_factor_result("600519.SH")])
+
+    assert "CANDIDATE" in str(raised.value)
+    assert "2026-09-04" in str(raised.value)
+    # 被拒绝的写入不得造成任何副作用：原始候选快照完好无损
+    assert [
+        record["symbol"] for record in store.read(SnapshotKind.CANDIDATE, AS_OF)
+    ] == ["600000.SH"]

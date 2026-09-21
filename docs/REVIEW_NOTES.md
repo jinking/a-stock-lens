@@ -2119,5 +2119,20 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
 - **Value / Quality / Growth 策略**：20日收益率中位数均在 -2.6% ~ -5.2% 区间，真实反映了结构性行情中的估值压制与震荡筑底，证明绝对阈值必须依策略属性差异化配置；
 - **流动性底线事实**：各策略合格池 20 日均成交额 P10 均在 1.7 亿元以上，为系统设定 1.5 亿/1.0 亿流动性安全底线提供了坚实数据依据。
 
+## 三十八、快照防冲突与不可变性锁定（Plan A Task 8，2026-09-21）
+
+### 38.1 不可变性安全原则
+
+根据设计架构要求与数据质量铁律，正式快照具有绝对不可变性（Immutability）：
+1. **严格内容哈希判决**：无论 JSON 还是 DuckDB 存储实现，当同一日期已存在相同 `kind` 快照且内容不同时，必须无条件抛出 `SnapshotConflictError`；
+2. **严禁自动搬移或删除绕过**：代码库经过严格静态审查，不存在任何在遇到快照冲突时自动搬移（move）、重命名（rename）或删除（unlink/rmdir）既有标准生产快照（`data/snapshots/`）的旁路逻辑；
+3. **回放与测试隔离边界**：任何回溯测试、重估实验或历史验收产物，一律强制写入 `var/acceptance/<run-name>/` 或受隔离的临时目录，绝不允许直接污染或覆写 canonical snapshot 生产路径。
+
+### 38.2 补充回归测试覆盖
+
+- `tests/unit/test_snapshot_store.py::test_candidate_snapshot_conflict_cannot_be_overwritten_or_bypassed`：锁定 JSON 存储中 CANDIDATE 快照的防覆写与防绕过能力，验证冲突发生后原有快照数据完整无损。
+- `tests/unit/test_duckdb_snapshot_store.py::test_candidate_snapshot_conflict_refused_across_both_stores`：在跨实现协议测试中强化 CANDIDATE 快照相同键不同内容的抛错与防覆写一致性。
+
+
 
 
