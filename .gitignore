@@ -42,3 +42,4 @@ var/*.log
 tools/bin/*
 !tools/bin/.gitkeep
 tests/.tmp/
+.worktrees/
