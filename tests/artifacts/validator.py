@@ -848,6 +848,74 @@ def _candidate_checks(
             )
         )
 
+    # Signal publication rules (Decision D1, E1, F1 independent replay)
+    sig = _text(record.get("signal"))
+    if sig == "BREAKDOWN":
+        findings.append(
+            ArtifactFinding(
+                check="signal_veto",
+                symbol=symbol,
+                observed="candidate has signal 'BREAKDOWN' which is vetoed by approved Decision D1",
+            )
+        )
+    elif sig == "TREND_WEAKEN":
+        action = _text(record.get("next_action"))
+        if action != "WATCH":
+            findings.append(
+                ArtifactFinding(
+                    check="signal_action",
+                    symbol=symbol,
+                    observed=(
+                        f"candidate with signal 'TREND_WEAKEN' must have next_action 'WATCH', "
+                        f"observed {action!r}"
+                    ),
+                )
+            )
+        risks = record.get("risks")
+        risk_strs = [str(r) for r in risks] if isinstance(risks, (list, tuple)) else []
+        if not any("TREND_WEAKEN" in r or "走弱" in r for r in risk_strs):
+            findings.append(
+                ArtifactFinding(
+                    check="signal_risk_warning",
+                    symbol=symbol,
+                    observed="candidate with signal 'TREND_WEAKEN' lacks weaken risk warning in risks",
+                )
+            )
+    elif sig == "NO_SIGNAL":
+        action = _text(record.get("next_action"))
+        if action != "WATCH":
+            findings.append(
+                ArtifactFinding(
+                    check="signal_action",
+                    symbol=symbol,
+                    observed=(
+                        f"candidate with signal 'NO_SIGNAL' must have next_action 'WATCH', "
+                        f"observed {action!r}"
+                    ),
+                )
+            )
+
+    # Market validation independent replay from serialized evidence
+    for res in _cited_results(record):
+        for factor in _cited_factors(res):
+            if _text(factor.get("factor")) == "avg_amount_20d":
+                raw_val = factor.get("raw_value")
+                if (
+                    isinstance(raw_val, (int, float))
+                    and not isinstance(raw_val, bool)
+                    and float(raw_val) < 100_000_000.0
+                ):
+                    findings.append(
+                        ArtifactFinding(
+                            check="market_validation_liquidity_veto",
+                            symbol=symbol,
+                            observed=(
+                                f"avg_amount_20d {raw_val} < 1.0e8 triggers liquidity veto, "
+                                "candidate cannot be published"
+                            ),
+                        )
+                    )
+
     return findings
 
 

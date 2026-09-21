@@ -137,3 +137,53 @@ def test_valid_candidate_semantic_artifact_passes() -> None:
     good_record = _candidate_record()
     findings = validate_snapshot("CANDIDATE", [good_record], as_of=AS_OF)
     assert findings == ()
+
+
+def test_breakdown_signal_in_candidate_fails_independent_validation() -> None:
+    """Task 8: 独立校验器复算决策 D1，任何含有 BREAKDOWN 破位信号的候选产物必须报错。"""
+    bad_record = _candidate_record(signal="BREAKDOWN")
+    findings = validate_snapshot("CANDIDATE", [bad_record], as_of=AS_OF)
+    checks = [f.check for f in findings]
+    assert "signal_veto" in checks
+
+
+def test_trend_weaken_wrong_action_fails_independent_validation() -> None:
+    """Task 8: 独立校验器复算决策 E1，含有 TREND_WEAKEN 信号的候选动作必须为 WATCH。"""
+    bad_record = _candidate_record(signal="TREND_WEAKEN", next_action="DEEP_RESEARCH")
+    findings = validate_snapshot("CANDIDATE", [bad_record], as_of=AS_OF)
+    checks = [f.check for f in findings]
+    assert "signal_action" in checks
+
+
+def test_trend_weaken_missing_warning_fails_independent_validation() -> None:
+    """Task 8: 独立校验器复算决策 E1，含有 TREND_WEAKEN 信号的候选必须在 risks 中携带走弱预警。"""
+    bad_record = _candidate_record(signal="TREND_WEAKEN", risks=[])
+    findings = validate_snapshot("CANDIDATE", [bad_record], as_of=AS_OF)
+    checks = [f.check for f in findings]
+    assert "signal_risk_warning" in checks
+
+
+def test_liquidity_veto_violation_in_candidate_fails_independent_validation() -> None:
+    """Task 8: 独立校验器独立复算 5D 流动性底线，若引用均成交额击穿 1 亿警戒线必须报错。"""
+    bad_record = _candidate_record(
+        strategy_results=[
+            {
+                "symbol": "600000.SH",
+                "strategy_id": "momentum",
+                "strategy_version": "v1",
+                "as_of": AS_OF.isoformat(),
+                "score": 95.0,
+                "rank_percentile": 0.98,
+                "factor_snapshot": [
+                    {
+                        "symbol": "600000.SH",
+                        "factor": "avg_amount_20d",
+                        "raw_value": 80_000_000.0,  # 0.8亿 < 1.0亿
+                    }
+                ],
+            }
+        ]
+    )
+    findings = validate_snapshot("CANDIDATE", [bad_record], as_of=AS_OF)
+    checks = [f.check for f in findings]
+    assert "market_validation_liquidity_veto" in checks
