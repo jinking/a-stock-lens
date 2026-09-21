@@ -27,6 +27,11 @@ class DefaultSignalDetector:
 
     def detect(self, context: SignalContext) -> SignalResult:
         """Detect the market state signal for the symbol."""
+        if not context.strategy_id:
+            raise ValueError(
+                f"Signal detection requires an explicit strategy_id for {context.symbol}, got {context.strategy_id!r}"
+            )
+
         factor_map: dict[str, FactorResult] = {
             f.factor: f
             for f in context.factors
@@ -80,7 +85,7 @@ class DefaultSignalDetector:
             )
 
         # 3. 策略特定技术特征判定
-        elif context.strategy_id in ("momentum", None):
+        elif context.strategy_id == "momentum":
             if prox is not None and prox >= 0.95:
                 signal = Signal.BREAKOUT
                 reasons.append(f"向上突破一年新高区域 (距52周最高点 {prox:.2f})")
@@ -108,7 +113,6 @@ class DefaultSignalDetector:
         if signal == Signal.NO_SIGNAL and context.strategy_id in (
             "value",
             "dividend",
-            None,
         ):
             if (
                 div_yield is not None
@@ -127,10 +131,12 @@ class DefaultSignalDetector:
         if not reasons:
             reasons.append("当前技术特征处于中性无特殊形态")
 
+        strat_id = context.strategy_id or ""
         return SignalResult(
             symbol=context.symbol,
             signal=signal,
             as_of=context.as_of,
+            strategy_id=strat_id,
             reasons=tuple(reasons),
             lineage=SnapshotLineage(signal_version=self.version),
         )

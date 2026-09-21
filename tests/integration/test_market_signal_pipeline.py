@@ -137,6 +137,7 @@ def test_market_signal_pipeline_end_to_end_assembly() -> None:
         symbols=symbols,
         factor_results=factors,
         as_of=AS_OF,
+        strategy_by_symbol={s: "momentum" for s in symbols},
     )
     assert len(validation_results) == 3
     mv_map = {r.symbol: r.status for r in validation_results}
@@ -149,6 +150,7 @@ def test_market_signal_pipeline_end_to_end_assembly() -> None:
         symbols=symbols,
         factor_results=factors,
         as_of=AS_OF,
+        strategy_by_symbol={s: "momentum" for s in symbols},
         market_regime=regime_res.regime,
     )
     assert len(signal_results) == 3

@@ -53,6 +53,11 @@ class MarketValidator:
 
     def validate(self, context: MarketValidationContext) -> MarketValidationResult:
         """Validate market behaviour for a given symbol and strategy."""
+        if not context.strategy_id:
+            raise ValueError(
+                f"Market validation requires an explicit strategy_id for {context.symbol}, got {context.strategy_id!r}"
+            )
+
         factor_map: dict[str, FactorResult] = {
             f.factor: f
             for f in context.factors

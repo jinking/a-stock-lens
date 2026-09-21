@@ -28,6 +28,7 @@ class SignalResult(DomainRecord):
     symbol: str
     signal: Signal
     as_of: datetime
+    strategy_id: str
     lineage: SnapshotLineage
     reasons: tuple[str, ...] = ()
 

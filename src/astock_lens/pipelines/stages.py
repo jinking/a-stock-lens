@@ -439,23 +439,34 @@ def market_regime_stage(
     return active_detector.detect(context)
 
 
+class MissingStrategyMappingError(ValueError):
+    """Raised when a symbol lacks an explicit strategy mapping in market validation or signal detection."""
+
+
 def market_validation_stage(
     *,
-    symbols: Sequence[str],
+    strategy_by_symbol: Mapping[str, str],
     factor_results: Sequence[FactorResult],
     as_of: datetime,
-    strategy_id: str = "momentum",
+    symbols: Sequence[str] | None = None,
     validator: MarketValidator | None = None,
 ) -> tuple[MarketValidationResult, ...]:
     """Validate candidate market behavior against the 5-dimension matrix."""
     active_validator = validator or MarketValidator()
     index = FactorResultIndex(factor_results)
+    target_symbols = (
+        symbols if symbols is not None else sorted(strategy_by_symbol.keys())
+    )
     results: list[MarketValidationResult] = []
-    for sym in symbols:
+    for sym in target_symbols:
+        if sym not in strategy_by_symbol or not strategy_by_symbol[sym]:
+            raise MissingStrategyMappingError(
+                f"Missing strategy mapping for symbol: {sym}"
+            )
         factors = index.for_symbol(sym)
         context = MarketValidationContext(
             symbol=sym,
-            strategy_id=strategy_id,
+            strategy_id=strategy_by_symbol[sym],
             as_of=as_of,
             factors=factors,
         )
@@ -465,31 +476,32 @@ def market_validation_stage(
 
 def signal_stage(
     *,
-    symbols: Sequence[str],
+    strategy_by_symbol: Mapping[str, str],
     factor_results: Sequence[FactorResult],
     as_of: datetime,
-    strategy_id: str | None = None,
-    strategy_by_symbol: Mapping[str, str] | None = None,
     market_regime: MarketRegime | None = None,
+    symbols: Sequence[str] | None = None,
     detector: SignalDetector | None = None,
 ) -> tuple[SignalResult, ...]:
     """Detect technical market state signals."""
     active_detector = detector or DefaultSignalDetector()
     index = FactorResultIndex(factor_results)
+    target_symbols = (
+        symbols if symbols is not None else sorted(strategy_by_symbol.keys())
+    )
     results: list[SignalResult] = []
-    for sym in symbols:
+    for sym in target_symbols:
+        if sym not in strategy_by_symbol or not strategy_by_symbol[sym]:
+            raise MissingStrategyMappingError(
+                f"Missing strategy mapping for symbol: {sym}"
+            )
         factors = index.for_symbol(sym)
-        sid = (
-            strategy_by_symbol.get(sym)
-            if strategy_by_symbol is not None
-            else strategy_id
-        )
         context = SignalContext(
             symbol=sym,
             as_of=as_of,
             factors=factors,
             market_regime=market_regime,
-            strategy_id=sid,
+            strategy_id=strategy_by_symbol[sym],
         )
         results.append(active_detector.detect(context))
     return tuple(results)
