@@ -2659,3 +2659,110 @@ def calibrate_market_signal_readiness(
     typer.echo("Market & signal readiness report written:")
     typer.echo(f"  {json_path}")
     typer.echo(f"  {md_path}")
+
+
+@calibrate_app.command("candidate-v2-impact")
+def calibrate_candidate_v2_impact_cmd(
+    as_of: Annotated[
+        str,
+        typer.Option(
+            "--as-of",
+            help="Trade date, YYYY-MM-DD.",
+        ),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option(
+            "--output-dir",
+            help="Directory where the candidate v2 impact audit report will be written.",
+        ),
+    ],
+) -> None:
+    """Audit Candidate v2 5D market evidence and signal impact on qualified candidates.
+
+    Strictly read-only:
+    - reads stored FACTOR and STRATEGY snapshots;
+    - reads normalized bars and industry landing files if present;
+    - audits 5D evidence availability and signal breakdown distributions;
+    - writes candidate-v2-impact-YYYY-MM-DD.json and .md under output_dir.
+    """
+    from astock_lens.calibration.candidate_v2_impact import (
+        compute_candidate_v2_impact,
+        render_candidate_v2_impact_markdown,
+    )
+
+    day = _as_of(as_of)
+    factor_results = _snapshot_records(SnapshotKind.FACTOR, day, FactorResult)
+    strategy_results = _snapshot_records(SnapshotKind.STRATEGY, day, StrategyResult)
+
+    if not factor_results:
+        typer.echo(
+            f"no FACTOR snapshot for {day.date().isoformat()}: run "
+            "`astock daily` to produce it first",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if not strategy_results:
+        typer.echo(
+            f"no STRATEGY snapshot for {day.date().isoformat()}: run "
+            "`astock daily` to produce it first",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    factor_names = frozenset(config.name for config in _factor_configs())
+    qualifiers = load_canonical_qualifiers(known_factor_names=factor_names)
+
+    qualifications = compute_strategy_qualifications(
+        strategy_results=strategy_results,
+        factor_results=factor_results,
+        qualifiers=qualifiers,
+    )
+
+    outcome = stages.normalize_stage(
+        csv_root=_csv_root(),
+        as_of=day,
+        dataset=_dataset(),
+        securities_dataset=_securities_dataset(),
+    )
+    bars = outcome.bars.daily_bars
+
+    industry_file = _csv_root() / "industry" / f"{day.date().isoformat()}.csv"
+    mapped_symbols: set[str] = set()
+    if industry_file.is_file():
+        from astock_lens.data.sync import read_industry_memberships
+
+        try:
+            memberships = read_industry_memberships(industry_file)
+            mapped_symbols = {m.symbol for m in memberships}
+        except (OSError, ValueError):
+            mapped_symbols = set()
+
+    benchmark_available = False
+
+    report = compute_candidate_v2_impact(
+        qualifications=qualifications,
+        factors=factor_results,
+        bars=bars,
+        industry_mapped_symbols=mapped_symbols,
+        benchmark_available=benchmark_available,
+        as_of=day,
+    )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    date_str = day.strftime("%Y-%m-%d")
+    json_path = output_dir / f"candidate-v2-impact-{date_str}.json"
+    md_path = output_dir / f"candidate-v2-impact-{date_str}.md"
+
+    json_path.write_text(
+        json.dumps(report.model_dump(mode="json"), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    md_path.write_text(
+        render_candidate_v2_impact_markdown(report),
+        encoding="utf-8",
+    )
+
+    typer.echo("Candidate v2 impact audit report written:")
+    typer.echo(f"  {json_path}")
+    typer.echo(f"  {md_path}")
