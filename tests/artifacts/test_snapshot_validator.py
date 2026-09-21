@@ -73,6 +73,7 @@ def _candidate_record(**overrides: object) -> dict[str, object]:
         "symbol": "600000.SH",
         "as_of": AS_OF.isoformat(),
         "next_action": "WATCH",
+        "primary_strategy_id": "momentum",
         "reasons": (),
         "risks": (),
         "candidate_policy_version": "v1",
@@ -81,6 +82,7 @@ def _candidate_record(**overrides: object) -> dict[str, object]:
                 "symbol": "600000.SH",
                 "strategy_id": "momentum",
                 "qualified": True,
+                "rank_percentile": 0.95,
                 "percentile_floor": 0.90,
                 "as_of": AS_OF.isoformat(),
                 "lineage": {"qualification_version": "v1"},
@@ -92,6 +94,9 @@ def _candidate_record(**overrides: object) -> dict[str, object]:
             "strategy_version": "v1",
             "qualification_version": "v1",
             "candidate_policy_version": "v1",
+            "regime_version": "v1",
+            "market_validation_version": "v1",
+            "signal_version": "v1",
             "universe_snapshot": "2026-09-04:abc",
         },
         "strategy_results": [_strategy_record()],
@@ -542,7 +547,51 @@ def test_real_candidate_snapshots_from_daily_pipeline_validate_cleanly(
         candidate_policy=RepresentativeCandidatePolicy(version="v1"),
     )
 
-    assert len(result.candidates) > 0
+    from astock_lens.domain.enums import JobStage
+    from astock_lens.jobs.models import JobStatus
+    from astock_lens.pipelines import stages
+
+    runs_by_type = {r.job_type: r for r in result.runs}
+    # 门禁验证：因 5D 证据未齐，生产调度 BUILD_CANDIDATES 必须处于安全阻断状态
+    assert runs_by_type[JobStage.BUILD_CANDIDATES].status == JobStatus.BLOCKED
+
+    # 为验证独立校验器对真实候选快照语义与跨快照引用的审查能力，由 stages 构建装配完整血缘的快照并落盘
+    assert result.universe is not None
+    quals = stages.qualification_stage(
+        strategy_results=result.strategy_results,
+        factor_results=result.factor_results,
+        qualifiers=qualifiers,
+    )
+    strat_by_sym = {q.symbol: q.strategy_id for q in quals if q.qualified}
+    val_results = stages.market_validation_stage(
+        strategy_by_symbol=strat_by_sym,
+        factor_results=result.factor_results,
+        as_of=AS_OF,
+    )
+    sig_results = stages.signal_stage(
+        strategy_by_symbol=strat_by_sym,
+        factor_results=result.factor_results,
+        as_of=AS_OF,
+    )
+    lineage = stages.lineage_for(
+        universe=result.universe,
+        factor_configs=configs_factors,
+        scanners=scanners,
+        regime_version="v1",
+        market_validation_version="v1",
+        signal_version="v1",
+    )
+    candidates = stages.candidate_stage(
+        strategy_results=result.strategy_results,
+        qualifications=quals,
+        market_validation_by_symbol={r.symbol: r.status for r in val_results},
+        signal_by_symbol={r.symbol: r.signal for r in sig_results},
+        lineage=lineage,
+        as_of=AS_OF,
+        policy=RepresentativeCandidatePolicy(version="v1"),
+    )
+    assert len(candidates) > 0
+    store.write(SnapshotKind.CANDIDATE, AS_OF, candidates)
 
     candidate_records = store.read(SnapshotKind.CANDIDATE, AS_OF)
     factor_records = store.read(SnapshotKind.FACTOR, AS_OF)

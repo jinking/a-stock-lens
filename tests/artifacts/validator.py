@@ -67,6 +67,7 @@ REQUIRED_KEYS: dict[str, frozenset[str]] = {
             "symbol",
             "as_of",
             "next_action",
+            "primary_strategy_id",
             "lineage",
             "strategy_results",
             "strategy_qualifications",
@@ -86,6 +87,9 @@ VERSION_KEYS: dict[str, tuple[str, ...]] = {
         "strategy_version",
         "qualification_version",
         "candidate_policy_version",
+        "regime_version",
+        "market_validation_version",
+        "signal_version",
     ),
 }
 
@@ -758,6 +762,91 @@ def _candidate_checks(
                         ),
                     )
                 )
+
+    # Primary strategy validation
+    primary_strat = _text(record.get("primary_strategy_id"))
+    if not primary_strat:
+        findings.append(
+            ArtifactFinding(
+                check="candidate_primary_strategy",
+                symbol=symbol,
+                observed="primary_strategy_id is missing or empty",
+            )
+        )
+    elif qualified_strats:
+        if primary_strat not in qualified_strats:
+            findings.append(
+                ArtifactFinding(
+                    check="candidate_primary_strategy",
+                    symbol=symbol,
+                    observed=(
+                        f"primary_strategy_id {primary_strat!r} has no matching "
+                        "qualified strategy_qualification"
+                    ),
+                )
+            )
+        else:
+            # Deterministic check: highest rank_percentile, then ascending strategy_id
+            qualified_qual_objs = [
+                q
+                for q in quals
+                if q.get("qualified") is True and _text(q.get("strategy_id"))
+            ]
+
+            def _strat_rank_key(q: Mapping[str, object]) -> tuple[float, str]:
+                p = q.get("rank_percentile")
+                pval = float(p) if isinstance(p, (int, float)) else -1.0
+                return (-pval, _text(q.get("strategy_id")))
+
+            sorted_quals = sorted(qualified_qual_objs, key=_strat_rank_key)
+            expected_primary = _text(sorted_quals[0].get("strategy_id"))
+            if primary_strat != expected_primary:
+                findings.append(
+                    ArtifactFinding(
+                        check="candidate_primary_strategy",
+                        symbol=symbol,
+                        observed=(
+                            f"primary_strategy_id {primary_strat!r} is not the top "
+                            f"qualified strategy (expected {expected_primary!r})"
+                        ),
+                    )
+                )
+
+    # Signal strategy alignment
+    sig_strat = _text(record.get("signal_strategy_id"))
+    if not sig_strat:
+        sig_val = record.get("signal")
+        if isinstance(sig_val, Mapping):
+            sig_strat = _text(sig_val.get("strategy_id"))
+    if sig_strat and primary_strat and sig_strat != primary_strat:
+        findings.append(
+            ArtifactFinding(
+                check="signal_strategy_match",
+                symbol=symbol,
+                observed=(
+                    f"signal strategy_id {sig_strat!r} does not match "
+                    f"primary_strategy_id {primary_strat!r}"
+                ),
+            )
+        )
+
+    # Market validation strategy alignment
+    mv_strat = _text(record.get("market_validation_strategy_id"))
+    if not mv_strat:
+        mv_val = record.get("market_validation")
+        if isinstance(mv_val, Mapping):
+            mv_strat = _text(mv_val.get("strategy_id"))
+    if mv_strat and primary_strat and mv_strat != primary_strat:
+        findings.append(
+            ArtifactFinding(
+                check="market_validation_strategy_match",
+                symbol=symbol,
+                observed=(
+                    f"market validation strategy_id {mv_strat!r} does not match "
+                    f"primary_strategy_id {primary_strat!r}"
+                ),
+            )
+        )
 
     return findings
 
