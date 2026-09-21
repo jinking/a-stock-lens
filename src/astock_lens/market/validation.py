@@ -4,7 +4,7 @@ Based on approved decision packet 2026-09-20:
 - 5 Dimensions:
   1. Stock Trend: ret_20d, proximity_52w_high (strategy-differentiated)
   2. Industry Trend: industry_excess_return
-  3. Relative Strength: ret_60d
+  3. Relative Strength: relative_strength_60d
   4. Volume/Price: vol_ratio
   5. Liquidity Floor: avg_amount_20d (hard veto threshold: < 1.0e8)
 - State Matrix:
@@ -69,9 +69,22 @@ class MarketValidator:
             if f.status == DataStatus.VALUE and f.raw_value is not None
         }
 
-        if not factor_map:
+        missing: list[str] = []
+        if factor_map.get("ret_20d") is None:
+            missing.append("ret_20d")
+        if factor_map.get("proximity_52w_high") is None:
+            missing.append("proximity_52w_high")
+        if factor_map.get("avg_amount_20d") is None:
+            missing.append("avg_amount_20d")
+        if context.industry_excess_return is None:
+            missing.append("industry_excess_return_20d")
+        if context.relative_strength_60d is None:
+            missing.append("relative_strength_60d")
+        if context.vol_ratio is None:
+            missing.append("volume_ratio_5_20")
+        if missing:
             raise MarketValidationEvidenceIncomplete(
-                f"Missing market validation factors for symbol {context.symbol}"
+                f"{context.symbol} missing required 5D evidence: {', '.join(missing)}"
             )
 
         reasons: list[str] = []
@@ -80,113 +93,88 @@ class MarketValidator:
         negative_count = 0
 
         # 1. 维度 5: 流动性底线 (优先检查一票否决警戒线)
-        avg_amount_res = factor_map.get("avg_amount_20d")
+        avg_amount = float(factor_map["avg_amount_20d"].raw_value)  # type: ignore[arg-type]
         liquidity_vetoed = False
-        if avg_amount_res is None:
-            risks.append("缺少 20 日均成交额 (avg_amount_20d) 因子，流动性数据不完备")
+        if avg_amount < 100_000_000.0:  # < 1.0 亿元
+            liquidity_vetoed = True
+            negative_count += 1
+            risks.append(
+                f"20日均成交额 ({avg_amount / 1e8:.2f}亿) 击穿 1.0 亿元流动性警戒线，触发一票否决"
+            )
+        elif avg_amount >= 150_000_000.0:  # >= 1.5 亿元
+            positive_count += 1
+            reasons.append(
+                f"流动性充沛 (20日均成交额 {avg_amount / 1e8:.2f}亿 >= 1.5亿)"
+            )
         else:
-            avg_amount = float(avg_amount_res.raw_value)  # type: ignore[arg-type]
-            if avg_amount < 100_000_000.0:  # < 1.0 亿元
-                liquidity_vetoed = True
-                negative_count += 1
-                risks.append(
-                    f"20日均成交额 ({avg_amount / 1e8:.2f}亿) 击穿 1.0 亿元流动性警戒线，触发一票否决"
-                )
-            elif avg_amount >= 150_000_000.0:  # >= 1.5 亿元
-                positive_count += 1
-                reasons.append(
-                    f"流动性充沛 (20日均成交额 {avg_amount / 1e8:.2f}亿 >= 1.5亿)"
-                )
-            else:
-                reasons.append(
-                    f"流动性处于观察区间 (20日均成交额 {avg_amount / 1e8:.2f}亿)"
-                )
+            reasons.append(
+                f"流动性处于观察区间 (20日均成交额 {avg_amount / 1e8:.2f}亿)"
+            )
 
         # 2. 维度 1: 个股趋势
-        ret_20d_res = factor_map.get("ret_20d")
-        prox_res = factor_map.get("proximity_52w_high")
+        ret_20d = float(factor_map["ret_20d"].raw_value)  # type: ignore[arg-type]
+        prox = float(factor_map["proximity_52w_high"].raw_value)  # type: ignore[arg-type]
         stock_trend_positive = False
 
-        if ret_20d_res is not None and prox_res is not None:
-            ret_20d = float(ret_20d_res.raw_value)  # type: ignore[arg-type]
-            prox = float(prox_res.raw_value)  # type: ignore[arg-type]
-
-            if context.strategy_id == "momentum":
-                if ret_20d > 0.064 and prox > 0.85:
-                    positive_count += 1
-                    stock_trend_positive = True
-                    reasons.append(
-                        f"动量趋势强劲 (20日涨幅 {ret_20d:+.2%}, 距高点 {prox:.2f})"
-                    )
-                elif ret_20d < 0.0 or prox < 0.80:
-                    negative_count += 1
-                    risks.append(
-                        f"动量结构破坏 (20日涨幅 {ret_20d:+.2%}, 距高点 {prox:.2f})"
-                    )
-            else:
-                if ret_20d > 0.0:
-                    positive_count += 1
-                    stock_trend_positive = True
-                    reasons.append(f"短期走势向好 (20日涨幅 {ret_20d:+.2%})")
-                elif ret_20d < -0.15:
-                    negative_count += 1
-                    risks.append(f"短期破位大跌 (20日跌幅 {ret_20d:+.2%})")
-                else:
-                    reasons.append(f"短期震荡调整中 (20日涨幅 {ret_20d:+.2%})")
-
-        # 3. 维度 2: 板块/行业超额
-        if context.industry_excess_return is not None:
-            if context.industry_excess_return > 0.0:
+        if context.strategy_id == "momentum":
+            if ret_20d > 0.064 and prox > 0.85:
                 positive_count += 1
+                stock_trend_positive = True
                 reasons.append(
-                    f"所属行业具备超额收益 ({context.industry_excess_return:+.2%})"
+                    f"动量趋势强劲 (20日涨幅 {ret_20d:+.2%}, 距高点 {prox:.2f})"
                 )
-            elif context.industry_excess_return < -0.05:
+            elif ret_20d < 0.0 or prox < 0.80:
                 negative_count += 1
                 risks.append(
-                    f"所属行业处于严重退潮期 ({context.industry_excess_return:+.2%})"
+                    f"动量结构破坏 (20日涨幅 {ret_20d:+.2%}, 距高点 {prox:.2f})"
                 )
-
-        # 4. 维度 3: 相对强弱 / 60日趋势
-        if context.relative_strength_60d is not None:
-            rel_str = context.relative_strength_60d
-            if rel_str > 0.0:
-                positive_count += 1
-                reasons.append(f"相对基准超额向上 (相对强弱 {rel_str:+.2%})")
-            elif rel_str < -0.15:
-                negative_count += 1
-                risks.append(f"相对基准大幅落后 (相对强弱 {rel_str:+.2%})")
-            else:
-                reasons.append(f"相对基准表现平稳 (相对强弱 {rel_str:+.2%})")
         else:
-            ret_60d_res = factor_map.get("ret_60d")
-            if ret_60d_res is not None:
-                ret_60d = float(ret_60d_res.raw_value)  # type: ignore[arg-type]
-                if ret_60d > 0.0:
-                    positive_count += 1
-                    reasons.append(f"中期趋势向上 (60日涨幅 {ret_60d:+.2%})")
-                elif ret_60d < -0.20:
-                    negative_count += 1
-                    risks.append(f"中期严重亏损破位 (60日跌幅 {ret_60d:+.2%})")
+            if ret_20d > 0.0:
+                positive_count += 1
+                stock_trend_positive = True
+                reasons.append(f"短期走势向好 (20日涨幅 {ret_20d:+.2%})")
+            elif ret_20d < -0.15:
+                negative_count += 1
+                risks.append(f"短期破位大跌 (20日跌幅 {ret_20d:+.2%})")
+            else:
+                reasons.append(f"短期震荡调整中 (20日涨幅 {ret_20d:+.2%})")
+
+        # 3. 维度 2: 板块/行业超额
+        industry_excess = context.industry_excess_return
+        assert industry_excess is not None
+        if industry_excess > 0.0:
+            positive_count += 1
+            reasons.append(f"所属行业具备超额收益 ({industry_excess:+.2%})")
+        elif industry_excess < -0.05:
+            negative_count += 1
+            risks.append(f"所属行业处于严重退潮期 ({industry_excess:+.2%})")
+
+        # 4. 维度 3: 相对强弱
+        rel_str = context.relative_strength_60d
+        assert rel_str is not None
+        if rel_str > 0.0:
+            positive_count += 1
+            reasons.append(f"相对基准超额向上 (相对强弱 {rel_str:+.2%})")
+        elif rel_str < -0.15:
+            negative_count += 1
+            risks.append(f"相对基准大幅落后 (相对强弱 {rel_str:+.2%})")
+        else:
+            reasons.append(f"相对基准表现平稳 (相对强弱 {rel_str:+.2%})")
 
         # 5. 维度 4: 量价配合
-        if context.vol_ratio is not None:
-            if context.vol_ratio > 1.05:
-                positive_count += 1
-                reasons.append(f"量价配合放量 (量比 {context.vol_ratio:.2f})")
-            elif context.vol_ratio < 0.70:
-                negative_count += 1
-                risks.append(f"成交量急剧萎缩 (量比 {context.vol_ratio:.2f})")
+        vol_ratio = context.vol_ratio
+        assert vol_ratio is not None
+        if vol_ratio > 1.05:
+            positive_count += 1
+            reasons.append(f"量价配合放量 (量比 {vol_ratio:.2f})")
+        elif vol_ratio < 0.70:
+            negative_count += 1
+            risks.append(f"成交量急剧萎缩 (量比 {vol_ratio:.2f})")
 
         # 判定状态矩阵
         if liquidity_vetoed or negative_count >= 2:
             status = MarketValidation.CONTRADICTED
-        elif (
-            avg_amount_res is not None
-            and not liquidity_vetoed
-            and stock_trend_positive
-            and negative_count == 0
-        ):
+        elif not liquidity_vetoed and stock_trend_positive and negative_count == 0:
             status = MarketValidation.CONFIRMED
         else:
             status = MarketValidation.NEUTRAL
