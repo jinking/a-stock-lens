@@ -1,9 +1,9 @@
-"""股票发现查询层领域模型。"""
-
+from datetime import datetime
 from typing import Self
 
 from pydantic import model_validator
 
+from astock_lens.domain.enums import MarketValidation, NextAction, Signal
 from astock_lens.domain.models import DomainRecord
 
 
@@ -136,3 +136,26 @@ class StockProfileResponse(DomainRecord):
     candidate_status: str
     candidate: dict[str, object] | None = None
     watchlist: dict[str, object] | None = None
+
+
+class CandidateScreenItem(DomainRecord):
+    """单个候选股票发现结果项。"""
+
+    rank: int
+    symbol: str
+    primary_strategy_id: str
+    qualified_strategy_ids: tuple[str, ...]
+    best_rank_percentile: float
+    market_validation: MarketValidation | None
+    signal: Signal | None
+    next_action: NextAction
+    reasons: tuple[str, ...] = ()
+    risks: tuple[str, ...] = ()
+
+
+class CandidateScreenResult(DomainRecord):
+    """候选股票发现的完整结果。"""
+
+    as_of: datetime
+    total_count: int
+    items: tuple[CandidateScreenItem, ...]
