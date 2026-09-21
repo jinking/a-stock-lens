@@ -95,7 +95,8 @@ from astock_lens.discovery import (
     screen_strategy,
 )
 from astock_lens.discovery.candidates import screen_candidates
-from astock_lens.domain.enums import SnapshotKind, WatchlistState
+from astock_lens.discovery.today import build_today_overview
+from astock_lens.domain.enums import MarketRegime, SnapshotKind, WatchlistState
 from astock_lens.factors.config import FactorConfig, load_factor_config
 from astock_lens.factors.contracts import FactorResult
 from astock_lens.jobs.models import StageOutcome
@@ -1077,6 +1078,93 @@ def candidates(
     typer.echo("-" * len(header))
 
     for item in screen_result.items:
+        mv_text = item.market_validation.value if item.market_validation else "NONE"
+        sig_text = item.signal.value if item.signal else "NO_SIGNAL"
+        qual_text = ",".join(item.qualified_strategy_ids)
+        typer.echo(
+            f"{item.rank:<4} | "
+            f"{item.symbol:<9} | "
+            f"{item.primary_strategy_id:<16} | "
+            f"{qual_text:<20} | "
+            f"{mv_text:<17} | "
+            f"{sig_text:<15} | "
+            f"{item.next_action.value:<11}"
+        )
+
+
+@app.command()
+def today(
+    as_of: Annotated[str, AS_OF_OPTION],
+    top: Annotated[
+        int,
+        typer.Option("--top", help="Number of top candidates to preview."),
+    ] = 10,
+) -> None:
+    """今日盘后候选研究概览（严格只读）。
+
+    聚合展示当天候选股票的整体情况、策略分布、市场验证与信号分布，
+    并展示权威候选顺序的前 N 只核心标的。
+    """
+    day = _as_of(as_of)
+    date_str = day.date().isoformat()
+    store = _store()
+
+    if date_str not in store.dates(SnapshotKind.CANDIDATE):
+        typer.echo(
+            f"no CANDIDATE snapshot for {as_of}\n"
+            f"run `astock daily --as-of {as_of} --allow-incomplete` first",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    candidate_records = _snapshot_records(SnapshotKind.CANDIDATE, day, Candidate)
+    if not candidate_records:
+        typer.echo(f"as_of: {date_str}\ncandidates: 0")
+        return
+
+    regime_enum: MarketRegime | None = None
+    regime_records = store.read(SnapshotKind.MARKET_REGIME, day)
+    if regime_records and isinstance(regime_records[0], dict):
+        raw_reg = regime_records[0].get("regime")
+        if isinstance(raw_reg, str):
+            try:
+                regime_enum = MarketRegime(raw_reg)
+            except ValueError:
+                pass
+
+    overview = build_today_overview(
+        candidate_records,
+        as_of=day,
+        market_regime=regime_enum,
+        top_limit=top,
+    )
+
+    typer.echo(f"as_of: {date_str}")
+    typer.echo(f"candidates: {overview.candidate_count}")
+    if overview.market_regime is not None:
+        typer.echo(f"market_regime: {overview.market_regime.value}")
+
+    typer.echo("counts by primary strategy:")
+    for strat, count in sorted(overview.counts_by_primary_strategy.items()):
+        typer.echo(f"  {strat}: {count}")
+
+    typer.echo("counts by market validation:")
+    for mv, count in sorted(overview.counts_by_market_validation.items()):
+        typer.echo(f"  {mv}: {count}")
+
+    typer.echo("counts by signal:")
+    for sig, count in sorted(overview.counts_by_signal.items()):
+        typer.echo(f"  {sig}: {count}")
+
+    typer.echo(f"\ntop {len(overview.top_candidates)} candidates:")
+    header = (
+        f"{'rank':<4} | {'symbol':<9} | {'primary strategy':<16} | "
+        f"{'qualified strategies':<20} | {'market validation':<17} | "
+        f"{'signal':<15} | {'next action':<11}"
+    )
+    typer.echo(header)
+    typer.echo("-" * len(header))
+    for item in overview.top_candidates:
         mv_text = item.market_validation.value if item.market_validation else "NONE"
         sig_text = item.signal.value if item.signal else "NO_SIGNAL"
         qual_text = ",".join(item.qualified_strategy_ids)
