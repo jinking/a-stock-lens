@@ -506,6 +506,7 @@ def _detect_regime(context: _Context, state: _State) -> StageOutcome:
         index_trend=index_trend,
     )
     state.regime_result = regime_res
+    _record(state, SnapshotKind.MARKET_REGIME, context.store, context.as_of)
     return StageOutcome(
         rows_in=len(daily_bars),
         rows_out=1,
@@ -764,6 +765,8 @@ def _record(
         records = state.factor_results
     elif kind is SnapshotKind.STRATEGY:
         records = state.strategy_results
+    elif kind is SnapshotKind.MARKET_REGIME:
+        records = (state.regime_result,) if state.regime_result is not None else ()
     else:
         records = state.candidates
 
