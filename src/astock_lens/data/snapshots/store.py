@@ -89,6 +89,10 @@ class SnapshotStore(Protocol):
         """
         ...
 
+    def dates(self, kind: SnapshotKind) -> tuple[str, ...]:
+        """Return the dates that actually have a snapshot for this kind."""
+        ...
+
 
 class JsonSnapshotStore:
     """Write snapshots as JSON files named by kind and date.

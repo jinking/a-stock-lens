@@ -94,6 +94,7 @@ from astock_lens.discovery import (
     screen_qualified,
     screen_strategy,
 )
+from astock_lens.discovery.candidates import screen_candidates
 from astock_lens.domain.enums import SnapshotKind, WatchlistState
 from astock_lens.factors.config import FactorConfig, load_factor_config
 from astock_lens.factors.contracts import FactorResult
@@ -990,6 +991,64 @@ def qualified(
         typer.echo(
             f"  {item.rank}  {item.symbol}  score={score_text}  "
             f"percentile={item.rank_percentile:.4f}"
+        )
+
+
+@app.command()
+def candidates(
+    as_of: Annotated[str, AS_OF_OPTION],
+    top: Annotated[
+        int,
+        typer.Option("--top", help="Maximum number of candidates to show."),
+    ] = 20,
+) -> None:
+    """正式候选股票列表查询（严格只读）。
+
+    只读取已存储的 CANDIDATE 快照，按权威顺序展示候选标的。
+    不调用 Provider，不重算任何因子/策略/验证/信号，不写任何记录。
+    """
+    day = _as_of(as_of)
+    date_str = day.date().isoformat()
+    store = _store()
+
+    if date_str not in store.dates(SnapshotKind.CANDIDATE):
+        typer.echo(
+            f"no CANDIDATE snapshot for {as_of}\n"
+            f"run `astock daily --as-of {as_of} --allow-incomplete` first",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    candidate_records = _snapshot_records(SnapshotKind.CANDIDATE, day, Candidate)
+    if not candidate_records:
+        typer.echo("candidates: 0")
+        return
+
+    screen_result = screen_candidates(candidate_records, as_of=day, limit=top)
+
+    typer.echo(
+        f"candidates: {screen_result.total_count} (showing: {len(screen_result.items)})"
+    )
+    header = (
+        f"{'rank':<4} | {'symbol':<9} | {'primary strategy':<16} | "
+        f"{'qualified strategies':<20} | {'market validation':<17} | "
+        f"{'signal':<15} | {'next action':<11}"
+    )
+    typer.echo(header)
+    typer.echo("-" * len(header))
+
+    for item in screen_result.items:
+        mv_text = item.market_validation.value if item.market_validation else "NONE"
+        sig_text = item.signal.value if item.signal else "NO_SIGNAL"
+        qual_text = ",".join(item.qualified_strategy_ids)
+        typer.echo(
+            f"{item.rank:<4} | "
+            f"{item.symbol:<9} | "
+            f"{item.primary_strategy_id:<16} | "
+            f"{qual_text:<20} | "
+            f"{mv_text:<17} | "
+            f"{sig_text:<15} | "
+            f"{item.next_action.value:<11}"
         )
 
 
