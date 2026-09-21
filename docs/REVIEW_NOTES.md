@@ -2166,3 +2166,42 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
    - 23 只 `NO_SIGNAL` 标的作为常规观察候选稳健发布；
    - 彻底解决跨策略混合排序混淆，50 只候选标的分别具有明确的 `primary_strategy_id` 归属（momentum 17, growth 12, value 12, quality 8, garp 1）；
    - 详细实证审计材料形成决策包：`docs/decision-packets/2026-09-21-candidate-v2-audit.md`。
+
+---
+
+## 四十、候选与盘后概览查询日常化上线（Plan C，2026-09-21）
+
+### 40.1 纯候选发现服务与契约（Task 1，commit `67f743f`）
+
+1. **严格保持原生权威顺序**：`CandidateScreenResult` 与 `CandidateScreenItem` 严格沿用候选发布阶段（`candidate_stage`）所产生的既定权威排名，绝不在查询层做任何次级重新加权或重排序；
+2. **零副作用与只读保障**：纯函数式切片，绝不写入任何快照或 Watchlist。
+
+### 40.2 CLI 候选查看与存储契约扩充（Task 2，commit `b691a60`）
+
+1. **SnapshotStore 契约增强**：在 `SnapshotStore` 抽象协议中新增 `dates(kind: SnapshotKind) -> list[str]` 方法，支持查询指定类型的全部历史快照日期；
+2. **`astock candidates` 命令行**：支持 `--as-of` 与 `--top`（默认 20），以清晰紧凑的 ASCII 表格呈现权威候选排名、主策略、合格策略、市场验证状态、信号与下一步建议动作。
+
+### 40.3 单股档案升级（Task 3，commit `f16142d`）
+
+1. **候选上下文全面展示**：`astock stock <symbol>` 增加候选发布状态（`candidate: WATCH (published)`）、主策略（`primary_strategy`）、合格策略集合（`qualified_strategies`）、市场验证结论（`market_validation`）以及触发信号（`signal`）；
+2. **风险与理由显式输出**：如实打印 `risks` 预警项与 `reasons` 规则依据；
+3. **全链路血缘透传**：完整输出 `lineage`（含 universe、factor、strategy、qualification、regime、validation、signal 各阶段版本）。
+
+### 40.4 今日盘后概览读模型与 CLI（Task 4，commit `5f8a55d`）
+
+1. **`TodayOverview` 读模型**：聚合 `as_of`、`market_regime`、候选总数、各主策略分布计数、各市场验证状态分布计数、各信号类型分布计数，以及前 N 只权威候选切片；
+2. **`astock today` 命令行**：支持 `--as-of` 与 `--top`（默认 10），一键呈现当日全景盘后研究摘要与核心观察池。
+
+### 40.5 HTTP API 今日盘后概览路由（Task 5，commit `1e48ac6`）
+
+1. **`GET /today` 接口**：支持 `as_of`（必选）与 `top`（默认 10，上限 100）；快照不存在时返回 404，参数非法时返回 422；
+2. **架构边界铁律**：`api/app.py` 严格禁止导入 `pipelines` 或任何阶段计算模块，通过 `test_api_module_imports_strictly_bounded` 单元测试防御。
+
+### 40.6 生产与日常验收实测（Task 6）
+
+在 2026-09-19 验收快照基准下，全流程实测以下命令全部 100% 成功，零状态污染：
+- `astock today --as-of 2026-09-19`
+- `astock candidates --as-of 2026-09-19 --top 20`
+- `astock qualified growth --as-of 2026-09-19 --top 20`
+- `astock qualified momentum --as-of 2026-09-19 --top 20`
+- `astock stock 001309.SZ --as-of 2026-09-19`

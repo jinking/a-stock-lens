@@ -131,29 +131,40 @@ curl "http://127.0.0.1:8000/watchlist"
 
 `--as-of` 接受交易日 `YYYY-MM-DD`，按当日 A 股收盘（15:00 +08:00）解析。
 
-### 选股与单股研究工作流（Daily-to-Screener Workflow）
+### 选股与单股研究工作流（Daily-to-Candidates Workflow）
 
-标准的日常发现与选股工作流程如下：
+标准的日常盘后分析与候选研究工作流程如下：
 
 ```bash
-# 1. 产出正式策略快照（Candidate 阶段继续保持安全阻断）
-uv run astock daily --as-of 2026-09-17 --allow-incomplete
+# 1. 查看今日盘后全景概览（环境、策略分布、市场验证、信号统计与核心候选）
+uv run astock today --as-of 2026-09-19
 
-# 2. 查询已落盘的策略选股榜单
-uv run astock screen growth --as-of 2026-09-17 --top 20
+# 2. 查询已落盘的权威候选池（查看排名、主策略、合格策略、市场验证、信号与下一步建议动作）
+uv run astock candidates --as-of 2026-09-19 --top 20
 
-# 3. 查看单只股票研究画像
-uv run astock stock 600519.SH --as-of 2026-09-17
+# 3. 查询双重门槛合格股票池（分位数 Top 10% + 绝对质量门槛双通过）
+uv run astock qualified growth --as-of 2026-09-19 --top 20
+
+# 4. 查询已落盘的策略单项横截面打分榜单
+uv run astock screen growth --as-of 2026-09-19 --top 20
+
+# 5. 查看单只股票完整研究画像（Universe 纳入、因子证据、策略打分、候选状态、市场验证、信号及全链路血缘）
+uv run astock stock 001309.SZ --as-of 2026-09-19
 ```
 
 **概念边界与职责区分**：
-- `screen = 研究选股榜单 / Research Ranking`：基于已持久化的 `STRATEGY` 快照提供只读选股与排序（支持 `--top` 截断、`--min-percentile` 阈值过滤、`--all-results` 包含未合格标的），绝不重算因子或扫描器，绝不修改存储快照。
-- `candidates = 正式候选池（因绝对门槛/市场验证门禁尚未批准，当前处于安全阻断状态）`：Candidate 是经过 Market Regime、Market Validation 与 Signal 门禁后的最终研究对象；在上述上游层与准入决策正式批准前，Candidate 阶段保持显式安全阻断（`BLOCKED`），绝不输出未经验证的伪候选或兜底占位。
+- `today = 今日盘后全景概览 / Today Overview`：聚合市场环境、各主策略分布计数、5维市场验证状态计数、信号类型统计，并展示权威候选顺序的前 N 只核心标的。
+- `candidates = 权威候选池 / Candidate Research Pool`：经过 Market Regime、5维市场验证矩阵（一票否决严重破位标的）、多策略特征信号引擎与代表性选择政策后的权威候选对象（**候选仅作为深入研究对象，绝非买卖建议或收益承诺**）。
+- `qualified = 双门槛合格池 / Qualified Universe`：同时通过分位数门槛（`rank_percentile >= 0.90`）与各策略绝对质量门槛的合格标的集合。
+- `screen = 研究选股榜单 / Research Ranking`：基于已持久化的 `STRATEGY` 快照提供单策略只读选股与排序（支持 `--top` 截断、`--min-percentile` 阈值过滤、`--all-results` 包含未合格标的），绝不重算因子或扫描器，绝不修改存储快照。
 
 **HTTP API 路由**：
+- `GET /today?as_of=...&top=10`：获取指定交易日的盘后全景概览与核心候选切片。
+- `GET /candidates?as_of=...`：获取指定交易日的完整权威候选池（按权威顺序排序）。
+- `GET /qualifications/{strategy_id}/results?as_of=...`：获取指定策略的双门槛合格股票池。
 - `GET /strategies?as_of=...`：获取指定交易日所有策略的覆盖率摘要列表（总数、合格数、打分数、排名数）。
 - `GET /strategies/{strategy_id}/results?as_of=...`：查询指定策略已落盘的选股榜单，支持查询参数 `limit`（默认 20，最大 500）、`eligible_only`（默认 `true`）与 `min_percentile`（可选分位数阈值 `[0.0, 1.0]`）。
-- `GET /stocks/{symbol}?as_of=...`：查看单只标的的完整研究画像（Universe 纳入状态与剔除规则、各因子测量值、各策略评分与理由、Watchlist 跟踪状态，以及 Candidate 状态如 `not_published`）。
+- `GET /stocks/{symbol}?as_of=...`：查看单只标的的完整研究画像（Universe 纳入状态与剔除规则、各因子测量值、各策略评分与理由、候选状态、主策略、市场验证、信号与全链路血缘、Watchlist 跟踪状态）。
 
 ### 生命周期命令
 

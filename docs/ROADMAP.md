@@ -24,8 +24,8 @@
 | P2 Owner Qualification Decision | COMPLETE | 所有者已批准稳健平衡型六策略规则（2026-09-20） |
 | P2 Qualification Implementation | REPAIRED + AUDITED | 六份生产 YAML 已恢复批准原文；资格改用完整股票因子证据；非法配置 fail-closed；已全研究池只读审计 |
 | P3 Market Regime/Validation/Signal | COMPLETE | 所有者批准口径已落地（2026-09-20）：R2 复合多维市场环境、5维市场验证矩阵（支持一票否决）与多策略特征信号引擎已实现；已通过端到端集成流水线装配验证（1051 tests passed） |
-| P4 Candidate Publishing | COMPLETE | 2026-09-19 首期候选快照正式发布（50 只候选标的，一票否决 682 只）；独立产物校验与跨快照一致性 0 findings；API 与单股画像全面连通 |
-| P5 Today/Web | NOT STARTED | 待候选生成体系稳定后启动 Web UI / Today 看板研发 |
+| P4 Candidate Publishing | COMPLETE | 2026-09-19 首期候选快照正式发布；2026-09-21 完成 Candidate v2 市场证据与信号加固（沙箱验收 0 findings，破位标的归零） |
+| P5 Today Query & Experience | COMPLETE | CLI `astock candidates` 与 `astock today` 上线；API `GET /today` 与单股画像全面升级；Web 待后续启动 |
 
 
 
@@ -37,8 +37,8 @@
 | 策略 | 7 个配置，**6 个在打分**（等权，均已评审，各自独立 Scanner 类），1 个待行业数据 |
 | 执行链 | 唯一分析执行链 `pipelines/analysis.py`；正式快照只有 `astock daily` 能写 |
 | 发现 | **股票发现已完成**（排名 `screen` + 双门槛合格 `qualified` 纯查询服务、CLI 与 API 已打通，只读无副作用） |
-| 候选 | **候选快照已发布**（2026-09-19 首批 50 只代表性候选标的已落地并完成独立产物校验） |
-| 接口 | CLI 12 条命令；API 9 个路由（含 `/candidates` 与单股候选状态）；Web 只有 `web/README.md` |
+| 候选 | **候选快照已就绪**（Candidate v2 市场验证/信号闭环，破位 100% 否决，主策略唯一归属） |
+| 接口 | CLI 14 条命令（含 `candidates`、`today`）；API 10 个路由（含 `/candidates`、`/today` 与单股候选状态）；Web 只有 `web/README.md` |
 
 ---
 
