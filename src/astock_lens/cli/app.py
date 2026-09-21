@@ -48,6 +48,10 @@ from astock_lens.calibration.render import render_json, render_markdown
 from astock_lens.calibration.valuation_coverage import valuation_coverage
 from astock_lens.candidates.models import Candidate
 from astock_lens.candidates.policy import RepresentativeCandidatePolicy
+from astock_lens.data.benchmark import (
+    read_benchmark_bars,
+    resolve_benchmark_bars_path,
+)
 from astock_lens.data.bootstrap import (
     bootstrap_liquidity_history,
     bootstrap_strategy_history,
@@ -267,6 +271,11 @@ def _dataset() -> str:
 
 def _securities_dataset() -> str:
     return os.getenv(SECURITIES_DATASET_ENV, DEFAULT_SECURITIES_DATASET)
+
+
+def _benchmark_bars_path() -> Path:
+    """解析基准指数日线 CSV 文件路径。"""
+    return resolve_benchmark_bars_path()
 
 
 def _storage_paths() -> StoragePaths:
@@ -1356,6 +1365,13 @@ def _run_daily(day: datetime, *, land: bool) -> DailyRunResult:
     candidate_policy = (
         RepresentativeCandidatePolicy(version="v1") if qualifiers else None
     )
+    benchmark_path = _benchmark_bars_path()
+    benchmark_bars = read_benchmark_bars(
+        path=benchmark_path,
+        benchmark_id="000985.CSI",
+        as_of=day,
+    )
+    industry_by_symbol = _production_industry_map(day)
     return run_daily(
         csv_root=_csv_root(),
         as_of=day,
@@ -1370,6 +1386,9 @@ def _run_daily(day: datetime, *, land: bool) -> DailyRunResult:
         sync=_sync_stage(day) if land else None,
         qualifiers=qualifiers,
         candidate_policy=candidate_policy,
+        benchmark_id="000985.CSI",
+        benchmark_bars=benchmark_bars,
+        industry_by_symbol=industry_by_symbol,
     )
 
 
