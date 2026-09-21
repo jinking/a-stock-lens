@@ -30,6 +30,7 @@ class Candidate(DomainRecord):
     next_action: NextAction
     lineage: SnapshotLineage
     candidate_policy_version: str = "v1"
+    primary_strategy_id: str = ""
     strategy_results: tuple[StrategyResult, ...] = ()
     strategy_qualifications: tuple[StrategyQualification, ...] = ()
     market_validation: MarketValidation | None = None

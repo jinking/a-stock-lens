@@ -8,6 +8,7 @@ nobody approved.
 
 from datetime import datetime
 
+from astock_lens.candidates.context import primary_qualified_strategy
 from astock_lens.candidates.models import Candidate
 from astock_lens.candidates.policy import CandidateEvidence, CandidateSelection
 from astock_lens.domain.enums import NextAction
@@ -64,6 +65,9 @@ class CandidateBuilder:
             )
 
             action = next_action if next_action is not None else NextAction.WATCH
+            primary_strat = (
+                primary_qualified_strategy(qualified_quals) if qualified_quals else ""
+            )
 
             return Candidate(
                 symbol=selection.symbol,
@@ -71,6 +75,7 @@ class CandidateBuilder:
                 next_action=action,
                 lineage=updated_lineage,
                 candidate_policy_version=selection.policy_version,
+                primary_strategy_id=primary_strat,
                 strategy_results=qualified_results,
                 strategy_qualifications=qualified_quals,
                 market_validation=evidence.market_validation,
