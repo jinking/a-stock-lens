@@ -20,13 +20,14 @@ A failing stage stops the pipeline, because every later stage consumes what it
 produced. A scan continued on missing data would be a scan of nothing.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel
 
+from astock_lens.candidates.context import primary_qualified_strategy
 from astock_lens.candidates.models import Candidate
 from astock_lens.candidates.policy import (
     CANDIDATE_POLICY_DEFERRED,
@@ -472,12 +473,42 @@ def _detect_regime(context: _Context, state: _State) -> StageOutcome:
     )
 
 
+def _ensure_qualifications(
+    context: _Context, state: _State
+) -> tuple[StrategyQualification, ...]:
+    if state.qualifications:
+        return state.qualifications
+    if not context.qualifiers:
+        raise QualificationRuleNotConfigured(
+            "strategy qualification rules are not configured"
+        )
+    state.qualifications = stages.qualification_stage(
+        strategy_results=state.strategy_results,
+        factor_results=state.factor_results,
+        qualifiers=context.qualifiers,
+    )
+    return state.qualifications
+
+
+def _primary_strategy_by_symbol(
+    qualifications: Sequence[StrategyQualification],
+) -> dict[str, str]:
+    by_sym: dict[str, list[StrategyQualification]] = {}
+    for q in qualifications:
+        if q.qualified:
+            by_sym.setdefault(q.symbol, []).append(q)
+    return {sym: primary_qualified_strategy(quals) for sym, quals in by_sym.items()}
+
+
 def _market_validate(context: _Context, state: _State) -> StageOutcome:
-    symbols = sorted({r.symbol for r in state.strategy_results})
+    quals = _ensure_qualifications(context, state)
+    strat_by_sym = _primary_strategy_by_symbol(quals)
+    symbols = sorted(strat_by_sym.keys())
     val_results = stages.market_validation_stage(
-        symbols=symbols,
+        strategy_by_symbol=strat_by_sym,
         factor_results=state.factor_results,
         as_of=context.as_of,
+        symbols=symbols,
     )
     state.validation_results = val_results
     state.market_validation_by_symbol = {r.symbol: r.status for r in val_results}
@@ -495,13 +526,16 @@ def _market_validate(context: _Context, state: _State) -> StageOutcome:
 
 
 def _run_signals(context: _Context, state: _State) -> StageOutcome:
-    symbols = sorted({r.symbol for r in state.strategy_results})
+    quals = _ensure_qualifications(context, state)
+    strat_by_sym = _primary_strategy_by_symbol(quals)
+    symbols = sorted(strat_by_sym.keys())
     regime = state.regime_result.regime if state.regime_result is not None else None
     sig_results = stages.signal_stage(
-        symbols=symbols,
+        strategy_by_symbol=strat_by_sym,
         factor_results=state.factor_results,
         as_of=context.as_of,
         market_regime=regime,
+        symbols=symbols,
     )
     state.signal_results = sig_results
     state.signal_by_symbol = {r.symbol: r.signal for r in sig_results}
@@ -517,18 +551,10 @@ def _build_candidates(context: _Context, state: _State) -> StageOutcome:
     universe = _required(
         state.universe, stage=JobStage.BUILD_CANDIDATES, name="BUILD_UNIVERSE"
     )
-    if not context.qualifiers:
-        raise QualificationRuleNotConfigured(
-            "strategy qualification rules are not configured"
-        )
-    state.qualifications = stages.qualification_stage(
-        strategy_results=state.strategy_results,
-        factor_results=state.factor_results,
-        qualifiers=context.qualifiers,
-    )
+    quals = _ensure_qualifications(context, state)
     state.candidates = stages.candidate_stage(
         strategy_results=state.strategy_results,
-        qualifications=state.qualifications,
+        qualifications=quals,
         market_validation_by_symbol=state.market_validation_by_symbol,
         signal_by_symbol=state.signal_by_symbol,
         lineage=stages.lineage_for(

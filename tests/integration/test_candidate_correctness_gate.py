@@ -65,7 +65,9 @@ def test_value_qualified_symbol_must_keep_value_validation_semantics() -> None:
     assert result.status != MarketValidation.CONTRADICTED
 
 
-def test_growth_qualified_symbol_never_falls_through_to_value_contrarian_signal() -> None:
+def test_growth_qualified_symbol_never_falls_through_to_value_contrarian_signal() -> (
+    None
+):
     """Gap 2: Growth 标的由于缺少 strategy_id，绝不能误跨界命中 Value/Dividend 规则。"""
     symbol = "300750.SZ"
     factors = (
@@ -163,4 +165,90 @@ def test_incomplete_5d_market_evidence_fails_candidate_publication(
     assert candidate_run is not None
     # 证据未补齐且语义未审批前，BUILD_CANDIDATES 必须保持 BLOCKED 或 FAILED，不得写入 CANDIDATE 快照
     assert candidate_run.status != JobStatus.SUCCEEDED
-    assert not (local_tmp / "snapshots" / "CANDIDATE" / f"{AS_OF.date().isoformat()}.json").exists()
+    assert not (
+        local_tmp / "snapshots" / "CANDIDATE" / f"{AS_OF.date().isoformat()}.json"
+    ).exists()
+
+
+def test_only_qualified_symbols_enter_downstream_validation_and_signal(
+    local_tmp: Path,
+) -> None:
+    """Step 1: 只有至少有一个合格策略的标的才进入下游市场验证与信号检测。"""
+    from astock_lens.pipelines.daily import (
+        _primary_strategy_by_symbol,
+    )
+    from astock_lens.qualifications.models import StrategyQualification
+
+    quals = [
+        StrategyQualification(
+            symbol="600000.SH",
+            strategy_id="value",
+            strategy_version="v1",
+            qualification_version="v1",
+            as_of=AS_OF,
+            rank_percentile=0.95,
+            rank=1,
+            total_evaluable=100,
+            percentile_pass=True,
+            absolute_pass=True,
+            qualified=True,
+        ),
+        StrategyQualification(
+            symbol="000001.SZ",
+            strategy_id="growth",
+            strategy_version="v1",
+            qualification_version="v1",
+            as_of=AS_OF,
+            rank_percentile=0.70,
+            rank=30,
+            total_evaluable=100,
+            percentile_pass=False,
+            absolute_pass=False,
+            qualified=False,
+        ),
+    ]
+
+    strat_map = _primary_strategy_by_symbol(quals)
+    # 只有合格标的 600000.SH 进入映射，未合格标的 000001.SZ 绝不进入
+    assert "600000.SH" in strat_map
+    assert "000001.SZ" not in strat_map
+    assert strat_map["600000.SH"] == "value"
+
+
+def test_multi_qualified_symbol_derives_deterministic_primary_strategy_mapping() -> (
+    None
+):
+    """Step 2: 多策略合格标的确定性推导主策略映射。"""
+    from astock_lens.pipelines.daily import _primary_strategy_by_symbol
+    from astock_lens.qualifications.models import StrategyQualification
+
+    quals = [
+        StrategyQualification(
+            symbol="600000.SH",
+            strategy_id="value",
+            strategy_version="v1",
+            qualification_version="v1",
+            as_of=AS_OF,
+            rank_percentile=0.91,
+            rank=9,
+            total_evaluable=100,
+            percentile_pass=True,
+            absolute_pass=True,
+            qualified=True,
+        ),
+        StrategyQualification(
+            symbol="600000.SH",
+            strategy_id="growth",
+            strategy_version="v1",
+            qualification_version="v1",
+            as_of=AS_OF,
+            rank_percentile=0.95,
+            rank=5,
+            total_evaluable=100,
+            percentile_pass=True,
+            absolute_pass=True,
+            qualified=True,
+        ),
+    ]
+    strat_map = _primary_strategy_by_symbol(quals)
+    assert strat_map["600000.SH"] == "growth"
