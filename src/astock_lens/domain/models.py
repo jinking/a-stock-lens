@@ -113,6 +113,7 @@ class SnapshotLineage(DomainRecord):
     qualification_version: str | None = None
     candidate_policy_version: str | None = None
     regime_version: str | None = None
+    market_validation_version: str | None = None
     signal_version: str | None = None
 
     def factor_versions(self) -> frozenset[str]:
@@ -134,6 +135,10 @@ class SnapshotLineage(DomainRecord):
     def regime_versions(self) -> frozenset[str]:
         """Return the distinct regime versions this lineage declares."""
         return _versions(self.regime_version)
+
+    def market_validation_versions(self) -> frozenset[str]:
+        """Return the distinct market validation versions this lineage declares."""
+        return _versions(self.market_validation_version)
 
     def signal_versions(self) -> frozenset[str]:
         """Return the distinct signal versions this lineage declares."""

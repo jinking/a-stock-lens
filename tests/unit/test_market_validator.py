@@ -127,3 +127,19 @@ def test_market_validator_missing_liquidity_factor_fail_closed() -> None:
     result = validator.validate(ctx)
     assert result.status != MarketValidation.CONFIRMED
     assert any("avg_amount_20d" in r for r in result.risks)
+
+
+def test_market_validator_lineage_contains_market_validation_version() -> None:
+    """测试 MarketValidationResult 的 lineage 携带 market_validation_version 且不复用 regime_version。"""
+    validator = MarketValidator(version="v1")
+    factors = (_fr("601398.SH", "avg_amount_20d", 80_000_000.0),)
+    ctx = MarketValidationContext(
+        symbol="601398.SH",
+        strategy_id="momentum",
+        as_of=AS_OF,
+        factors=factors,
+    )
+    result = validator.validate(ctx)
+    assert result.lineage.market_validation_version == "v1"
+    assert "v1" in result.lineage.market_validation_versions()
+    assert result.lineage.regime_version is None

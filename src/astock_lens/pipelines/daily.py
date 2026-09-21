@@ -564,6 +564,19 @@ def _build_candidates(context: _Context, state: _State) -> StageOutcome:
         state.universe, stage=JobStage.BUILD_CANDIDATES, name="BUILD_UNIVERSE"
     )
     quals = _ensure_qualifications(context, state)
+    regime_ver = (
+        state.regime_result.lineage.regime_version
+        if state.regime_result is not None
+        else None
+    )
+    val_ver = (
+        state.validation_results[0].lineage.market_validation_version
+        if state.validation_results
+        else None
+    )
+    sig_ver = (
+        state.signal_results[0].lineage.signal_version if state.signal_results else None
+    )
     state.candidates = stages.candidate_stage(
         strategy_results=state.strategy_results,
         qualifications=quals,
@@ -573,6 +586,9 @@ def _build_candidates(context: _Context, state: _State) -> StageOutcome:
             universe=universe,
             factor_configs=context.factor_configs,
             scanners=context.scanners,
+            regime_version=regime_ver,
+            market_validation_version=val_ver,
+            signal_version=sig_ver,
         ),
         as_of=context.as_of,
         policy=context.candidate_policy,

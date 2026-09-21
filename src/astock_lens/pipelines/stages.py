@@ -393,6 +393,9 @@ def lineage_for(
     universe: UniverseSnapshot,
     factor_configs: Sequence[FactorConfig],
     scanners: Sequence[RegisteredStrategy],
+    regime_version: str | None = None,
+    market_validation_version: str | None = None,
+    signal_version: str | None = None,
 ) -> SnapshotLineage:
     """Describe what produced a run, so its result can be reproduced."""
     return SnapshotLineage(
@@ -401,6 +404,9 @@ def lineage_for(
         strategy_version=",".join(
             sorted({scanner.config.version for scanner in scanners})
         ),
+        regime_version=regime_version,
+        market_validation_version=market_validation_version,
+        signal_version=signal_version,
     )
 
 

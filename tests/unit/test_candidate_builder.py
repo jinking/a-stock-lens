@@ -11,9 +11,11 @@ from datetime import UTC, datetime
 import pytest
 
 from astock_lens.candidates.builder import CandidateBuilder
-from astock_lens.domain.enums import DataStatus, NextAction
+from astock_lens.candidates.policy import CandidateEvidence, CandidateSelection
+from astock_lens.domain.enums import DataStatus, MarketValidation, NextAction, Signal
 from astock_lens.domain.models import SnapshotLineage
 from astock_lens.factors.contracts import FactorResult
+from astock_lens.qualifications.models import StrategyQualification
 from astock_lens.strategies.contracts import StrategyResult
 
 AS_OF = datetime(2026, 9, 4, 15, 0, tzinfo=UTC)
@@ -97,3 +99,54 @@ def test_candidate_is_a_research_object_not_a_recommendation() -> None:
     assert candidate.as_of == AS_OF
     assert candidate.lineage == LINEAGE
     assert candidate.next_action in set(NextAction)
+
+
+def test_candidate_lineage_carries_complete_stage_versions() -> None:
+    """测试 Candidate 的 lineage 完整携带所有上游阶段版本（factor, strategy, qualification, policy, regime, market_validation, signal）。"""
+    full_lineage = SnapshotLineage(
+        universe_snapshot="2026-09-04:u1",
+        factor_version="v1",
+        strategy_version="v1",
+        regime_version="v1",
+        market_validation_version="v1",
+        signal_version="v1",
+    )
+    strategy_res = _strategy_result(strategy_version="v1")
+    strategy_qual = StrategyQualification(
+        symbol="600000.SH",
+        strategy_id="momentum",
+        strategy_version="v1",
+        qualification_version="v1",
+        qualified=True,
+        percentile_pass=True,
+        absolute_pass=True,
+        rank_percentile=0.95,
+    )
+    evidence = CandidateEvidence(
+        symbol="600000.SH",
+        strategy_results=(strategy_res,),
+        strategy_qualifications=(strategy_qual,),
+        market_validation=MarketValidation.CONFIRMED,
+        signal=Signal.BREAKOUT,
+    )
+    selection = CandidateSelection(
+        symbol="600000.SH",
+        policy_version="v1",
+        reasons=("top candidate",),
+    )
+    candidate = CandidateBuilder().build(
+        evidence=evidence,
+        selection=selection,
+        as_of=AS_OF,
+        lineage=full_lineage,
+    )
+    assert candidate.lineage.factor_version == "v1"
+    assert candidate.lineage.strategy_version == "v1"
+    assert candidate.lineage.qualification_version == "v1"
+    assert candidate.lineage.candidate_policy_version == "v1"
+    assert candidate.lineage.regime_version == "v1"
+    assert candidate.lineage.market_validation_version == "v1"
+    assert candidate.lineage.signal_version == "v1"
+    assert "v1" in candidate.lineage.market_validation_versions()
+    assert "v1" in candidate.lineage.signal_versions()
+    assert "v1" in candidate.lineage.regime_versions()

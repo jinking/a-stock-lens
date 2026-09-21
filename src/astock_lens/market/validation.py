@@ -188,5 +188,5 @@ class MarketValidator:
             negative_count=negative_count,
             reasons=tuple(reasons),
             risks=tuple(risks),
-            lineage=SnapshotLineage(regime_version=self.version),
+            lineage=SnapshotLineage(market_validation_version=self.version),
         )
