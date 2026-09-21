@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query
 
+from astock_lens.candidates.models import Candidate
 from astock_lens.data.snapshots.resolve import resolve_snapshot_store
 from astock_lens.data.storage.paths import StoragePaths, resolve_storage_paths
 from astock_lens.discovery import (
@@ -26,7 +27,8 @@ from astock_lens.discovery import (
     screen_strategy,
     summarize_strategies,
 )
-from astock_lens.domain.enums import SnapshotKind
+from astock_lens.discovery.today import TodayOverview, build_today_overview
+from astock_lens.domain.enums import MarketRegime, SnapshotKind
 from astock_lens.factors.contracts import FactorResult
 from astock_lens.qualifications import (
     QualificationConfigInvalid,
@@ -113,6 +115,52 @@ def create_app(
             root(), SnapshotKind.CANDIDATE, as_of, database=snapshot_database()
         )
         return {"as_of": as_of, "records": list(records)}
+
+    @application.get("/today", response_model=TodayOverview)
+    def today_overview(as_of: str, top: int = 10) -> TodayOverview:
+        """Read the aggregated post-market candidate overview for one date."""
+        try:
+            day = date.fromisoformat(as_of)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422, detail=f"as_of must be YYYY-MM-DD, got {as_of!r}"
+            ) from error
+
+        candidate_records = _read_optional(
+            root(),
+            SnapshotKind.CANDIDATE,
+            as_of,
+            database=snapshot_database(),
+        )
+        if candidate_records is None:
+            raise HTTPException(
+                status_code=404, detail=f"no CANDIDATE snapshot for {as_of}"
+            )
+
+        candidates = [Candidate.model_validate(r) for r in candidate_records]
+
+        regime_enum: MarketRegime | None = None
+        regime_records = _read_optional(
+            root(),
+            SnapshotKind.MARKET_REGIME,
+            as_of,
+            database=snapshot_database(),
+        )
+        if regime_records and isinstance(regime_records[0], dict):
+            raw_reg = regime_records[0].get("regime")
+            if isinstance(raw_reg, str):
+                try:
+                    regime_enum = MarketRegime(raw_reg)
+                except ValueError:
+                    pass
+
+        day_dt = datetime(day.year, day.month, day.day, CLOSE_HOUR, tzinfo=SHANGHAI)
+        return build_today_overview(
+            candidates,
+            as_of=day_dt,
+            market_regime=regime_enum,
+            top_limit=top,
+        )
 
     @application.get("/watchlist")
     def watchlist_entries() -> dict[str, object]:

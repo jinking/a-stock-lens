@@ -1008,3 +1008,88 @@ def test_api_module_imports_strictly_bounded() -> None:
                     assert f != alias.name, (
                         f"Forbidden from-import name found: {alias.name}"
                     )
+
+
+def test_today_api_missing_candidate_snapshot_returns_404(local_tmp: Path) -> None:
+    """Task 5: CANDIDATE 快照不存在时 /today 返回 404。"""
+    client = TestClient(create_app(snapshot_root=local_tmp))
+    res = client.get("/today", params={"as_of": DAY})
+    assert res.status_code == 404
+    assert f"no CANDIDATE snapshot for {DAY}" in res.json()["detail"]
+
+
+def test_today_api_returns_aggregated_overview(local_tmp: Path) -> None:
+    """Task 5: /today 返回聚合概览并保持候选原生权威顺序。"""
+    from astock_lens.candidates.models import Candidate
+    from astock_lens.domain.enums import MarketValidation, NextAction, Signal
+    from astock_lens.qualifications.models import StrategyQualification
+
+    store = JsonSnapshotStore(local_tmp)
+    qual = StrategyQualification(
+        symbol="601336.SH",
+        strategy_id="value",
+        strategy_version="v1",
+        qualification_version="v1",
+        qualified=True,
+        percentile_pass=True,
+        absolute_pass=True,
+        rank_percentile=0.98,
+        as_of=AS_OF,
+    )
+    c1 = Candidate(
+        symbol="601336.SH",
+        as_of=AS_OF,
+        next_action=NextAction.WATCH,
+        primary_strategy_id="value",
+        strategy_qualifications=(qual,),
+        market_validation=MarketValidation.NEUTRAL,
+        signal=Signal.VALUE_CONTRARIAN,
+        reasons=("qualified for value",),
+        lineage=SnapshotLineage(
+            universe_snapshot="2026-09-19:u1",
+            factor_version="v1",
+            strategy_version="v1",
+            qualification_version="v1",
+            regime_version="v1",
+            market_validation_version="v1",
+            signal_version="v1",
+        ),
+    )
+    c2 = Candidate(
+        symbol="300741.SZ",
+        as_of=AS_OF,
+        next_action=NextAction.WATCH,
+        primary_strategy_id="momentum",
+        strategy_qualifications=(),
+        market_validation=MarketValidation.CONFIRMED,
+        signal=Signal.BREAKOUT,
+        reasons=("qualified for momentum",),
+        lineage=SnapshotLineage(
+            universe_snapshot="2026-09-19:u1",
+            factor_version="v1",
+            strategy_version="v1",
+            qualification_version="v1",
+            regime_version="v1",
+            market_validation_version="v1",
+            signal_version="v1",
+        ),
+    )
+    store.write(SnapshotKind.CANDIDATE, AS_OF, [c1, c2])
+
+    client = TestClient(create_app(snapshot_root=local_tmp))
+    res = client.get("/today", params={"as_of": DAY})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["candidate_count"] == 2
+    assert data["counts_by_primary_strategy"] == {"value": 1, "momentum": 1}
+    assert data["counts_by_market_validation"] == {"NEUTRAL": 1, "CONFIRMED": 1}
+    assert data["counts_by_signal"] == {"VALUE_CONTRARIAN": 1, "BREAKOUT": 1}
+    assert len(data["top_candidates"]) == 2
+    assert data["top_candidates"][0]["symbol"] == "601336.SH"
+    assert data["top_candidates"][1]["symbol"] == "300741.SZ"
+
+
+def test_today_api_invalid_as_of_returns_422(local_tmp: Path) -> None:
+    client = TestClient(create_app(snapshot_root=local_tmp))
+    res = client.get("/today", params={"as_of": "not-a-date"})
+    assert res.status_code == 422
