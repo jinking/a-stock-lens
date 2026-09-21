@@ -1505,6 +1505,35 @@ def industry_export_map(
     typer.echo(f"industry map: {len(mapping)} symbols written to {output}")
 
 
+def _latest_industry_file(day: datetime, root: Path | None = None) -> Path:
+    """按时点查找不晚于该日期的最新申万行业 CSV 文件。"""
+    directory = (root or _csv_root()) / "westock" / "industry"
+    target_date = day.date()
+    eligible: list[tuple[date, Path]] = []
+    if directory.is_dir():
+        for file in directory.glob("*.csv"):
+            try:
+                file_date = date.fromisoformat(file.stem)
+            except ValueError:
+                continue
+            if file_date <= target_date:
+                eligible.append((file_date, file))
+    if not eligible:
+        raise FileNotFoundError(
+            f"No eligible industry file found in {directory} for date {day.date().isoformat()}"
+        )
+    eligible.sort(key=lambda item: item[0])
+    return eligible[-1][1]
+
+
+def _production_industry_map(day: datetime, root: Path | None = None) -> dict[str, str]:
+    """按时点加载生产申万二级行业映射（含权威静态补充）。"""
+    file = _latest_industry_file(day, root)
+    memberships = read_industry_memberships(file)
+    supplements = load_supplemental_industry_memberships(as_of=day)
+    return build_industry_map((*memberships, *supplements), as_of=day)
+
+
 def _valuation_strategy_configs() -> tuple[StrategyConfig, ...]:
     """读策略目录里的全部策略配置；覆盖报告按 `required_factors` 判定，不认策略名。"""
     return tuple(
