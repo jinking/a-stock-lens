@@ -24,6 +24,7 @@ class StockMarketEvidence(DomainRecord):
     proximity_52w_high: float | None = None
     avg_amount_20d: float | None = None
     volume_ratio_5_20: float | None = None
+    relative_strength_60d: float | None = None
 
 
 def build_stock_market_evidence(
@@ -32,6 +33,7 @@ def build_stock_market_evidence(
     factors: Sequence[FactorResult],
     bars: Sequence[DailyBar],
     as_of: datetime,
+    benchmark_ret_60d: float | None = None,
 ) -> StockMarketEvidence:
     """Build auditable market evidence for a given symbol."""
     cutoff_date = as_of.date()
@@ -62,6 +64,12 @@ def build_stock_market_evidence(
         if f.symbol == symbol and f.status == DataStatus.VALUE:
             factor_map[f.factor] = f.raw_value
 
+    # 3. Calculate true relative strength against approved benchmark
+    relative_strength_60d: float | None = None
+    stock_ret_60d = factor_map.get("ret_60d")
+    if stock_ret_60d is not None and benchmark_ret_60d is not None:
+        relative_strength_60d = stock_ret_60d - benchmark_ret_60d
+
     return StockMarketEvidence(
         symbol=symbol,
         as_of=as_of,
@@ -69,4 +77,5 @@ def build_stock_market_evidence(
         proximity_52w_high=factor_map.get("proximity_52w_high"),
         avg_amount_20d=factor_map.get("avg_amount_20d"),
         volume_ratio_5_20=volume_ratio_5_20,
+        relative_strength_60d=relative_strength_60d,
     )

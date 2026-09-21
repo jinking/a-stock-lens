@@ -144,3 +144,46 @@ def test_missing_or_error_factors_become_none() -> None:
     assert evidence.proximity_52w_high is None
     assert evidence.avg_amount_20d is None
     assert evidence.volume_ratio_5_20 is None
+    assert evidence.relative_strength_60d is None
+
+
+def test_relative_strength_60d_exact_calculation() -> None:
+    # 个股 ret_60d = 0.25, 基准 ret_60d = 0.10
+    # 相对强弱 = 0.25 - 0.10 = 0.15
+    factors = (_factor_result("ret_60d", 0.25),)
+
+    evidence = build_stock_market_evidence(
+        symbol="600519.SH",
+        factors=factors,
+        bars=(),
+        as_of=AS_OF,
+        benchmark_ret_60d=0.10,
+    )
+
+    assert evidence.relative_strength_60d == pytest.approx(0.15)
+
+
+def test_missing_benchmark_ret_60d_results_in_none() -> None:
+    factors = (_factor_result("ret_60d", 0.25),)
+
+    evidence = build_stock_market_evidence(
+        symbol="600519.SH",
+        factors=factors,
+        bars=(),
+        as_of=AS_OF,
+        benchmark_ret_60d=None,
+    )
+
+    assert evidence.relative_strength_60d is None
+
+
+def test_missing_stock_ret_60d_results_in_none() -> None:
+    evidence = build_stock_market_evidence(
+        symbol="600519.SH",
+        factors=(),
+        bars=(),
+        as_of=AS_OF,
+        benchmark_ret_60d=0.10,
+    )
+
+    assert evidence.relative_strength_60d is None
