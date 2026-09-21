@@ -14,7 +14,7 @@
 - 明确澄清三层发现语义：`screen`（纯横截面打分排名）、`qualified`（Top 10% + 绝对质量门槛双通过过滤）、`candidate`（后续经 Market/Signal 验证的研究候选对象，非买入推荐）；
 - 架构与数据契约严格遵守只读隔离，绝不重算因子或策略，零状态突变；单股画像中的 `candidate_status` 严格如实呈现（未发布快照时显式返回 `"not_published"`，`/candidates` 严格返回 404，绝不捏造假候选）。
 生产资格规则已恢复为所有者批准口径，并完成全研究池只读审计（见 `docs/decision-packets/2026-09-20-qualification-repair-audit.md`）。
-当前严格执行停机门禁（Stop Gate），Candidate 发布前的 Market/Signal 模块与候选政策未就绪，`BUILD_CANDIDATES` 保持 BLOCKED。
+2026-09-19 首期 CANDIDATE 生产快照已正式发布并经独立产物校验器 100% 通过（见 `docs/decision-packets/2026-09-20-candidate-snapshot-audit.md`）。
 
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
@@ -24,8 +24,8 @@
 | P2 Owner Qualification Decision | COMPLETE | 所有者已批准稳健平衡型六策略规则（2026-09-20） |
 | P2 Qualification Implementation | REPAIRED + AUDITED | 六份生产 YAML 已恢复批准原文；资格改用完整股票因子证据；非法配置 fail-closed；已全研究池只读审计 |
 | P3 Market Regime/Validation/Signal | COMPLETE | 所有者批准口径已落地（2026-09-20）：R2 复合多维市场环境、5维市场验证矩阵（支持一票否决）与多策略特征信号引擎已实现；已通过端到端集成流水线装配验证（1051 tests passed） |
-| P4 Candidate Publishing | READY FOR DRILL-DOWN | 上游 Market/Signal 已闭环打通；保持 Mode B 全局阻塞语义，等待日常快照全链路试跑放行 |
-| P5 Today/Web | NOT STARTED | 待候选生成体系全链路就绪后启动 |
+| P4 Candidate Publishing | COMPLETE | 2026-09-19 首期候选快照正式发布（50 只候选标的，一票否决 682 只）；独立产物校验与跨快照一致性 0 findings；API 与单股画像全面连通 |
+| P5 Today/Web | NOT STARTED | 待候选生成体系稳定后启动 Web UI / Today 看板研发 |
 
 
 
@@ -33,12 +33,12 @@
 | --- | --- |
 | 数据源 | AkShare（名单/日线）、WeStock（三大表，带公告日）、neodata（估值/行业/语义）三个 Provider 全部接入 |
 | 落地 | 财报（按 `code+EndDate` 合并）、名单/日线（按 `symbol[+trade_date]`）、neodata（按取数日一天一文件） |
-| 因子 | 24 个配置（技术/流动性 + 基本面 + 估值） |
+| 因子 | 24 个配置（技术/流动性 + 基本面 + 估值，含真实 TTM 股息率） |
 | 策略 | 7 个配置，**6 个在打分**（等权，均已评审，各自独立 Scanner 类），1 个待行业数据 |
 | 执行链 | 唯一分析执行链 `pipelines/analysis.py`；正式快照只有 `astock daily` 能写 |
 | 发现 | **股票发现已完成**（排名 `screen` + 双门槛合格 `qualified` 纯查询服务、CLI 与 API 已打通，只读无副作用） |
-| 候选 | `BUILD_CANDIDATES` 保持 `BLOCKED`：上游 Market/Signal 未实现（入选规则已批准并落地 REPAIRED + AUDITED） |
-| 接口 | CLI 12 条命令；API 9 个路由；Web 只有 `web/README.md` |
+| 候选 | **候选快照已发布**（2026-09-19 首批 50 只代表性候选标的已落地并完成独立产物校验） |
+| 接口 | CLI 12 条命令；API 9 个路由（含 `/candidates` 与单股候选状态）；Web 只有 `web/README.md` |
 
 ---
 
@@ -50,11 +50,11 @@
   - **决策材料包**：`docs/decision-packets/2026-09-20-market-signal-owner-decisions.md`，所有者已批准 R2 复合多维、5维市场验证矩阵（支持一票否决）、信号词表与分位数阈值、Mode B 全局阻塞语义；
   - **工程落地**：`src/astock_lens/market/`（`regime.py`, `validation.py`）与 `src/astock_lens/signals/`（`detector.py`）已实现并装配至 `pipelines/stages.py`；全量单元与集成测试 100% 通过（1051 passed）。
 
-- [ ] **Candidate Qualification 绝对门槛与候选发布**：
+- [x] **Candidate Qualification 绝对门槛与候选发布（已完成，commit `95f34a5`, `8d56c85`）**：
   - **批准架构（Approved Architecture）**：双门槛机制（相对分位数底线 `rank_percentile >= 0.90` + 独立绝对质量门槛）；横截面代表性选择政策（每策略软保底 3 只、上限 50 只、不硬凑 20 只下限、Market Validation 一票否决、严禁跨策略综合加权打分；详见 `docs/superpowers/specs/2026-09-17-candidate-qualification-design.md`）；
-  - **已实现基础设施（Implemented Infrastructure）**：策略资格模型与契约（`src/astock_lens/qualifications/`）、6 个策略判定器框架、横截面代表性选择策略（`RepresentativeCandidatePolicy`）、候选证据装配与持久化（`strategy_qualifications`, `candidate_policy_version`）、管线阶段解耦（`qualification_stage` 与 `candidate_stage`）、全市场只读校准报告引擎与 CLI（`astock calibrate candidates`）、独立产物审计器（`tests/artifacts/validator.py`）；
+  - **已实现基础设施（Implemented Infrastructure）**：策略资格模型与契约（`src/astock_lens/qualifications/`）、6 个策略判定器框架、横截面代表性选择政策（`RepresentativeCandidatePolicy`）、候选证据装配与持久化（`strategy_qualifications`, `candidate_policy_version`）、管线阶段解耦（`qualification_stage` 与 `candidate_stage`）、全市场只读校准报告引擎与 CLI（`astock calibrate candidates`）、独立产物审计器（`tests/artifacts/validator.py`）；
   - **已修复并审计（Repaired + Audited，2026-09-20）**：六个策略的绝对质量门槛（Value/Growth/GARP/Quality/Dividend/Momentum）生产配置已恢复为所有者批准口径（`configs/qualifications/*.yaml`）；资格判定改用该股票完整 Factor 证据；非法配置 fail-closed；已完成全研究池只读审计（见 `docs/decision-packets/2026-09-20-qualification-repair-audit.md`）。
-  - **依然阻塞（Still Blocked）**：上游 Market Regime、Market Validation、Signal 模块未实现；`RepresentativeCandidatePolicy` 未生产接线；日常管线中 `BUILD_CANDIDATES` 依法保持 `BLOCKED`。此外新发现 Dividend `dividend_yield_ttm` 上游数据全池缺失（见 `docs/REMAINING_PRODUCT_BLOCKERS.md`）。
+  - **生产闭环与首期发布（2026-09-21）**：日常调度全链路打通，成功生成 2026-09-19 正式 `CANDIDATE` 快照（50 只标的）；经独立校验器全量单快照与跨快照审查 0 findings（见 `docs/decision-packets/2026-09-20-candidate-snapshot-audit.md`）；API 与 CLI 全面连通。
 - [ ] **分红支付率的形状**：实测榜首出现 1950%/274% 的支付率（动用留存收益或特别分红），当前线性加权把 1950% 与 90% 同等对待。选项：设上限 / 区间偏好 / 接受现状。
 - [ ] **Growth 极值稳健化**：榜首 `net_profit_parent_yoy` 达 71528%，百分位把 3000% 与 70000% 压成相邻名次。选项：缩尾 / 要求两端同时成立 / 接受现状。
 - [ ] **PEG 值域复核**：源站 PEG 值域是 83–1503（正常 0–5）且出现负值。选项：接受其相对排序 / 自算 `pe_ttm / net_profit_parent_cagr_3y`。
