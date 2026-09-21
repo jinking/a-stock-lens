@@ -143,3 +143,51 @@ def test_market_validator_lineage_contains_market_validation_version() -> None:
     assert result.lineage.market_validation_version == "v1"
     assert "v1" in result.lineage.market_validation_versions()
     assert result.lineage.regime_version is None
+
+
+def test_market_validator_consumes_all_five_dimensions() -> None:
+    """测试市场验证完整消费 5 维输入（流动性、个股趋势、行业超额、相对基准强弱、量比配合）。"""
+    validator = MarketValidator(version="v1")
+    factors = (
+        _fr(
+            "600519.SH", "avg_amount_20d", 500_000_000.0
+        ),  # 维度 5: 流动性 >= 1.5 亿 (+1)
+        _fr("600519.SH", "ret_20d", 0.08),  # 维度 1: 个股趋势 (+1)
+        _fr("600519.SH", "proximity_52w_high", 0.90),
+    )
+    ctx = MarketValidationContext(
+        symbol="600519.SH",
+        strategy_id="growth",
+        as_of=AS_OF,
+        factors=factors,
+        industry_excess_return=0.035,  # 维度 2: 行业超额 (+1)
+        relative_strength_60d=0.062,  # 维度 3: 相对基准超额 (+1)
+        vol_ratio=1.25,  # 维度 4: 量价配合 (+1)
+    )
+    result = validator.validate(ctx)
+    assert result.status == MarketValidation.CONFIRMED
+    assert result.positive_count == 5
+    assert result.negative_count == 0
+    assert any("相对基准" in r and "+6.20%" in r for r in result.reasons)
+    assert any("行业" in r for r in result.reasons)
+    assert any("量比" in r for r in result.reasons)
+
+
+def test_market_validator_relative_strength_negative_adds_risk() -> None:
+    """测试相对基准大幅跑输（< -15%）时，记入 negative 且添加 risk 警示。"""
+    validator = MarketValidator(version="v1")
+    factors = (
+        _fr("600519.SH", "avg_amount_20d", 200_000_000.0),
+        _fr("600519.SH", "ret_20d", -0.02),
+        _fr("600519.SH", "proximity_52w_high", 0.70),
+    )
+    ctx = MarketValidationContext(
+        symbol="600519.SH",
+        strategy_id="value",
+        as_of=AS_OF,
+        factors=factors,
+        relative_strength_60d=-0.18,  # < -15%
+    )
+    result = validator.validate(ctx)
+    assert result.negative_count >= 1
+    assert any("相对基准" in r and "落后" in r for r in result.risks)

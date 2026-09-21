@@ -33,9 +33,11 @@ from astock_lens.candidates.policy import (
     CANDIDATE_POLICY_DEFERRED,
     CandidatePolicy,
 )
+from astock_lens.data.industry import IndustryMembership
 from astock_lens.data.repository.contracts import NormalizedRepository
 from astock_lens.data.snapshots.store import SnapshotStore
 from astock_lens.domain.enums import (
+    DataStatus,
     JobStage,
     MarketValidation,
     Signal,
@@ -46,6 +48,15 @@ from astock_lens.factors.config import FactorConfig
 from astock_lens.factors.contracts import FactorResult
 from astock_lens.jobs.models import JobRun, JobStatus, StageOutcome
 from astock_lens.jobs.store import JobStore
+from astock_lens.market.benchmark import (
+    BenchmarkEvidence,
+    BenchmarkEvidenceUnavailable,
+    compute_benchmark_evidence,
+)
+from astock_lens.market.industry import (
+    IndustryEvidenceUnavailable,
+    build_industry_evidence,
+)
 from astock_lens.market.regime import (
     MarketRegimeEvidenceIncomplete,
     MarketRegimeResult,
@@ -68,14 +79,7 @@ SYNC_SKIPPED = (
     "Pass a sync callable (or run `astock sync`) to land it first"
 )
 
-# The design lists BUILD_UNIVERSE before COMPUTE_FACTORS. This implementation
-# computes factors first because the Universe's liquidity rule consumes the
-# `avg_amount_20d` factor: measuring it twice would give the same quantity two
-# definitions. The deviation is deliberate and recorded in REVIEW_NOTES.md.
-#
-# BUILD_CANDIDATES comes after the market and signal stages, because a
-# Candidate is the object those layers have already spoken about. Building it
-# earlier publishes a partial result under a name that promises a complete one.
+# Stages that run unconditionally unless blocked by design decisions.
 EXECUTION_ORDER: tuple[JobStage, ...] = (
     JobStage.SYNC_DATA,
     JobStage.NORMALIZE,
@@ -93,10 +97,6 @@ EXECUTION_ORDER: tuple[JobStage, ...] = (
 # Why each blocked stage cannot run. Every reason names a decision the design
 # has not made, so nobody can read a blocked stage as a data outage.
 BLOCKED_REASONS: dict[JobStage, str] = {
-    JobStage.BUILD_CANDIDATES: (
-        "5D market validation evidence (industry excess, relative strength, volume ratio) "
-        "and signal candidate publishing semantics have not been completed and approved by owner (spec §5, §6)"
-    ),
     JobStage.UPDATE_WATCHLIST: (
         "no confirmed rule changes a watchlist state on its own; V1 transitions "
         "are user-driven and validated by the state machine (spec §13)"
@@ -179,6 +179,9 @@ def run_daily(
     candidate_policy: CandidatePolicy | None = None,
     qualifiers: Mapping[str, StrategyQualifier] | None = None,
     repository: NormalizedRepository | None = None,
+    benchmark_id: str = "000985.CSI",
+    benchmark_bars: Sequence[DailyBar] | None = None,
+    industry_by_symbol: Mapping[str, str] | None = None,
 ) -> DailyRunResult:
     """Run every stage of the daily pipeline once for one point in time.
 
@@ -205,6 +208,9 @@ def run_daily(
         candidate_policy=candidate_policy,
         qualifiers=qualifiers,
         repository=repository,
+        benchmark_id=benchmark_id,
+        benchmark_bars=benchmark_bars,
+        industry_by_symbol=industry_by_symbol,
     )
     state = _State()
 
@@ -250,6 +256,9 @@ class _Context:
     candidate_policy: CandidatePolicy | None
     qualifiers: Mapping[str, StrategyQualifier] | None = None
     repository: NormalizedRepository | None = None
+    benchmark_id: str = "000985.CSI"
+    benchmark_bars: Sequence[DailyBar] | None = None
+    industry_by_symbol: Mapping[str, str] | None = None
 
 
 def _blocked_reasons(stage: JobStage, context: _Context) -> tuple[str, ...]:
@@ -292,6 +301,7 @@ class _State:
     factor_results: tuple[FactorResult, ...] = ()
     strategy_results: tuple[StrategyResult, ...] = ()
     regime_result: MarketRegimeResult | None = None
+    benchmark_evidence: BenchmarkEvidence | None = None
     validation_results: tuple[MarketValidationResult, ...] = ()
     signal_results: tuple[SignalResult, ...] = ()
     market_validation_by_symbol: dict[str, MarketValidation] = field(
@@ -473,9 +483,27 @@ def _detect_regime(context: _Context, state: _State) -> StageOutcome:
             "Market breadth is unavailable: insufficient daily bars to calculate MA20 breadth"
         )
 
+    # 决策 A1：基准指数趋势（中证全指 000985.CSI）
+    index_trend: float | None = None
+    bm_bars = context.benchmark_bars
+    if bm_bars is None and daily_bars:
+        bm_bars = [b for b in daily_bars if b.symbol == context.benchmark_id]
+    if bm_bars and len(bm_bars) >= 60:
+        try:
+            bm_evidence = compute_benchmark_evidence(
+                benchmark_id=context.benchmark_id,
+                bars=bm_bars,
+                as_of=context.as_of,
+            )
+            state.benchmark_evidence = bm_evidence
+            index_trend = bm_evidence.trend_value
+        except BenchmarkEvidenceUnavailable:
+            pass
+
     regime_res = stages.market_regime_stage(
         as_of=context.as_of,
         breadth_ratio=breadth_ratio,
+        index_trend=index_trend,
     )
     state.regime_result = regime_res
     return StageOutcome(
@@ -516,11 +544,119 @@ def _market_validate(context: _Context, state: _State) -> StageOutcome:
     quals = _ensure_qualifications(context, state)
     strat_by_sym = _primary_strategy_by_symbol(quals)
     symbols = sorted(strat_by_sym.keys())
+
+    outcome = _required(state.outcome, stage=JobStage.MARKET_VALIDATE, name="NORMALIZE")
+    daily_bars = outcome.bars.daily_bars
+    bars_by_symbol: dict[str, list[DailyBar]] = {}
+    for b in daily_bars:
+        bars_by_symbol.setdefault(b.symbol, []).append(b)
+
+    # 1. 维度 4: 20日成交量量比 (volume_ratio_5_20)
+    vol_ratio_by_symbol: dict[str, float] = {}
+    for sym in symbols:
+        sym_bars = bars_by_symbol.get(sym, [])
+        valid_bars = [
+            b
+            for b in sym_bars
+            if b.trade_date <= context.as_of.date()
+            and b.volume is not None
+            and b.volume > 0
+        ]
+        if len(valid_bars) >= 20:
+            valid_bars.sort(key=lambda b: b.trade_date)
+            vol_20 = (
+                sum(b.volume for b in valid_bars[-20:] if b.volume is not None) / 20.0
+            )
+            vol_5 = sum(b.volume for b in valid_bars[-5:] if b.volume is not None) / 5.0
+            if vol_20 > 0:
+                vol_ratio_by_symbol[sym] = vol_5 / vol_20
+
+    # 2. 维度 3: 真实相对强弱（stock_ret_60d - benchmark_ret_60d）
+    rel_strength_by_symbol: dict[str, float] = {}
+    if state.benchmark_evidence is not None:
+        bm_ret_60d = state.benchmark_evidence.ret_60d
+        factors_by_symbol: dict[str, dict[str, float]] = {}
+        for fr in state.factor_results:
+            if fr.status == DataStatus.VALUE and fr.raw_value is not None:
+                factors_by_symbol.setdefault(fr.symbol, {})[fr.factor] = float(
+                    fr.raw_value
+                )
+        for sym in symbols:
+            stk_ret_60d = factors_by_symbol.get(sym, {}).get("ret_60d")
+            if stk_ret_60d is not None:
+                rel_strength_by_symbol[sym] = stk_ret_60d - bm_ret_60d
+
+    # 3. 维度 2: 申万二级行业超额 (industry_excess_return_20d)
+    industry_excess_by_symbol: dict[str, float] = {}
+    if context.industry_by_symbol:
+        all_memberships = [
+            IndustryMembership(
+                symbol=s,
+                industry_id=ind,
+                industry_name=ind,
+                as_of=context.as_of,
+                provider="westock_sector",
+            )
+            for s, ind in context.industry_by_symbol.items()
+        ]
+        membership_by_sym = {m.symbol: m for m in all_memberships}
+
+        member_returns_20d: dict[str, float] = {}
+        for fr in state.factor_results:
+            if (
+                fr.factor == "ret_20d"
+                and fr.status == DataStatus.VALUE
+                and fr.raw_value is not None
+            ):
+                member_returns_20d[fr.symbol] = float(fr.raw_value)
+
+        bm_ret_20d: float | None = None
+        bm_bars = context.benchmark_bars or (
+            [b for b in daily_bars if b.symbol == context.benchmark_id]
+            if daily_bars
+            else []
+        )
+        if bm_bars and len(bm_bars) >= 20:
+            v_bars = [
+                b
+                for b in bm_bars
+                if b.trade_date <= context.as_of.date()
+                and b.close is not None
+                and b.close > 0
+            ]
+            v_bars.sort(key=lambda b: b.trade_date)
+            if (
+                len(v_bars) >= 20
+                and v_bars[0].close is not None
+                and v_bars[-1].close is not None
+            ):
+                bm_ret_20d = (v_bars[-1].close - v_bars[0].close) / v_bars[0].close
+
+        for sym in symbols:
+            mem = membership_by_sym.get(sym)
+            if mem is not None:
+                try:
+                    ind_ev = build_industry_evidence(
+                        symbol=sym,
+                        membership=mem,
+                        all_memberships=all_memberships,
+                        member_returns_20d=member_returns_20d,
+                        benchmark_return_20d=bm_ret_20d,
+                        requested_level="SW2",
+                        as_of=context.as_of,
+                    )
+                    industry_excess_by_symbol[sym] = ind_ev.industry_excess_return_20d
+                except IndustryEvidenceUnavailable:
+                    pass
+
     val_results = stages.market_validation_stage(
         strategy_by_symbol=strat_by_sym,
         factor_results=state.factor_results,
         as_of=context.as_of,
         symbols=symbols,
+        vol_ratio_by_symbol=vol_ratio_by_symbol,
+        relative_strength_by_symbol=rel_strength_by_symbol,
+        industry_excess_by_symbol=industry_excess_by_symbol,
     )
     state.validation_results = val_results
     state.market_validation_by_symbol = {r.symbol: r.status for r in val_results}

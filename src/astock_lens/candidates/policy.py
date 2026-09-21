@@ -107,6 +107,7 @@ class RepresentativeCandidatePolicy:
     - Soft reserve: up to `soft_reserve_per_strategy` (default 3) qualified symbols per strategy.
     - Global fill: remaining slots filled by global lexicographic priority.
     - MarketValidation.CONTRADICTED is vetoed.
+    - Signal.BREAKDOWN is vetoed (approved decision D1).
     - Incomplete evidence (None market validation or signal) raises CandidateEvidenceIncomplete.
     """
 
@@ -132,11 +133,12 @@ class RepresentativeCandidatePolicy:
                     f"market_validation={item.market_validation}, signal={item.signal}"
                 )
 
-        # Filter out vetoed evidence
+        # Filter out vetoed evidence (CONTRADICTED market validation or BREAKDOWN signal veto - Decision D1)
         eligible = [
             item
             for item in evidence
             if item.market_validation != MarketValidation.CONTRADICTED
+            and item.signal != Signal.BREAKDOWN
         ]
         if not eligible:
             return ()

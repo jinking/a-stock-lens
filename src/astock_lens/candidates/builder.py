@@ -11,7 +11,7 @@ from datetime import datetime
 from astock_lens.candidates.context import primary_qualified_strategy
 from astock_lens.candidates.models import Candidate
 from astock_lens.candidates.policy import CandidateEvidence, CandidateSelection
-from astock_lens.domain.enums import NextAction
+from astock_lens.domain.enums import NextAction, Signal
 from astock_lens.domain.models import SnapshotLineage
 from astock_lens.strategies.contracts import StrategyResult
 
@@ -64,10 +64,18 @@ class CandidateBuilder:
                 }
             )
 
-            action = next_action if next_action is not None else NextAction.WATCH
+            action = (
+                NextAction.WATCH
+                if evidence.signal == Signal.TREND_WEAKEN
+                else (next_action if next_action is not None else NextAction.WATCH)
+            )
             primary_strat = (
                 primary_qualified_strategy(qualified_quals) if qualified_quals else ""
             )
+
+            candidate_risks = [r for res in qualified_results for r in res.risks]
+            if evidence.signal == Signal.TREND_WEAKEN:
+                candidate_risks.append("技术信号提示走弱风险 (TREND_WEAKEN)")
 
             return Candidate(
                 symbol=selection.symbol,
@@ -84,7 +92,7 @@ class CandidateBuilder:
                     *selection.reasons,
                     *(r for res in qualified_results for r in res.reasons),
                 ),
-                risks=tuple(r for res in qualified_results for r in res.risks),
+                risks=tuple(candidate_risks),
             )
 
         # Legacy fallback

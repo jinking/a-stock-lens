@@ -456,6 +456,9 @@ def market_validation_stage(
     as_of: datetime,
     symbols: Sequence[str] | None = None,
     validator: MarketValidator | None = None,
+    industry_excess_by_symbol: Mapping[str, float] | None = None,
+    vol_ratio_by_symbol: Mapping[str, float] | None = None,
+    relative_strength_by_symbol: Mapping[str, float] | None = None,
 ) -> tuple[MarketValidationResult, ...]:
     """Validate candidate market behavior against the 5-dimension matrix."""
     active_validator = validator or MarketValidator()
@@ -475,6 +478,21 @@ def market_validation_stage(
             strategy_id=strategy_by_symbol[sym],
             as_of=as_of,
             factors=factors,
+            industry_excess_return=(
+                industry_excess_by_symbol.get(sym)
+                if industry_excess_by_symbol is not None
+                else None
+            ),
+            vol_ratio=(
+                vol_ratio_by_symbol.get(sym)
+                if vol_ratio_by_symbol is not None
+                else None
+            ),
+            relative_strength_60d=(
+                relative_strength_by_symbol.get(sym)
+                if relative_strength_by_symbol is not None
+                else None
+            ),
         )
         results.append(active_validator.validate(context))
     return tuple(results)

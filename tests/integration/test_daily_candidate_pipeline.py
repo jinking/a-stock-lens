@@ -52,12 +52,13 @@ def test_daily_pipeline_executes_regime_validation_signal_and_candidates(
         candidate_policy=policy,
     )
 
-    # 验证各阶段执行状态（Plan A 门禁下 BUILD_CANDIDATES 处于 BLOCKED 状态，待 Plan B 补齐 5D 证据并通过审批）
+    # 验证各阶段执行状态（Plan B 审批通过并完成五维接线后，BUILD_CANDIDATES 顺利执行为 SUCCEEDED）
     runs_by_type = {run.job_type: run for run in result.runs}
     assert runs_by_type[JobStage.DETECT_REGIME].status == JobStatus.SUCCEEDED
     assert runs_by_type[JobStage.MARKET_VALIDATE].status == JobStatus.SUCCEEDED
     assert runs_by_type[JobStage.RUN_SIGNALS].status == JobStatus.SUCCEEDED
-    assert runs_by_type[JobStage.BUILD_CANDIDATES].status == JobStatus.BLOCKED
+    assert runs_by_type[JobStage.BUILD_CANDIDATES].status == JobStatus.SUCCEEDED
 
-    # 验证 CANDIDATE 快照在安全门禁下严禁落盘
-    assert not (local_tmp / "snapshots" / "CANDIDATE" / "2026-09-04.json").exists()
+    # 验证 CANDIDATE 快照正式落盘
+    assert (local_tmp / "snapshots" / "CANDIDATE" / "2026-09-04.json").exists()
+    assert len(result.candidates) > 0

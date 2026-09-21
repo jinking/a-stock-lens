@@ -132,10 +132,10 @@ def test_detect_regime_fails_closed_when_market_breadth_is_unavailable(
     assert regime_run.status != JobStatus.SUCCEEDED
 
 
-def test_incomplete_5d_market_evidence_fails_candidate_publication(
+def test_unconfigured_candidate_policy_fails_candidate_publication(
     local_tmp: Path,
 ) -> None:
-    """Gap 4: 5 维市场证据不完整时，Candidate 发布必须 fail-closed，严禁发布 CANDIDATE 快照。"""
+    """未配置批准的 CandidatePolicy 时，Candidate 发布必须 fail-closed，严禁发布 CANDIDATE 快照。"""
     factor_configs = tuple(
         load_factor_config(path)
         for path in sorted((CONFIGS / "factors").glob("*.yaml"))
@@ -157,14 +157,14 @@ def test_incomplete_5d_market_evidence_fails_candidate_publication(
         job_store=job_store,
         dataset="daily_bars_long",
         qualifiers=qualifiers,
-        candidate_policy=RepresentativeCandidatePolicy(version="v1"),
+        candidate_policy=None,
     )
 
     runs = {r.job_type: r for r in result.runs}
     candidate_run = runs.get(JobStage.BUILD_CANDIDATES)
     assert candidate_run is not None
-    # 证据未补齐且语义未审批前，BUILD_CANDIDATES 必须保持 BLOCKED 或 FAILED，不得写入 CANDIDATE 快照
-    assert candidate_run.status != JobStatus.SUCCEEDED
+    # 未配置候选策略时，BUILD_CANDIDATES 必须保持 BLOCKED，不得写入 CANDIDATE 快照
+    assert candidate_run.status == JobStatus.BLOCKED
     assert not (
         local_tmp / "snapshots" / "CANDIDATE" / f"{AS_OF.date().isoformat()}.json"
     ).exists()

@@ -310,3 +310,52 @@ def test_final_ties_are_symbol_deterministic() -> None:
     ev_a = _make_evidence("600001.SH", rank_percentile=0.95)
     selected = policy.select([ev_b, ev_a])
     assert [s.symbol for s in selected] == ["600001.SH", "600002.SH"]
+
+
+def test_breakdown_signal_is_vetoed_under_approved_decision_d1() -> None:
+    """根据所有者批准决策 D1：BREAKDOWN 严重破位信号触发一票否决，直接拦截不发布。"""
+    policy = RepresentativeCandidatePolicy()
+    ev_breakdown = _make_evidence(
+        "600001.SH",
+        rank_percentile=0.99,
+        market_validation=MarketValidation.CONFIRMED,
+        signal=Signal.BREAKDOWN,
+    )
+    ev_normal = _make_evidence(
+        "600002.SH",
+        rank_percentile=0.91,
+        market_validation=MarketValidation.CONFIRMED,
+        signal=Signal.BREAKOUT,
+    )
+    selected = policy.select([ev_breakdown, ev_normal])
+    symbols = [s.symbol for s in selected]
+    assert "600001.SH" not in symbols
+    assert "600002.SH" in symbols
+
+
+def test_trend_weaken_signal_is_eligible_under_approved_decision_e1() -> None:
+    """根据所有者批准决策 E1：TREND_WEAKEN 走弱信号允许入选候选池（由 Builder 标为 WATCH 并预警）。"""
+    policy = RepresentativeCandidatePolicy()
+    ev_weaken = _make_evidence(
+        "600001.SH",
+        rank_percentile=0.95,
+        market_validation=MarketValidation.CONFIRMED,
+        signal=Signal.TREND_WEAKEN,
+    )
+    selected = policy.select([ev_weaken])
+    assert len(selected) == 1
+    assert selected[0].symbol == "600001.SH"
+
+
+def test_no_signal_is_eligible_under_approved_decision_f1() -> None:
+    """根据所有者批准决策 F1：NO_SIGNAL 无特定形态信号允许作为常规候选入选。"""
+    policy = RepresentativeCandidatePolicy()
+    ev_no_sig = _make_evidence(
+        "600001.SH",
+        rank_percentile=0.95,
+        market_validation=MarketValidation.CONFIRMED,
+        signal=Signal.NO_SIGNAL,
+    )
+    selected = policy.select([ev_no_sig])
+    assert len(selected) == 1
+    assert selected[0].symbol == "600001.SH"

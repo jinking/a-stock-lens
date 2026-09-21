@@ -33,6 +33,7 @@ class MarketValidationContext(DomainRecord):
     factors: tuple[FactorResult, ...] = ()
     industry_excess_return: float | None = None
     vol_ratio: float | None = None
+    relative_strength_60d: float | None = None
 
 
 class MarketValidationResult(DomainRecord):
@@ -147,15 +148,26 @@ class MarketValidator:
                 )
 
         # 4. 维度 3: 相对强弱 / 60日趋势
-        ret_60d_res = factor_map.get("ret_60d")
-        if ret_60d_res is not None:
-            ret_60d = float(ret_60d_res.raw_value)  # type: ignore[arg-type]
-            if ret_60d > 0.0:
+        if context.relative_strength_60d is not None:
+            rel_str = context.relative_strength_60d
+            if rel_str > 0.0:
                 positive_count += 1
-                reasons.append(f"中期趋势向上 (60日涨幅 {ret_60d:+.2%})")
-            elif ret_60d < -0.20:
+                reasons.append(f"相对基准超额向上 (相对强弱 {rel_str:+.2%})")
+            elif rel_str < -0.15:
                 negative_count += 1
-                risks.append(f"中期严重亏损破位 (60日跌幅 {ret_60d:+.2%})")
+                risks.append(f"相对基准大幅落后 (相对强弱 {rel_str:+.2%})")
+            else:
+                reasons.append(f"相对基准表现平稳 (相对强弱 {rel_str:+.2%})")
+        else:
+            ret_60d_res = factor_map.get("ret_60d")
+            if ret_60d_res is not None:
+                ret_60d = float(ret_60d_res.raw_value)  # type: ignore[arg-type]
+                if ret_60d > 0.0:
+                    positive_count += 1
+                    reasons.append(f"中期趋势向上 (60日涨幅 {ret_60d:+.2%})")
+                elif ret_60d < -0.20:
+                    negative_count += 1
+                    risks.append(f"中期严重亏损破位 (60日跌幅 {ret_60d:+.2%})")
 
         # 5. 维度 4: 量价配合
         if context.vol_ratio is not None:

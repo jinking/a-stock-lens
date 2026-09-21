@@ -150,3 +150,72 @@ def test_candidate_lineage_carries_complete_stage_versions() -> None:
     assert "v1" in candidate.lineage.market_validation_versions()
     assert "v1" in candidate.lineage.signal_versions()
     assert "v1" in candidate.lineage.regime_versions()
+
+
+def test_candidate_builder_trend_weaken_under_approved_decision_e1() -> None:
+    """根据决策 E1：TREND_WEAKEN 标的动作标记为 WATCH，并在 risks 中明确走弱风险警示。"""
+    strategy_res = _strategy_result(strategy_version="v1")
+    strategy_qual = StrategyQualification(
+        symbol="600000.SH",
+        strategy_id="momentum",
+        strategy_version="v1",
+        qualification_version="v1",
+        qualified=True,
+        percentile_pass=True,
+        absolute_pass=True,
+        rank_percentile=0.95,
+    )
+    evidence = CandidateEvidence(
+        symbol="600000.SH",
+        strategy_results=(strategy_res,),
+        strategy_qualifications=(strategy_qual,),
+        market_validation=MarketValidation.CONFIRMED,
+        signal=Signal.TREND_WEAKEN,
+    )
+    selection = CandidateSelection(
+        symbol="600000.SH",
+        policy_version="v1",
+        reasons=("top candidate",),
+    )
+    candidate = CandidateBuilder().build(
+        evidence=evidence,
+        selection=selection,
+        as_of=AS_OF,
+        lineage=LINEAGE,
+    )
+    assert candidate.next_action == NextAction.WATCH
+    assert any("TREND_WEAKEN" in r or "走弱" in r for r in candidate.risks)
+
+
+def test_candidate_builder_no_signal_under_approved_decision_f1() -> None:
+    """根据决策 F1：NO_SIGNAL 标的允许作为常规候选入选，默认动作标记为 WATCH。"""
+    strategy_res = _strategy_result(strategy_version="v1")
+    strategy_qual = StrategyQualification(
+        symbol="600000.SH",
+        strategy_id="value",
+        strategy_version="v1",
+        qualification_version="v1",
+        qualified=True,
+        percentile_pass=True,
+        absolute_pass=True,
+        rank_percentile=0.92,
+    )
+    evidence = CandidateEvidence(
+        symbol="600000.SH",
+        strategy_results=(strategy_res,),
+        strategy_qualifications=(strategy_qual,),
+        market_validation=MarketValidation.CONFIRMED,
+        signal=Signal.NO_SIGNAL,
+    )
+    selection = CandidateSelection(
+        symbol="600000.SH",
+        policy_version="v1",
+        reasons=("top candidate",),
+    )
+    candidate = CandidateBuilder().build(
+        evidence=evidence,
+        selection=selection,
+        as_of=AS_OF,
+        lineage=LINEAGE,
+    )
+    assert candidate.next_action == NextAction.WATCH

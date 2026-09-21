@@ -104,3 +104,29 @@ def test_regime_detector_raises_when_no_data() -> None:
     )
     with pytest.raises(ValueError, match="Missing market regime inputs"):
         detector.detect(ctx)
+
+
+def test_regime_detector_with_trend_ratio_bull_under_approved_decision_a1() -> None:
+    """决策 A1：当指数趋势以均线比率 (ma_20 / ma_60 > 1.0) 传入且宽度高时判定为 BULL。"""
+    detector = MarketRegimeDetector(version="v1")
+    ctx = MarketRegimeContext(
+        as_of=AS_OF,
+        breadth_ratio=0.62,
+        index_trend=1.035,  # 均线比率 ma_20 / ma_60 = 1.035 > 1.0
+    )
+    result = detector.detect(ctx)
+    assert result.regime == MarketRegime.BULL
+    assert any("走多" in r or "均线" in r for r in result.reasons)
+
+
+def test_regime_detector_with_trend_ratio_bear_under_approved_decision_a1() -> None:
+    """决策 A1：当指数趋势以均线比率 (ma_20 / ma_60 < 1.0) 传入且宽度低时判定为 BEAR。"""
+    detector = MarketRegimeDetector(version="v1")
+    ctx = MarketRegimeContext(
+        as_of=AS_OF,
+        breadth_ratio=0.28,
+        index_trend=0.965,  # 均线比率 ma_20 / ma_60 = 0.965 < 1.0
+    )
+    result = detector.detect(ctx)
+    assert result.regime == MarketRegime.BEAR
+    assert any("下行" in r or "空头" in r or "走弱" in r for r in result.reasons)

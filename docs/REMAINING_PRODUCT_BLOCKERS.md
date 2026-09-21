@@ -402,8 +402,8 @@ PYTHONPATH= .venv/bin/python -m astock_lens.cli.app calibrate qualification-impa
    - 决策材料包：[`docs/decision-packets/2026-09-21-candidate-v2-market-evidence-decision.md`](file:///Users/huangjinjin/Documents/ChatGPT/a-stock-lens/docs/decision-packets/2026-09-21-candidate-v2-market-evidence-decision.md)；
    - 明确呈报 6 大核心决策（基准公式、极端波动率、行业层级、BREAKDOWN/TREND_WEAKEN/NO_SIGNAL 候选发布语义）；
    - 基于 2026-09-19 真实全量快照 621 只合格股票给出确切分布数据；
-4. **Mandatory OWNER STOP Gate（强制停机等待批复）**：
-   - 保持 `pipelines/daily.py` 中 `BUILD_CANDIDATES` 阻断；
-   - 严禁在所有者正式签署批复前推进 Task 7 生产接线与 Candidate v2 发布。
+4. **所有者正式批复（2026-09-21 已批准）**：
+   - 项目所有者正式签署批准推荐组合（A1 中证全指趋势 + B3 波动率延期 + C1 申万二级超额 + D1 严重破位一票否决 + E1 走弱转WATCH + F1 无形态常规发布）；
+   - OWNER STOP GATE 正式解除，工程侧按批准口径推进 Plan B 后半段（Task 7~9：接通完整 R2 与五维验证、独立校验器复算与全链路验收）。
 
 

@@ -61,12 +61,21 @@ class MarketRegimeDetector:
 
         reasons: list[str] = list(context.reasons)
 
+        def _is_trend_up(t: float) -> bool:
+            return t > 1.0 if t > 0.5 else t > 0.0
+
+        def _is_trend_down(t: float) -> bool:
+            return t < 1.0 if t > 0.5 else t < 0.0
+
+        def _fmt_trend(t: float) -> str:
+            return f"ma_20/ma_60 = {t:.4f}" if t > 0.5 else f"{t:+.2%}"
+
         if breadth is not None:
             if breadth > 0.55:
-                if index_trend is not None and index_trend > 0:
+                if index_trend is not None and _is_trend_up(index_trend):
                     regime = MarketRegime.BULL
                     reasons.append(
-                        f"全市场宽度强劲 ({breadth:.1%}) 且基准指数均线走多 ({index_trend:+.2%})"
+                        f"全市场宽度强劲 ({breadth:.1%}) 且基准指数均线走多 ({_fmt_trend(index_trend)})"
                     )
                 else:
                     regime = MarketRegime.RANGE_UP
@@ -77,10 +86,10 @@ class MarketRegimeDetector:
                 regime = MarketRegime.RANGE
                 reasons.append(f"全市场宽度处于均衡震荡区间 ({breadth:.1%})")
             else:
-                if index_trend is not None and index_trend < 0:
+                if index_trend is not None and _is_trend_down(index_trend):
                     regime = MarketRegime.BEAR
                     reasons.append(
-                        f"全市场宽度偏弱 ({breadth:.1%}) 且基准指数下行 ({index_trend:+.2%})"
+                        f"全市场宽度偏弱 ({breadth:.1%}) 且基准指数下行 ({_fmt_trend(index_trend)})"
                     )
                 else:
                     regime = MarketRegime.RANGE_DOWN
@@ -88,15 +97,15 @@ class MarketRegimeDetector:
         else:
             # breadth is None but index_trend is available
             assert index_trend is not None
-            if index_trend > 0.02:
+            if index_trend > 1.02 if index_trend > 0.5 else index_trend > 0.02:
                 regime = MarketRegime.BULL
-                reasons.append(f"基准指数单边强劲走多 ({index_trend:+.2%})")
-            elif index_trend < -0.02:
+                reasons.append(f"基准指数单边强劲走多 ({_fmt_trend(index_trend)})")
+            elif index_trend < 0.98 if index_trend > 0.5 else index_trend < -0.02:
                 regime = MarketRegime.BEAR
-                reasons.append(f"基准指数单边下行 ({index_trend:+.2%})")
+                reasons.append(f"基准指数单边下行 ({_fmt_trend(index_trend)})")
             else:
                 regime = MarketRegime.RANGE
-                reasons.append(f"基准指数处于横盘震荡 ({index_trend:+.2%})")
+                reasons.append(f"基准指数处于横盘震荡 ({_fmt_trend(index_trend)})")
 
         # 极端波动率降级检查
         if context.extreme_volatility:
