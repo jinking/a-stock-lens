@@ -429,7 +429,7 @@ def test_daily_pipeline_to_discovery_workflow_end_to_end(local_tmp: Path) -> Non
         "--allow-incomplete",
     )
     assert daily_res.exit_code == 0, daily_res.output
-    assert "daily pipeline incomplete: 1 blocked, 0 failed" in daily_res.output
+    assert "daily pipeline incomplete: 2 blocked, 0 failed" in daily_res.output
 
     # 2. 检查生成的快照文件
     assert (
@@ -441,8 +441,8 @@ def test_daily_pipeline_to_discovery_workflow_end_to_end(local_tmp: Path) -> Non
     assert (
         snapshot_root / SnapshotKind.STRATEGY.value / f"{DAY_2026_09_04}.json"
     ).is_file()
-    # Candidate 快照正式生成
-    assert (
+    # Candidate 快照在审批通过前保持 absent（被安全阻断）
+    assert not (
         snapshot_root / SnapshotKind.CANDIDATE.value / f"{DAY_2026_09_04}.json"
     ).is_file()
 
@@ -477,7 +477,7 @@ def test_daily_pipeline_to_discovery_workflow_end_to_end(local_tmp: Path) -> Non
     assert stock_res.exit_code == 0, stock_res.output
     assert f"300750.SZ ({DAY_2026_09_04})" in stock_res.stdout
     assert "universe: included" in stock_res.stdout
-    assert "candidate: WATCH" in stock_res.stdout
+    assert "candidate: not published for this date" in stock_res.stdout
 
     # 5. API 查询
     client = TestClient(
@@ -497,9 +497,12 @@ def test_daily_pipeline_to_discovery_workflow_end_to_end(local_tmp: Path) -> Non
 
     resp_stock = client.get(f"/stocks/300750.SZ?as_of={DAY_2026_09_04}")
     assert resp_stock.status_code == 200
-    assert resp_stock.json()["candidate_status"] == "published"
-    assert resp_stock.json()["candidate"] is not None
+    assert resp_stock.json()["candidate_status"] == "not_published"
+    assert resp_stock.json()["candidate"] is None
 
     resp_candidates = client.get("/candidates", params={"as_of": DAY_2026_09_04})
-    assert resp_candidates.status_code == 200
-    assert len(resp_candidates.json()) > 0
+    assert resp_candidates.status_code == 404
+    assert (
+        f"no CANDIDATE snapshot for {DAY_2026_09_04}"
+        in resp_candidates.json()["detail"]
+    )

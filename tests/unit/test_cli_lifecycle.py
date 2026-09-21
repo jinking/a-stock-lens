@@ -21,6 +21,7 @@ import pytest
 from click.testing import Result
 from typer.testing import CliRunner
 
+from astock_lens.candidates.models import Candidate
 from astock_lens.cli.app import app
 from astock_lens.data.contracts import (
     FetchRequest,
@@ -28,7 +29,9 @@ from astock_lens.data.contracts import (
     RawDataset,
     RawPayload,
 )
-from astock_lens.domain.enums import DataStatus, SnapshotKind
+from astock_lens.data.snapshots.store import JsonSnapshotStore
+from astock_lens.domain.enums import DataStatus, NextAction, SnapshotKind
+from astock_lens.domain.models import SnapshotLineage
 
 ROOT = Path(__file__).resolve().parents[2]
 CSV_ROOT = ROOT / "tests" / "fixtures" / "csv"
@@ -285,6 +288,21 @@ def test_watch_rejects_a_state_that_is_not_a_state(local_tmp: Path) -> None:
 
 def test_stock_profile_reads_the_stored_evidence(local_tmp: Path) -> None:
     _formal_run(local_tmp)
+    # 管线在审批前阻断发布 CANDIDATE 快照；显式写入一条已存储候选，以验证 stock 命令的读取与展示
+    candidate_store = JsonSnapshotStore(local_tmp / "snapshots")
+    candidate_store.write(
+        SnapshotKind.CANDIDATE,
+        datetime(2026, 9, 4, 15, 0, tzinfo=UTC),
+        [
+            Candidate(
+                symbol="300750.SZ",
+                as_of=datetime(2026, 9, 4, 15, 0, tzinfo=UTC),
+                next_action=NextAction.WATCH,
+                lineage=SnapshotLineage(strategy_version="v1"),
+                primary_strategy_id="momentum",
+            )
+        ],
+    )
 
     result = _invoke(local_tmp, "stock", "300750.SZ", "--as-of", DAY)
 
