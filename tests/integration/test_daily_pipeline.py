@@ -18,6 +18,7 @@ from astock_lens.factors.config import load_factor_config
 from astock_lens.jobs.models import JobStatus, StageOutcome
 from astock_lens.jobs.store import JsonJobStore
 from astock_lens.pipelines.daily import EXECUTION_ORDER, DailyRunResult, run_daily
+from astock_lens.qualifications.registry import load_canonical_qualifiers
 from astock_lens.strategies.registry import load_scanners
 from astock_lens.universe.config import load_universe_config
 
@@ -66,26 +67,38 @@ CANONICAL_ORDER = (
 )
 
 
+_DEFAULT_QUALIFIERS = object()
+
+
 def _run(
     local_tmp: Path,
     *,
     sync: Callable[[], StageOutcome] | None = None,
     dataset: str = LONG_DATASET,
+    qualifiers: object = _DEFAULT_QUALIFIERS,
 ) -> DailyRunResult:
+    factor_configs = tuple(
+        load_factor_config(path)
+        for path in sorted((CONFIGS / "factors").glob("*.yaml"))
+    )
+    if qualifiers is _DEFAULT_QUALIFIERS:
+        factor_names = frozenset(c.name for c in factor_configs)
+        active_qualifiers = load_canonical_qualifiers(known_factor_names=factor_names)
+    else:
+        active_qualifiers = qualifiers  # type: ignore[assignment]
+
     return run_daily(
         csv_root=CSV_ROOT,
         as_of=AS_OF,
         universe_config=load_universe_config(CONFIGS / "universe.yaml"),
-        factor_configs=tuple(
-            load_factor_config(path)
-            for path in sorted((CONFIGS / "factors").glob("*.yaml"))
-        ),
+        factor_configs=factor_configs,
         scanners=load_scanners(CONFIGS / "strategies"),
         strategy_directory=CONFIGS / "strategies",
         store=JsonSnapshotStore(local_tmp / "snapshots"),
         job_store=JsonJobStore(local_tmp / "jobs"),
         dataset=dataset,
         sync=sync,
+        qualifiers=active_qualifiers,
     )
 
 
@@ -135,7 +148,7 @@ def test_the_candidate_stage_is_blocked_while_its_layers_are_missing(
     local_tmp: Path,
 ) -> None:
     """未配置资格门槛与候选政策时，BUILD_CANDIDATES 安全阻断。"""
-    result = _run(local_tmp)
+    result = _run(local_tmp, qualifiers=None)
 
     run = next(
         item for item in result.runs if item.job_type is JobStage.BUILD_CANDIDATES

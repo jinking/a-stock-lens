@@ -46,7 +46,10 @@ from astock_lens.factors.config import FactorConfig
 from astock_lens.factors.contracts import FactorResult
 from astock_lens.jobs.models import JobRun, JobStatus, StageOutcome
 from astock_lens.jobs.store import JobStore
-from astock_lens.market.regime import MarketRegimeResult
+from astock_lens.market.regime import (
+    MarketRegimeEvidenceIncomplete,
+    MarketRegimeResult,
+)
 from astock_lens.market.validation import MarketValidationResult
 from astock_lens.pipelines import stages
 from astock_lens.qualifications.contracts import (
@@ -90,6 +93,10 @@ EXECUTION_ORDER: tuple[JobStage, ...] = (
 # Why each blocked stage cannot run. Every reason names a decision the design
 # has not made, so nobody can read a blocked stage as a data outage.
 BLOCKED_REASONS: dict[JobStage, str] = {
+    JobStage.BUILD_CANDIDATES: (
+        "5D market validation evidence (industry excess, relative strength, volume ratio) "
+        "and signal candidate publishing semantics have not been completed and approved by owner (spec §5, §6)"
+    ),
     JobStage.UPDATE_WATCHLIST: (
         "no confirmed rule changes a watchlist state on its own; V1 transitions "
         "are user-driven and validated by the state machine (spec §13)"
@@ -248,6 +255,9 @@ class _Context:
 def _blocked_reasons(stage: JobStage, context: _Context) -> tuple[str, ...]:
     """这个阶段今天不能跑的**全部**原因，一条都不许省。"""
     reasons: list[str] = []
+    base_reason = BLOCKED_REASONS.get(stage)
+    if base_reason is not None:
+        reasons.append(base_reason)
     missing = _missing_upstream(stage)
     if missing:
         reasons.append(
@@ -256,13 +266,20 @@ def _blocked_reasons(stage: JobStage, context: _Context) -> tuple[str, ...]:
             "implementation, and a result published without them would read as "
             "a complete one"
         )
-    if stage is JobStage.BUILD_CANDIDATES:
-        if not context.qualifiers:
-            reasons.append(
-                "strategy qualification rules are not configured: absolute quality thresholds have not been approved"
-            )
-        if context.candidate_policy is None:
-            reasons.append(CANDIDATE_POLICY_DEFERRED)
+    if (
+        stage
+        in (
+            JobStage.MARKET_VALIDATE,
+            JobStage.RUN_SIGNALS,
+            JobStage.BUILD_CANDIDATES,
+        )
+        and not context.qualifiers
+    ):
+        reasons.append(
+            "strategy qualification rules are not configured: absolute quality thresholds have not been approved"
+        )
+    if stage is JobStage.BUILD_CANDIDATES and context.candidate_policy is None:
+        reasons.append(CANDIDATE_POLICY_DEFERRED)
     return tuple(reasons)
 
 
@@ -298,16 +315,6 @@ def _execute(stage: JobStage, *, context: _Context, state: _State) -> JobRun:
             status=JobStatus.SKIPPED,
             started_at=started_at,
             note=SYNC_SKIPPED,
-        )
-
-    reason = BLOCKED_REASONS.get(stage)
-    if reason is not None:
-        return _run(
-            stage,
-            context,
-            status=JobStatus.BLOCKED,
-            started_at=started_at,
-            error=reason,
         )
 
     blocked = _blocked_reasons(stage, context)
@@ -461,9 +468,14 @@ def _detect_regime(context: _Context, state: _State) -> StageOutcome:
         if counted > 0:
             breadth_ratio = above_ma20 / counted
 
+    if breadth_ratio is None:
+        raise MarketRegimeEvidenceIncomplete(
+            "Market breadth is unavailable: insufficient daily bars to calculate MA20 breadth"
+        )
+
     regime_res = stages.market_regime_stage(
         as_of=context.as_of,
-        breadth_ratio=breadth_ratio if breadth_ratio is not None else 0.50,
+        breadth_ratio=breadth_ratio,
     )
     state.regime_result = regime_res
     return StageOutcome(

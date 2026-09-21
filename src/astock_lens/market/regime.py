@@ -15,6 +15,10 @@ from astock_lens.domain.enums import MarketRegime
 from astock_lens.domain.models import DomainRecord, SnapshotLineage
 
 
+class MarketRegimeEvidenceIncomplete(ValueError, RuntimeError):
+    """Raised when essential evidence for market regime detection is missing or incomplete."""
+
+
 class MarketRegimeContext(DomainRecord):
     """Context input for market regime detection."""
 
@@ -51,7 +55,7 @@ class MarketRegimeDetector:
         index_trend = context.index_trend
 
         if breadth is None and index_trend is None:
-            raise ValueError(
+            raise MarketRegimeEvidenceIncomplete(
                 "Missing market regime inputs: both breadth_ratio and index_trend are None"
             )
 

@@ -20,6 +20,10 @@ from astock_lens.domain.models import DomainRecord, SnapshotLineage
 from astock_lens.factors.contracts import FactorResult
 
 
+class MarketValidationEvidenceIncomplete(RuntimeError):
+    """Raised when required 5-dimension market validation inputs are missing or incomplete."""
+
+
 class MarketValidationContext(DomainRecord):
     """Context input for market validation."""
 
@@ -63,6 +67,11 @@ class MarketValidator:
             for f in context.factors
             if f.status == DataStatus.VALUE and f.raw_value is not None
         }
+
+        if not factor_map:
+            raise MarketValidationEvidenceIncomplete(
+                f"Missing market validation factors for symbol {context.symbol}"
+            )
 
         reasons: list[str] = []
         risks: list[str] = []
