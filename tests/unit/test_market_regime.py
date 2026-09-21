@@ -9,6 +9,7 @@ from astock_lens.domain.enums import MarketRegime
 from astock_lens.market.regime import (
     MarketRegimeContext,
     MarketRegimeDetector,
+    MarketRegimeEvidenceIncomplete,
     MarketRegimeResult,
 )
 
@@ -130,3 +131,39 @@ def test_regime_detector_with_trend_ratio_bear_under_approved_decision_a1() -> N
     result = detector.detect(ctx)
     assert result.regime == MarketRegime.BEAR
     assert any("下行" in r or "空头" in r or "走弱" in r for r in result.reasons)
+
+
+def test_r2_requires_breadth_and_index_trend() -> None:
+    detector = MarketRegimeDetector(version="v2")
+    ctx = MarketRegimeContext(
+        as_of=AS_OF,
+        breadth_ratio=0.61,
+        index_trend=None,
+        extreme_volatility=False,
+    )
+    with pytest.raises(MarketRegimeEvidenceIncomplete):
+        detector.detect(ctx)
+
+
+def test_r2_requires_breadth_when_index_trend_present() -> None:
+    detector = MarketRegimeDetector(version="v2")
+    ctx = MarketRegimeContext(
+        as_of=AS_OF,
+        breadth_ratio=None,
+        index_trend=1.035,
+        extreme_volatility=False,
+    )
+    with pytest.raises(MarketRegimeEvidenceIncomplete):
+        detector.detect(ctx)
+
+
+def test_r2_b3_volatility_deferred_reason() -> None:
+    detector = MarketRegimeDetector(version="v2")
+    ctx = MarketRegimeContext(
+        as_of=AS_OF,
+        breadth_ratio=0.68,
+        index_trend=1.035,
+        extreme_volatility=False,
+    )
+    result = detector.detect(ctx)
+    assert any("B3" in r or "暂缓启用" in r for r in result.reasons)
