@@ -55,6 +55,7 @@
   - **已实现基础设施（Implemented Infrastructure）**：策略资格模型与契约（`src/astock_lens/qualifications/`）、6 个策略判定器框架、横截面代表性选择政策（`RepresentativeCandidatePolicy`）、候选证据装配与持久化（`strategy_qualifications`, `candidate_policy_version`）、管线阶段解耦（`qualification_stage` 与 `candidate_stage`）、全市场只读校准报告引擎与 CLI（`astock calibrate candidates`）、独立产物审计器（`tests/artifacts/validator.py`）；
   - **已修复并审计（Repaired + Audited，2026-09-20）**：六个策略的绝对质量门槛（Value/Growth/GARP/Quality/Dividend/Momentum）生产配置已恢复为所有者批准口径（`configs/qualifications/*.yaml`）；资格判定改用该股票完整 Factor 证据；非法配置 fail-closed；已完成全研究池只读审计（见 `docs/decision-packets/2026-09-20-qualification-repair-audit.md`）。
   - **生产闭环与首期发布（2026-09-21）**：日常调度全链路打通，成功生成 2026-09-19 正式 `CANDIDATE` 快照（50 只标的）；经独立校验器全量单快照与跨快照审查 0 findings（见 `docs/decision-packets/2026-09-20-candidate-snapshot-audit.md`）；API 与 CLI 全面连通。
+  - **Candidate v2 市场证据与信号发布全面加固（2026-09-21）**：项目所有者正式批准 A1/B3/C1/D1/E1/F1 决策组合；完成 Plan A（安全门禁、确定性主策略、策略显式市场验证/信号）与 Plan B（R2 中证全指均线比率趋势、5D 申万二级超额与真实基准超额）；在隔离沙箱中全量跑通 Candidate v2 全链路，经独立校验器全量 0 findings（见 `docs/decision-packets/2026-09-21-candidate-v2-audit.md`）。顺利进入 Plan C。
 - [ ] **分红支付率的形状**：实测榜首出现 1950%/274% 的支付率（动用留存收益或特别分红），当前线性加权把 1950% 与 90% 同等对待。选项：设上限 / 区间偏好 / 接受现状。
 - [ ] **Growth 极值稳健化**：榜首 `net_profit_parent_yoy` 达 71528%，百分位把 3000% 与 70000% 压成相邻名次。选项：缩尾 / 要求两端同时成立 / 接受现状。
 - [ ] **PEG 值域复核**：源站 PEG 值域是 83–1503（正常 0–5）且出现负值。选项：接受其相对排序 / 自算 `pe_ttm / net_profit_parent_cagr_3y`。

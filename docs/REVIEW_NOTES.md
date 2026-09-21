@@ -2133,6 +2133,36 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
 - `tests/unit/test_snapshot_store.py::test_candidate_snapshot_conflict_cannot_be_overwritten_or_bypassed`：锁定 JSON 存储中 CANDIDATE 快照的防覆写与防绕过能力，验证冲突发生后原有快照数据完整无损。
 - `tests/unit/test_duckdb_snapshot_store.py::test_candidate_snapshot_conflict_refused_across_both_stores`：在跨实现协议测试中强化 CANDIDATE 快照相同键不同内容的抛错与防覆写一致性。
 
+---
 
+## 三十九、Candidate v2 独立复算与全链路生产验收（Plan B Task 8 & 9，2026-09-21）
 
+### 39.1 独立业务复算机制落地（Task 8）
 
+依据 `docs/superpowers/plans/2026-09-21-market-evidence-completion.md` Task 8，在独立产物校验器 `tests/artifacts/validator.py` 中实现了对所有者批准决策的第三方独立复算（零导入任何生产领域模块）：
+1. **决策 D1 独立复算**：若候选标的携带 `BREAKDOWN` 严重破位信号，强制抛出 `signal_veto` 违规发现。
+2. **决策 E1 独立复算**：若候选标的携带 `TREND_WEAKEN` 信号，`next_action` 必须为 `WATCH`，且 `risks` 预警列表中必须包含走弱风险提示，否则分别抛出 `signal_action` 与 `signal_risk_warning`。
+3. **决策 F1 独立复算**：若候选标的为 `NO_SIGNAL`，`next_action` 必须为 `WATCH`。
+4. **5D 流动性底线独立复算**：依据引用的 20 日均成交额 `avg_amount_20d`，若低于 1.0 亿元必须被一票否决，否则抛出 `market_validation_liquidity_veto`。
+5. 针对故意损坏的 4 类反例补充了单体回归测试（`tests/artifacts/test_candidate_semantic_validator.py`），验证校验器自身的故障感知灵敏度。
+
+### 39.2 隔离沙箱全链路生产验收（Task 9）
+
+1. **快照不可变性原则**：
+   - 绝不覆写或移动已有生产快照 `data/snapshots/CANDIDATE/2026-09-19.json`；
+   - 在独立沙箱 `var/acceptance/candidate-v2-20260921/` 中执行完整 daily 管线。
+2. **全链路 11 阶段调度记录**：
+   - `SYNC_DATA`（SKIPPED）、`NORMALIZE`（SUCCEEDED）、`COMPUTE_FACTORS`（SUCCEEDED）、`BUILD_UNIVERSE`（SUCCEEDED）、`RUN_STRATEGIES`（SUCCEEDED）、`DETECT_REGIME`（SUCCEEDED，RANGE_DOWN）、`MARKET_VALIDATE`（SUCCEEDED，Confirmed=150, Contradicted=23）、`RUN_SIGNALS`（SUCCEEDED，Active=208）、`BUILD_CANDIDATES`（SUCCEEDED，50 只）、`UPDATE_WATCHLIST`（BLOCKED，依法保持阻断）、`GENERATE_DAILY_SNAPSHOT`（SUCCEEDED，写出四大快照）。
+3. **独立第三方产物校验结果**：
+   - `validate_snapshot("UNIVERSE")`: **0 findings**
+   - `validate_snapshot("FACTOR")`: **0 findings**
+   - `validate_snapshot("STRATEGY")`: **0 findings**
+   - `validate_snapshot("CANDIDATE")`: **0 findings**
+   - `validate_snapshot_set`: **0 findings**（跨快照引用与血缘 100% 闭环）
+   - `validate_job_manifest`: **0 findings**
+4. **Candidate v1 与 v2 实证对比**：
+   - v1 中误入的 **6 只严重破位（`BREAKDOWN`）标的被 100% 依法否决剔除**（`000973.SZ`, `300009.SZ`, `300972.SZ`, `688266.SH`, `688336.SH`, `688578.SH`），v2 中破位标的彻底归零；
+   - 3 只 `TREND_WEAKEN` 标的（`688617.SH`, `300832.SZ`, `601069.SH`）全部标注动作 `WATCH` 并在 `risks` 中注入走弱风险预警；
+   - 23 只 `NO_SIGNAL` 标的作为常规观察候选稳健发布；
+   - 彻底解决跨策略混合排序混淆，50 只候选标的分别具有明确的 `primary_strategy_id` 归属（momentum 17, growth 12, value 12, quality 8, garp 1）；
+   - 详细实证审计材料形成决策包：`docs/decision-packets/2026-09-21-candidate-v2-audit.md`。
