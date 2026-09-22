@@ -1,0 +1,15 @@
+id: SWING
+version: v1
+pass_threshold: 80.0
+wait_threshold: 70.0
+weights:
+  fundamental_support: 15.0
+  sector_trend: 15.0
+  stock_trend: 20.0
+  key_level: 20.0
+  volume_confirmation: 10.0
+  relative_strength: 10.0
+  risk_reward: 10.0
+required_ai_dimensions: []
+enabled_vetoes: [NO_INVALIDATION, NO_RISK_BUDGET, UPSTREAM_MARKET_CONTRADICTED, UPSTREAM_BREAKDOWN, NO_PRICE_CONFIRMATION, EXTREME_FOMO]
+fomo_wait_threshold: 8

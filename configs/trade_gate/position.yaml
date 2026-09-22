@@ -1,0 +1,16 @@
+id: POSITION
+version: v1
+pass_threshold: 80.0
+wait_threshold: 70.0
+weights:
+  industry_trend: 20.0
+  competitiveness: 20.0
+  financial_quality: 15.0
+  earnings_growth: 15.0
+  valuation: 15.0
+  long_term_trend: 5.0
+  risk_resilience: 5.0
+  execution: 5.0
+required_ai_dimensions: [industry_trend, competitiveness, risk_resilience]
+enabled_vetoes: [NO_INVALIDATION, NO_RISK_BUDGET, UPSTREAM_MARKET_CONTRADICTED, UPSTREAM_BREAKDOWN, EXTREME_FOMO]
+fomo_wait_threshold: 8

@@ -1,0 +1,15 @@
+id: EVENT
+version: v1
+pass_threshold: 80.0
+wait_threshold: 70.0
+weights:
+  catalyst_quality: 20.0
+  expectation_gap: 20.0
+  directness: 15.0
+  sector_strength: 15.0
+  relative_strength: 15.0
+  price_confirmation: 10.0
+  risk_plan: 5.0
+required_ai_dimensions: [catalyst_quality, expectation_gap, directness]
+enabled_vetoes: [NO_INVALIDATION, NO_RISK_BUDGET, UPSTREAM_MARKET_CONTRADICTED, UPSTREAM_BREAKDOWN, RELATIVE_WEAKNESS, NO_PRICE_CONFIRMATION, EXTREME_FOMO, EXPECTATION_ALREADY_PRICED]
+fomo_wait_threshold: 8
