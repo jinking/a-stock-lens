@@ -9,15 +9,10 @@ from astock_lens.domain.models import SnapshotLineage
 from astock_lens.qualifications.contracts import (
     QualificationRuleNotConfigured,
 )
-from astock_lens.qualifications.dividend import DividendQualifier
-from astock_lens.qualifications.garp import GARPQualifier
-from astock_lens.qualifications.growth import GrowthQualifier
 from astock_lens.qualifications.models import (
     AbsoluteQualificationVerdict,
     QualificationContext,
 )
-from astock_lens.qualifications.momentum import MomentumQualifier
-from astock_lens.qualifications.quality import QualityQualifier
 from astock_lens.qualifications.registry import (
     CANONICAL_STRATEGY_IDS,
     build_qualifiers,
@@ -148,31 +143,6 @@ def test_qualifier_rejects_mismatched_strategy_id() -> None:
         qualifier.qualify(_context(result))
 
 
-def test_six_independent_qualifiers_instantiate_correctly() -> None:
-    rule = _AlwaysPassAbsoluteRule()
-    qualifiers = [
-        ValueQualifier(absolute_rule=rule, qualification_version="v1"),
-        GrowthQualifier(absolute_rule=rule, qualification_version="v1"),
-        GARPQualifier(absolute_rule=rule, qualification_version="v1"),
-        QualityQualifier(absolute_rule=rule, qualification_version="v1"),
-        DividendQualifier(absolute_rule=rule, qualification_version="v1"),
-        MomentumQualifier(absolute_rule=rule, qualification_version="v1"),
-    ]
-    assert [q.strategy_id for q in qualifiers] == [
-        "value",
-        "growth",
-        "garp",
-        "quality",
-        "dividend",
-        "momentum",
-    ]
-    for q in qualifiers:
-        res = _strategy_result(strategy_id=q.strategy_id, rank_percentile=0.95)
-        qual = q.qualify(_context(res))
-        assert qual.qualified is True
-        assert qual.strategy_id == q.strategy_id
-
-
 def test_build_qualifiers_with_missing_rule_raises_not_configured() -> None:
     rules = {
         "value": _AlwaysPassAbsoluteRule(),
@@ -188,6 +158,9 @@ def test_build_qualifiers_succeeds_when_all_configured() -> None:
     qualifiers = build_qualifiers(rules)
     assert len(qualifiers) == 6
     assert set(qualifiers.keys()) == set(CANONICAL_STRATEGY_IDS)
+    assert {strategy_id: item.strategy_id for strategy_id, item in qualifiers.items()} == {
+        strategy_id: strategy_id for strategy_id in CANONICAL_STRATEGY_IDS
+    }
 
 
 def test_factor_threshold_rule_evaluation() -> None:

@@ -1,17 +1,11 @@
-"""Dividend strategy qualification."""
+"""Dividend strategy qualifier compatibility import."""
 
-from astock_lens.qualifications.common import build_qualification
+from astock_lens.qualifications.common import ConfiguredQualifier
 from astock_lens.qualifications.contracts import AbsoluteQualificationRule
-from astock_lens.qualifications.models import (
-    QualificationContext,
-    StrategyQualification,
-)
 
 
-class DividendQualifier:
-    """Qualifier for the dividend strategy."""
-
-    strategy_id: str = "dividend"
+class DividendQualifier(ConfiguredQualifier):
+    """Compatibility wrapper for the dividend strategy qualifier."""
 
     def __init__(
         self,
@@ -19,13 +13,8 @@ class DividendQualifier:
         absolute_rule: AbsoluteQualificationRule,
         qualification_version: str,
     ) -> None:
-        self.absolute_rule = absolute_rule
-        self.qualification_version = qualification_version
-
-    def qualify(self, context: QualificationContext) -> StrategyQualification:
-        return build_qualification(
-            context=context,
-            expected_strategy_id=self.strategy_id,
-            qualification_version=self.qualification_version,
-            absolute_rule=self.absolute_rule,
+        super().__init__(
+            strategy_id="dividend",
+            absolute_rule=absolute_rule,
+            qualification_version=qualification_version,
         )

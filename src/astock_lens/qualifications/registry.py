@@ -3,8 +3,8 @@
 import os
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
+from astock_lens.qualifications.common import ConfiguredQualifier
 from astock_lens.qualifications.contracts import (
     AbsoluteQualificationRule,
     QualificationRuleNotConfigured,
@@ -18,7 +18,7 @@ from astock_lens.qualifications.quality import QualityQualifier
 from astock_lens.qualifications.rules import load_qualification_rule
 from astock_lens.qualifications.value import ValueQualifier
 
-QUALIFIER_CLASSES: dict[str, type[Any]] = {
+QUALIFIER_CLASSES: dict[str, type[ConfiguredQualifier]] = {
     "value": ValueQualifier,
     "growth": GrowthQualifier,
     "garp": GARPQualifier,
@@ -55,10 +55,10 @@ def build_qualifiers(
             raise QualificationRuleNotConfigured(
                 f"Missing approved absolute qualification rule for strategy '{strategy_id}'"
             )
-        qualifier_cls = QUALIFIER_CLASSES.get(strategy_id)
-        if qualifier_cls is None:
+        if strategy_id not in QUALIFIER_CLASSES:
             raise ValueError(f"Unknown strategy ID '{strategy_id}' for qualification")
-        qualifier = qualifier_cls(
+        qualifier = ConfiguredQualifier(
+            strategy_id=strategy_id,
             absolute_rule=rule,
             qualification_version=rule.version or default_version,
         )

@@ -2,6 +2,7 @@
 
 from astock_lens.qualifications.common import (
     TOP_TEN_PERCENT_FLOOR,
+    ConfiguredQualifier,
     build_qualification,
     passes_percentile,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "TOP_TEN_PERCENT_FLOOR",
     "AbsoluteQualificationRule",
     "AbsoluteQualificationVerdict",
+    "ConfiguredQualifier",
     "DividendQualifier",
     "FactorThreshold",
     "FactorThresholdRule",

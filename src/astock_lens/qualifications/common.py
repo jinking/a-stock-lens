@@ -10,6 +10,29 @@ from astock_lens.strategies.contracts import StrategyResult
 TOP_TEN_PERCENT_FLOOR = 0.90
 
 
+class ConfiguredQualifier:
+    """Use one configured implementation for every strategy qualifier."""
+
+    def __init__(
+        self,
+        *,
+        strategy_id: str,
+        absolute_rule: AbsoluteQualificationRule,
+        qualification_version: str,
+    ) -> None:
+        self.strategy_id = strategy_id
+        self.absolute_rule = absolute_rule
+        self.qualification_version = qualification_version
+
+    def qualify(self, context: QualificationContext) -> StrategyQualification:
+        return build_qualification(
+            context=context,
+            expected_strategy_id=self.strategy_id,
+            qualification_version=self.qualification_version,
+            absolute_rule=self.absolute_rule,
+        )
+
+
 def passes_percentile(result: StrategyResult) -> bool:
     """Return True if strategy result passes the Top-10% percentile gate."""
     percentile = result.rank_percentile
