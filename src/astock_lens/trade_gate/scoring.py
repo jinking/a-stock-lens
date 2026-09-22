@@ -113,7 +113,11 @@ def score_event(
                 if context.confirmation_met is not None
                 else (None, "RULE", ())
             ),
-            "risk_plan": (1.0, "RULE", ("entry/stop/quantity/invalidation supplied",)),
+            "risk_plan": (
+                (1.0, "RULE", ("risk proposal complete",))
+                if (intent.risk.invalidation_rule or "").strip()
+                else (0.0, "RULE", ("invalidation rule missing",))
+            ),
         }
     )
     return _scores(profile.weights, ratios)
@@ -209,7 +213,11 @@ def score_position(
                 if context.ret_60d is not None
                 else (None, "RULE", ())
             ),
-            "execution": (1.0, "RULE", ("entry/stop/quantity/invalidation supplied",)),
+            "execution": (
+                (1.0, "RULE", ("risk proposal complete",))
+                if (intent.risk.invalidation_rule or "").strip()
+                else (0.0, "RULE", ("invalidation rule missing",))
+            ),
         }
     )
     return _scores(profile.weights, ratios)

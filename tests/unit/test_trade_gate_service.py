@@ -4,6 +4,7 @@ import pytest
 
 from astock_lens.domain.enums import TradeDecision, TradeProfile
 from astock_lens.trade_gate.models import (
+    DimensionScore,
     IndependentAssessment,
     ThesisAuditResult,
     TradeContext,
@@ -21,7 +22,11 @@ def _seed_evaluation(store: JsonTradeLedgerStore) -> TradeGateEvaluation:
         intent_id="intent-1",
         profile=TradeProfile.EVENT,
         profile_version="v1",
-        dimension_scores=(),
+        dimension_scores=(
+            DimensionScore(
+                dimension="seed", weight=60, ratio=1, score=60, source="RULE"
+            ),
+        ),
         weighted_score=60,
         decision=TradeDecision.NO_TRADE,
         context=TradeContext(

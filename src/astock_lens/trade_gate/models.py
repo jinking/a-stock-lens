@@ -27,7 +27,7 @@ class TradeRiskProposal(DomainRecord):
     planned_entry_price: float
     stop_loss_price: float
     quantity: int
-    invalidation_rule: str
+    invalidation_rule: str | None = None
     target_price: float | None = None
 
     @model_validator(mode="after")
@@ -42,8 +42,6 @@ class TradeRiskProposal(DomainRecord):
             raise ValueError("quantity must be positive")
         if self.stop_loss_price >= self.planned_entry_price:
             raise ValueError("V1 long trade stop must be below entry")
-        if not self.invalidation_rule.strip():
-            raise ValueError("invalidation_rule must not be empty")
         if self.target_price is not None and self.target_price <= 0:
             raise ValueError("target_price must be positive")
         return self
@@ -229,6 +227,11 @@ class TradeGateEvaluation(DomainRecord):
             raise ValueError("weighted_score must be within 0..100")
         if self.decision is TradeDecision.WAIT and not self.reentry_triggers:
             raise ValueError("WAIT requires reentry_triggers")
+        if (
+            abs(sum(item.score for item in self.dimension_scores) - self.weighted_score)
+            > 1e-6
+        ):
+            raise ValueError("dimension scores must sum to weighted_score")
         return self
 
 

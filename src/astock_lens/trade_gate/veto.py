@@ -32,7 +32,7 @@ def evaluate_vetoes(
         if code in profile.enabled_vetoes:
             hits.append(VetoResult(code=code, severity=severity, reason=reason))
 
-    if not intent.risk.invalidation_rule.strip():
+    if not (intent.risk.invalidation_rule or "").strip():
         add("NO_INVALIDATION", VetoSeverity.HARD, "未提供明确失效条件")
     if intent.risk.account_nav <= 0 or intent.risk.quantity <= 0:
         add("NO_RISK_BUDGET", VetoSeverity.HARD, "无法计算风险预算")
