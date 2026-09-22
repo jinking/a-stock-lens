@@ -129,8 +129,14 @@ class DuckDBTradeLedgerStore:
     def write_plan(self, record: TradePlan) -> Path:
         return self._write("PLAN", record)
 
+    def read_plan(self, record_id: str) -> TradePlan | None:
+        return self._read("PLAN", record_id)
+
     def write_override(self, record: OverrideRecord) -> Path:
         return self._write("OVERRIDE", record)
+
+    def read_override(self, record_id: str) -> OverrideRecord | None:
+        return self._read("OVERRIDE", record_id)
 
     def write_execution(self, record: ExecutionRecord) -> Path:
         return self._write("EXECUTION", record)

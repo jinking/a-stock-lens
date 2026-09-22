@@ -31,7 +31,9 @@ class TradeLedgerStore(Protocol):
         self, intent_id: str
     ) -> tuple[TradeGateEvaluation, ...]: ...
     def write_plan(self, record: TradePlan) -> Path: ...
+    def read_plan(self, record_id: str) -> TradePlan | None: ...
     def write_override(self, record: OverrideRecord) -> Path: ...
+    def read_override(self, record_id: str) -> OverrideRecord | None: ...
     def write_execution(self, record: ExecutionRecord) -> Path: ...
     def write_review(self, record: TradeReview) -> Path: ...
 
@@ -105,8 +107,14 @@ class JsonTradeLedgerStore:
     def write_plan(self, record: TradePlan) -> Path:
         return self._write("plans", record, record.id)
 
+    def read_plan(self, record_id: str) -> TradePlan | None:
+        return self._read("plans", record_id, TradePlan)
+
     def write_override(self, record: OverrideRecord) -> Path:
         return self._write("overrides", record, record.id)
+
+    def read_override(self, record_id: str) -> OverrideRecord | None:
+        return self._read("overrides", record_id, OverrideRecord)
 
     def write_execution(self, record: ExecutionRecord) -> Path:
         return self._write("executions", record, record.id)
