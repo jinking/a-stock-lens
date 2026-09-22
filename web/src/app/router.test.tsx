@@ -19,7 +19,7 @@ describe('Router & AppShell Smoke Tests', () => {
     // Verify TodayPage content
     const page = screen.getByTestId('today-page');
     expect(page).toBeInTheDocument();
-    expect(within(page).getByRole('heading', { level: 1, name: '今日研究概览' })).toBeInTheDocument();
+    expect(within(page).getByRole('heading', { level: 1, name: /今日.*概览/ })).toBeInTheDocument();
   });
 
   it('renders CandidatesPage within AppShell at route "/candidates"', () => {

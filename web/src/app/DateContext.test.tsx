@@ -211,9 +211,9 @@ describe('DateContext & AppShell Date Integration', () => {
       );
 
       await waitFor(() => {
-        expect(
-          screen.getByText('尚无正式 Candidate 快照。先运行标准 astock daily。')
-        ).toBeInTheDocument();
+        expect(screen.getByTestId('date-empty-notice')).toHaveTextContent(
+          '尚无正式 Candidate 快照。先运行标准 astock daily。'
+        );
       });
 
       expect(screen.queryByRole('combobox', { name: '快照日期' })).not.toBeInTheDocument();
