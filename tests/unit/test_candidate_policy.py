@@ -173,11 +173,10 @@ def test_the_policy_is_what_makes_a_candidate() -> None:
     assert candidates[0].next_action is NextAction.WATCH
 
 
-@pytest.mark.parametrize("score", [0.0, 50.0, 100.0])
-def test_the_score_never_decides_the_action(score: float) -> None:
-    """分数只影响排名，不影响入选：未入选的 policy 下没有候选。"""
+def test_score_does_not_override_a_rejecting_policy() -> None:
+    """分数再高也不能覆盖 policy 的拒绝判定。"""
     candidates = candidate_stage(
-        strategy_results=(_result(score=score),),
+        strategy_results=(_result(score=100.0),),
         lineage=LINEAGE,
         as_of=AS_OF,
         policy=_ApprovesNothing(),

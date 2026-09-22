@@ -10,8 +10,6 @@
 
 from datetime import UTC, datetime
 
-import pytest
-
 from astock_lens.candidates import routing
 from astock_lens.candidates.builder import CandidateBuilder
 from astock_lens.candidates.policy import CandidateQualification
@@ -72,17 +70,7 @@ def test_the_routed_action_reaches_a_candidate() -> None:
     assert candidate.strategy_results == (result,)
 
 
-def test_the_translation_is_pure() -> None:
-    """同样的判定永远得到同样的动作，不累积任何状态。"""
-    qualification = CandidateQualification(qualified=True)
-
-    assert next_action_for(qualification) == next_action_for(qualification)
-
-
-@pytest.mark.parametrize("score", [0.0, 0.001, 50.0, 99.999, 100.0])
-def test_no_score_range_can_produce_a_candidate_action(score: float) -> None:
-    """分数不再是任何一个动作的输入，任何一个区间都不例外。"""
-    del score
-
+def test_score_routing_api_is_absent() -> None:
+    """路由模块不提供基于分数决定候选动作的 API。"""
     assert not hasattr(routing, "route_next_action")
     assert not hasattr(routing, "route_candidate_actions")

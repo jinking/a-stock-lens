@@ -122,27 +122,6 @@ def test_market_validator_value_tolerates_drawdown_neutral() -> None:
     assert result.negative_count == 0
 
 
-def test_market_validator_missing_liquidity_factor_raises_incomplete() -> None:
-    """测试当缺少流动性因子时，绝不静默兜底，必须抛出 MarketValidationEvidenceIncomplete 阻断。"""
-    validator = MarketValidator(version="v1")
-    factors = (
-        _fr("000001.SZ", "ret_20d", 0.05),
-        _fr("000001.SZ", "proximity_52w_high", 0.88),
-    )
-    ctx = MarketValidationContext(
-        symbol="000001.SZ",
-        strategy_id="momentum",
-        as_of=AS_OF,
-        factors=factors,
-        industry_excess_return=0.01,
-        relative_strength_60d=0.02,
-        vol_ratio=1.0,
-    )
-    with pytest.raises(MarketValidationEvidenceIncomplete) as exc_info:
-        validator.validate(ctx)
-    assert "avg_amount_20d" in str(exc_info.value)
-
-
 def test_market_validator_lineage_contains_market_validation_version() -> None:
     """测试 MarketValidationResult 的 lineage 携带 market_validation_version 且不复用 regime_version。"""
     validator = MarketValidator(version="v1")

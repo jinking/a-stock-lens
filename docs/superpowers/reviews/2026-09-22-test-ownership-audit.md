@@ -41,6 +41,17 @@
 
 本轮新增 Trade Gate 的三项权威测试均标记为 **KEEP**。模型不变量、Profile 配置契约、外部审计 Adapter 契约分别覆盖不同的失败类别；当前没有证据表明它们在多层之间重复证明。
 
+## 第一轮有证据的测试收敛
+
+| 变化 | 权威保留证明 | 收敛理由 |
+| --- | --- | --- |
+| Candidate policy 分数参数用例合并为一个最高分拒绝用例 | `test_score_does_not_override_a_rejecting_policy` | 原有三个用例仅改变分数；对拒绝策略而言最高分是最强反例，保留了核心不变量证明。 |
+| 删除 Candidate routing 的纯函数自比较断言 | `test_a_qualified_verdict_routes_to_watch`、`test_an_unqualified_verdict_routes_to_ignore` | 同一调用结果与自身比较恒真，没有额外行为证明。 |
+| Candidate routing 未使用分数的参数用例合并为一个 API 缺席断言 | `test_score_routing_api_is_absent` | 参数值没有进入被测代码；断言路由模块不存在分数决策 API 即覆盖此边界。 |
+| 删除独立的缺失流动性测试 | `test_market_validator_missing_trend_or_liquidity_factors_raise`、`test_market_validator_multiple_missing_factors_reported` | 前者已逐一验证缺少 `avg_amount_20d` 时失败，后者验证错误中列出该因子。 |
+
+当前仓库第一轮可证明的收敛为净减少 8 个 pytest 用例：计划目标写为减少 9 个，但本次核验的分数拒绝参数只有 3 项（计划预期 4 项）。不为追平计划数字删除其他仍有独立责任的测试。
+
 ## 并发功能约束
 
 Westock bulk-bars 实现不得与本次复杂度重构并行，因为两者都会修改 CLI Provider 组合边界。CLI 拆分后，Westock 设计与实施计划必须把 `src/astock_lens/cli/runtime.py::_bulk_provider` 作为目标组合点，并单独声明 Test Delta Budget。
