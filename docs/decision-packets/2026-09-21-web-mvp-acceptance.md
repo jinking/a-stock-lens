@@ -23,6 +23,6 @@
 
 ## 未执行的远端步骤
 
-代码已提交至 `67fb318` 并推送到 `feat-web-upgrade`。截至 2026-09-22，GitHub Actions 尚无该分支运行记录：`.github/workflows/ci.yml` 仅配置 `main` 推送与 PR 触发，且该分支目前没有 PR。创建面向 `main` 的 PR 后才能触发远端 job；在取得运行记录前，不把远端 CI 记作已通过。最终复审还补充验证：缺失覆盖度不被伪装为零、旧请求不能覆盖新路由结果，且 Qualified 项只展示 API 实际提供的字段。
+PR #3 已面向 `main` 开启。首轮 GitHub Actions 中 Web job 通过，Python job 有 9 项 CLI 生命周期测试因基准日线默认路径未跟随 `ASTOCK_CSV_ROOT` 而失败。经 Jev 分诊并修复 CLI 路径解析后，本地 `ruff`、格式检查、`mypy` 与全量 pytest（1245 项）均通过；修复提交推送后需等待 PR CI 重跑成功，再合入 `main`。最终复审还验证：缺失覆盖度不被伪装为零、旧请求不能覆盖新路由结果，且 Qualified 项只展示 API 实际提供的字段。
 
 本次验收仅证明本地 Web 对所选正式快照的只读查询与页面表现，不代表其他日期数据覆盖完整，也不构成投资建议。

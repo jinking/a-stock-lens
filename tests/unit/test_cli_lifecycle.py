@@ -166,6 +166,31 @@ def _formal_run(local_tmp: Path) -> None:
     assert result.exit_code == 0, result.output
 
 
+def test_benchmark_bars_default_to_the_configured_csv_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import astock_lens.cli.app as cli_module
+    from astock_lens.data.benchmark import BENCHMARK_BARS_ENV
+
+    monkeypatch.setenv("ASTOCK_CSV_ROOT", str(tmp_path))
+    monkeypatch.delenv(BENCHMARK_BARS_ENV, raising=False)
+
+    assert cli_module._benchmark_bars_path() == tmp_path / "benchmark_bars.csv"
+
+
+def test_benchmark_bars_explicit_path_overrides_the_csv_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import astock_lens.cli.app as cli_module
+    from astock_lens.data.benchmark import BENCHMARK_BARS_ENV
+
+    benchmark_path = tmp_path / "custom.csv"
+    monkeypatch.setenv("ASTOCK_CSV_ROOT", str(tmp_path / "raw"))
+    monkeypatch.setenv(BENCHMARK_BARS_ENV, str(benchmark_path))
+
+    assert cli_module._benchmark_bars_path() == benchmark_path
+
+
 # --- watch -----------------------------------------------------------------
 
 

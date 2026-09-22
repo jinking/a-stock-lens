@@ -49,8 +49,8 @@ from astock_lens.calibration.valuation_coverage import valuation_coverage
 from astock_lens.candidates.models import Candidate
 from astock_lens.candidates.policy import RepresentativeCandidatePolicy
 from astock_lens.data.benchmark import (
+    BENCHMARK_BARS_ENV,
     read_benchmark_bars,
-    resolve_benchmark_bars_path,
 )
 from astock_lens.data.bootstrap import (
     bootstrap_liquidity_history,
@@ -275,7 +275,10 @@ def _securities_dataset() -> str:
 
 def _benchmark_bars_path() -> Path:
     """解析基准指数日线 CSV 文件路径。"""
-    return resolve_benchmark_bars_path()
+    configured_path = os.getenv(BENCHMARK_BARS_ENV)
+    if configured_path:
+        return Path(configured_path)
+    return _csv_root() / "benchmark_bars.csv"
 
 
 def _storage_paths() -> StoragePaths:
