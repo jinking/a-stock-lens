@@ -1,0 +1,252 @@
+/* ==========================================================================
+   A-Stock Lens 全局样式系统
+   规范：纯原生 CSS、Slate 冷灰色调、紧凑信息密度、响应式 1280px / 768px
+   ========================================================================== */
+
+:root {
+  /* 基础色盘 (Slate) */
+  --bg-app: #0f172a;             /* slate-900 */
+  --bg-header: rgba(15, 23, 42, 0.95);
+  --bg-card: #1e293b;            /* slate-800 */
+  --bg-card-subtle: #141f32;
+  --bg-input: #0f172a;
+  --border: #334155;             /* slate-700 */
+  --border-light: #475569;       /* slate-600 */
+
+  /* 文字 */
+  --text-main: #f8fafc;          /* slate-50 */
+  --text-muted: #94a3b8;         /* slate-400 */
+  --text-dim: #64748b;           /* slate-500 */
+
+  /* 语义辅助色（严禁使用刺激性装饰，仅用于状态标签辅助） */
+  --accent: #38bdf8;             /* sky-400 */
+  --accent-dim: rgba(56, 189, 248, 0.12);
+  --confirmed: #34d399;          /* emerald-400 */
+  --confirmed-bg: rgba(52, 211, 153, 0.12);
+  --neutral: #94a3b8;            /* slate-400 */
+  --neutral-bg: rgba(148, 163, 184, 0.12);
+  --warning: #fbbf24;            /* amber-400 */
+  --warning-bg: rgba(251, 191, 36, 0.12);
+  --contradicted: #f87171;       /* red-400 */
+  --contradicted-bg: rgba(248, 113, 113, 0.12);
+
+  /* 字体家族 */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+
+  /* 尺寸与间距 */
+  --max-width: 1280px;
+  --header-height: 3.5rem;
+}
+
+/* 盒模型与重置 */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* 应用整体骨架 */
+.app-layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 吸顶导航栏 */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--bg-header);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+  height: var(--header-height);
+}
+
+.header-inner {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0 1.5rem;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.brand-title {
+  font-weight: 700;
+  font-size: 1.1rem;
+  letter-spacing: -0.025em;
+  color: var(--text-main);
+}
+
+.brand-tag {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.4rem;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.nav-link {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 0.4rem 0.75rem;
+  border-radius: 4px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.nav-link:hover {
+  color: var(--text-main);
+  background-color: var(--bg-card);
+}
+
+.nav-link.active {
+  color: var(--text-main);
+  background-color: var(--border);
+  font-weight: 600;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.notice-badge {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-mono: var(--font-mono);
+}
+
+/* 主内容区域 */
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.main-content {
+  max-width: var(--max-width);
+  width: 100%;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+/* 页面通用容器 */
+.page-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.page-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-main);
+  letter-spacing: -0.02em;
+}
+
+.page-description {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+/* 占位与卡片基础样式 */
+.placeholder-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+/* 等宽数值与代码展示 */
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* 页脚 */
+.app-footer {
+  border-top: 1px solid var(--border);
+  padding: 1rem 1.5rem;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.footer-inner {
+  max-width: var(--max-width);
+  margin: 0 auto;
+}
+
+/* 键盘可访问性焦点状态 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 响应式平板断点适配 (768px) */
+@media (max-width: 768px) {
+  .header-inner {
+    padding: 0 1rem;
+    gap: 0.75rem;
+  }
+
+  .brand-tag,
+  .notice-badge {
+    display: none;
+  }
+
+  .main-content {
+    padding: 1rem;
+  }
+
+  .nav-link {
+    padding: 0.35rem 0.5rem;
+    font-size: 0.8rem;
+  }
+}
