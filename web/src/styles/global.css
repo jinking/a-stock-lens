@@ -659,6 +659,121 @@ a {
   color: var(--accent);
 }
 
+/* 候选股票池筛选面板与控件 */
+.filter-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.filter-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 150px;
+}
+
+.filter-label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.filter-input,
+.filter-select {
+  background-color: var(--bg-input);
+  color: var(--text-main);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.825rem;
+  outline: none;
+  transition: border-color 0.15s ease;
+  width: 100%;
+}
+
+.filter-input:focus,
+.filter-select:focus {
+  border-color: var(--accent);
+}
+
+.filter-actions {
+  display: flex;
+  align-items: flex-end;
+}
+
+.filter-reset-button {
+  background-color: var(--bg-card-subtle);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.45rem 1rem;
+  font-size: 0.825rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.filter-reset-button:hover {
+  background-color: var(--border);
+  color: var(--text-main);
+  border-color: var(--border-light);
+}
+
+.filter-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(51, 65, 85, 0.5);
+}
+
+.filter-summary-text {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* 信号破位与告警样式 */
+.signal-cell-container {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.signal-warning-breakdown {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0.2rem 0.45rem;
+  border-radius: 3px;
+  background-color: rgba(239, 68, 68, 0.18);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  white-space: nowrap;
+}
+
+.candidates-content-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
 /* 响应式平板断点适配 (768px) */
 @media (max-width: 768px) {
   .header-inner {
@@ -687,5 +802,20 @@ a {
   .distribution-grid {
     grid-template-columns: 1fr;
   }
+
+  .filter-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filter-field {
+    min-width: 100%;
+  }
+
+  .filter-reset-button {
+    width: 100%;
+    text-align: center;
+  }
 }
+
 
