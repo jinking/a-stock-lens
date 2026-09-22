@@ -30,6 +30,7 @@ class TradeLedgerStore(Protocol):
     def evaluations_for_intent(
         self, intent_id: str
     ) -> tuple[TradeGateEvaluation, ...]: ...
+    def history_for_symbol(self, symbol: str) -> tuple[TradeGateEvaluation, ...]: ...
     def write_plan(self, record: TradePlan) -> Path: ...
     def read_plan(self, record_id: str) -> TradePlan | None: ...
     def write_override(self, record: OverrideRecord) -> Path: ...
@@ -103,6 +104,16 @@ class JsonTradeLedgerStore:
             for path in sorted(folder.glob("*.json"))
         )
         return tuple(record for record in records if record.intent_id == intent_id)
+
+    def history_for_symbol(self, symbol: str) -> tuple[TradeGateEvaluation, ...]:
+        folder = self._root / "evaluations"
+        if not folder.exists():
+            return ()
+        records = (
+            TradeGateEvaluation.model_validate_json(path.read_text(encoding="utf-8"))
+            for path in sorted(folder.glob("*.json"))
+        )
+        return tuple(record for record in records if record.context.symbol == symbol)
 
     def write_plan(self, record: TradePlan) -> Path:
         return self._write("plans", record, record.id)

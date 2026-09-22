@@ -26,6 +26,8 @@ from astock_lens.domain.models import SnapshotLineage
 from astock_lens.factors.contracts import FactorResult
 from astock_lens.qualifications.models import StrategyQualification
 from astock_lens.strategies.contracts import StrategyResult
+from astock_lens.trade_gate.models import TradeIntent, TradeRiskProposal
+from astock_lens.trade_gate.store import JsonTradeLedgerStore
 from astock_lens.universe.models import (
     UniverseExclusion,
     UniverseRule,
@@ -243,6 +245,34 @@ def test_api_never_imports_the_computation_engines() -> None:
     assert "strategy_stage" not in source
     assert "factor_stage" not in source
     assert "run_analysis" not in source
+    assert "trade_gate.engine" not in source
+    assert "TradeGateEngine" not in source
+    assert "ThesisAuditAdapter" not in source
+
+
+def test_trade_gate_intent_route_is_read_only(tmp_path: Path) -> None:
+    intent = TradeIntent(
+        id="intent-api",
+        symbol="600519.SH",
+        action="ENTRY",
+        profile="EVENT",
+        thesis="test",
+        expected_holding_days=3,
+        created_at=AS_OF,
+        risk=TradeRiskProposal(
+            account_nav=10000,
+            planned_entry_price=100,
+            stop_loss_price=90,
+            quantity=10,
+            invalidation_rule="跌破90",
+        ),
+    )
+    JsonTradeLedgerStore(tmp_path).write_intent(intent)
+    client = TestClient(create_app(trade_root=tmp_path))
+    response = client.get("/trade-gate/intents/intent-api")
+    assert response.status_code == 200
+    assert response.json()["symbol"] == "600519.SH"
+    assert client.get("/trade-gate/intents/unknown").status_code == 404
 
 
 def test_watchlist_route_reads_the_stored_entries(local_tmp: Path) -> None:

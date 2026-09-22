@@ -126,6 +126,24 @@ class DuckDBTradeLedgerStore:
         finally:
             connection.close()
 
+    def history_for_symbol(self, symbol: str) -> tuple[TradeGateEvaluation, ...]:
+        connection = self._connect()
+        if connection is None:
+            return ()
+        try:
+            rows = connection.execute(
+                "SELECT payload FROM trade_ledger WHERE kind='EVALUATION' AND symbol=? ORDER BY created_at, record_id",
+                [symbol],
+            ).fetchall()
+            return tuple(
+                TradeGateEvaluation.model_validate(
+                    json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                )
+                for row in rows
+            )
+        finally:
+            connection.close()
+
     def write_plan(self, record: TradePlan) -> Path:
         return self._write("PLAN", record)
 

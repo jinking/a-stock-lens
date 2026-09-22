@@ -37,6 +37,8 @@ from astock_lens.qualifications import (
     load_canonical_qualifiers,
 )
 from astock_lens.strategies.contracts import StrategyResult
+from astock_lens.trade_gate.resolve import resolve_trade_ledger
+from astock_lens.trade_gate.store import JsonTradeLedgerStore, TradeLedgerStore
 from astock_lens.watchlist.store import resolve_watchlist_store
 
 SERVICE_NAME = "A-Stock Lens"
@@ -50,6 +52,7 @@ CLOSE_HOUR = 15
 def create_app(
     snapshot_root: Path | None = None,
     watchlist_root: Path | None = None,
+    trade_root: Path | None = None,
 ) -> FastAPI:
     """Build the API application.
 
@@ -84,6 +87,13 @@ def create_app(
         if watchlist_root is not None:
             return watchlist_root
         return paths().watchlist_root
+
+    def trade_ledger() -> TradeLedgerStore:
+        return (
+            JsonTradeLedgerStore(trade_root)
+            if trade_root is not None
+            else resolve_trade_ledger()
+        )
 
     def snapshot_database() -> Path | None:
         return None if snapshot_root is not None else paths().database
@@ -373,6 +383,29 @@ def create_app(
             candidate=candidate,
             watchlist=watchlist_data,
         )
+
+    @application.get("/trade-gate/evaluations/{evaluation_id}")
+    def trade_gate_evaluation(evaluation_id: str) -> dict[str, object]:
+        record = trade_ledger().read_evaluation(evaluation_id)
+        if record is None:
+            raise HTTPException(
+                status_code=404, detail="Trade Gate evaluation not found"
+            )
+        return cast(dict[str, object], record.model_dump(mode="json"))
+
+    @application.get("/trade-gate/intents/{intent_id}")
+    def trade_gate_intent(intent_id: str) -> dict[str, object]:
+        record = trade_ledger().read_intent(intent_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Trade Gate intent not found")
+        return cast(dict[str, object], record.model_dump(mode="json"))
+
+    @application.get("/trade-gate/history")
+    def trade_gate_history(symbol: str = Query(...)) -> list[dict[str, object]]:
+        return [
+            record.model_dump(mode="json")
+            for record in trade_ledger().history_for_symbol(symbol)
+        ]
 
     return application
 
