@@ -258,6 +258,132 @@ a {
   color: var(--text-muted);
 }
 
+.profile-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.profile-card,
+.profile-summary-grid > .stat-card,
+.coverage-summary,
+.strategy-toolbar,
+.strategy-tabs {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9rem 1rem;
+}
+
+.profile-summary-grid,
+.lineage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.75rem;
+}
+
+.profile-summary-grid .stat-label,
+.lineage-grid dt {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin-bottom: 0.35rem;
+}
+
+.profile-details {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.35fr) 1fr;
+  gap: 0.65rem 1rem;
+  margin: 0;
+}
+
+.profile-details dt {
+  color: var(--text-muted);
+}
+
+.profile-details dd,
+.lineage-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.lineage-grid > div {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.825rem;
+}
+
+.data-table th,
+.data-table td {
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.data-table th {
+  color: var(--text-muted);
+  background: var(--bg-card-subtle);
+  white-space: nowrap;
+}
+
+.strategy-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: fit-content;
+}
+
+.strategy-toolbar select {
+  background: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.45rem 0.6rem;
+}
+
+.strategy-tabs {
+  display: flex;
+  gap: 0.5rem;
+  width: fit-content;
+}
+
+.strategy-tabs button,
+.retry-button {
+  color: var(--text-main);
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+}
+
+.strategy-tabs button[aria-selected='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.coverage-warning {
+  color: var(--warning);
+  background: var(--warning-bg);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: 4px;
+  padding: 0.65rem 0.8rem;
+  margin: 0;
+}
+
+.empty-inline {
+  color: var(--text-muted);
+}
+
 /* 占位与卡片基础样式 */
 .placeholder-card {
   background: var(--bg-card);
@@ -816,6 +942,19 @@ a {
     width: 100%;
     text-align: center;
   }
-}
 
+  .strategy-toolbar,
+  .strategy-tabs {
+    width: 100%;
+  }
+
+  .profile-details {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+
+  .profile-details dd {
+    margin-bottom: 0.6rem;
+  }
+}
 

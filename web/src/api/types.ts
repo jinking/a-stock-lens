@@ -38,6 +38,18 @@ export interface Candidate {
   reasons: string[];
   risks: string[];
   rank?: number;
+  lineage?: SnapshotLineage;
+}
+
+export interface SnapshotLineage {
+  universe_snapshot?: string | null;
+  factor_version?: string | null;
+  strategy_version?: string | null;
+  qualification_version?: string | null;
+  candidate_policy_version?: string | null;
+  regime_version?: string | null;
+  market_validation_version?: string | null;
+  signal_version?: string | null;
 }
 
 export interface CandidatesResponse {
@@ -102,7 +114,10 @@ export interface StrategyScreenResult {
   coverage: {
     covered_count: number;
     total_count: number;
-    coverage_ratio: number;
+    coverage_ratio: number | null;
+    eligible_count?: number;
+    scored_count?: number;
+    ranked_count?: number;
   };
   results: Array<{
     symbol: string;
@@ -111,14 +126,15 @@ export interface StrategyScreenResult {
     confidence?: number | null;
     reasons: string[];
     risks: string[];
+    rank?: number;
   }>;
 }
 
 export interface QualifiedScreenItem {
   symbol: string;
-  qualified: boolean;
-  percentile_pass: boolean;
-  absolute_pass: boolean;
+  qualified?: boolean;
+  percentile_pass?: boolean;
+  absolute_pass?: boolean;
   rank_percentile: number | null;
   failure_reasons: string[];
 }
@@ -129,4 +145,5 @@ export interface QualifiedScreenResult {
   qualified_count: number;
   coverage_count: number;
   items: QualifiedScreenItem[];
+  warnings?: string[];
 }

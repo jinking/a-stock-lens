@@ -122,6 +122,7 @@ function normalizeCandidate(raw: any): Candidate {
     reasons: raw.reasons ?? [],
     risks: raw.risks ?? [],
     rank: raw.rank,
+    lineage: raw.lineage,
   };
 }
 
@@ -212,16 +213,24 @@ export async function getStrategyResults(
       limit,
     }
   );
-  if (raw.results && raw.query && raw.coverage?.covered_count !== undefined) {
+  if (
+    raw.results &&
+    raw.query &&
+    typeof raw.coverage?.covered_count === 'number' &&
+    typeof raw.coverage?.total_count === 'number' &&
+    typeof raw.coverage?.coverage_ratio === 'number'
+  ) {
     return raw as StrategyScreenResult;
   }
-  const totalCount = raw.coverage?.total_count ?? 0;
+  const totalCount = raw.coverage?.total_count;
   const coveredCount =
     raw.coverage?.covered_count ??
-    raw.coverage?.eligible_count ??
-    (raw.items?.length ?? 0);
-  const coverageRatio =
-    raw.coverage?.coverage_ratio ?? (totalCount > 0 ? coveredCount / totalCount : 0);
+    raw.coverage?.ranked_count ??
+    raw.coverage?.scored_count;
+  if (typeof totalCount !== 'number' || typeof coveredCount !== 'number') {
+    throw new ApiError(502, '策略结果缺少覆盖度统计信息');
+  }
+  const coverageRatio = raw.coverage?.coverage_ratio ?? (totalCount > 0 ? coveredCount / totalCount : null);
   const results =
     raw.results ??
     (raw.items ?? []).map((item: any) => ({
@@ -231,6 +240,7 @@ export async function getStrategyResults(
       confidence: item.confidence ?? null,
       reasons: item.reasons ?? [],
       risks: item.risks ?? [],
+      rank: item.rank,
     }));
   return {
     query: raw.query ?? { strategy_id: strategyId, as_of: asOf, limit: limit ?? 20 },
@@ -238,6 +248,9 @@ export async function getStrategyResults(
       covered_count: coveredCount,
       total_count: totalCount,
       coverage_ratio: coverageRatio,
+      eligible_count: raw.coverage?.eligible_count,
+      scored_count: raw.coverage?.scored_count,
+      ranked_count: raw.coverage?.ranked_count,
     },
     results,
   };
@@ -265,18 +278,19 @@ export async function getQualifiedResults(
   ) {
     return raw as QualifiedScreenResult;
   }
-  const qualifiedCount =
-    raw.qualified_count ?? raw.coverage?.qualified_count ?? (raw.items?.length ?? 0);
+  const qualifiedCount = raw.qualified_count ?? raw.coverage?.qualified_count;
   const coverageCount =
     raw.coverage_count ??
     raw.coverage?.strategy_eligible_count ??
-    raw.coverage?.ranked_count ??
-    0;
+    raw.coverage?.ranked_count;
+  if (typeof qualifiedCount !== 'number' || typeof coverageCount !== 'number') {
+    throw new ApiError(502, '资格结果缺少资格覆盖度统计信息');
+  }
   const items = (raw.items ?? []).map((item: any) => ({
     symbol: item.symbol,
-    qualified: item.qualified ?? true,
-    percentile_pass: item.percentile_pass ?? true,
-    absolute_pass: item.absolute_pass ?? true,
+    ...(item.qualified !== undefined ? { qualified: item.qualified } : {}),
+    ...(item.percentile_pass !== undefined ? { percentile_pass: item.percentile_pass } : {}),
+    ...(item.absolute_pass !== undefined ? { absolute_pass: item.absolute_pass } : {}),
     rank_percentile: item.rank_percentile ?? null,
     failure_reasons: item.failure_reasons ?? [],
   }));
@@ -286,5 +300,6 @@ export async function getQualifiedResults(
     qualified_count: qualifiedCount,
     coverage_count: coverageCount,
     items,
+    warnings: raw.warnings ?? [],
   };
 }

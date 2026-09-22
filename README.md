@@ -51,7 +51,7 @@ V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学�
 
 | 已具备 | 尚未实现 |
 | --- | --- |
-| 设计三件套（spec / PRODUCT / ARCHITECTURE） | React 前端（6 个页面：Today / Screener / Strategy / Stock Profile / Watchlist / Data Health） |
+| 设计三件套（spec / PRODUCT / ARCHITECTURE） | React 前端（Web MVP 四页：Today / Candidates / Stock Profile / Strategy） |
 | 类型化配置加载；阈值/因子/权重全部写在 YAML | 深研 Adapter 真实外部命令接线（默认未配置时明确报错） |
 | Watchlist 状态机（`DISCOVERED → WATCH → DEEP_RESEARCH → TRACK_SIGNAL`）+ Timeline + CLI/API | 第 7 个策略 Industry Trend（行业数据归一化已就位，打分口径待批准） |
 | 领域枚举、时间模型、扩展契约 Protocol | `confidence` 算法（设计未定义，保持 `null`） |
@@ -372,11 +372,10 @@ uv run mypy
 
 ## 下一步
 
-1. **Web MVP 前端 6 个页面**：Today / Screener / Strategy / Stock Profile / Watchlist / Data Health（技术方案与页面设计详见 `docs/superpowers/specs/2026-09-21-production-candidate-v2-web-mvp-design.md` 与 `web/README.md`）。
-2. **API 端点补齐**：为前端提供 Data Health 与 Market Regime 的专用查询接口。
-3. **第 7 个 Scanner：Industry Trend**：行业归一化已就位，待行业聚合指标与打分口径批准。
-4. **长尾策略指标稳健化**：分红支付率形状（是否设上限或区间偏好）、Growth 极值稳健化及 PEG 值域复核。
-5. **深研真实集成**：配置 `ASTOCK_DEEP_RESEARCH_CMD` 对接外部深研 Agent。
+1. **Web MVP 四页面验收**：Today / Candidates / Stock Profile / Strategy；执行状态见 `docs/superpowers/plans/2026-09-21-web-mvp.md` 与 `web/README.md`。
+2. **第 7 个 Scanner：Industry Trend**：行业归一化已就位，待行业聚合指标与打分口径批准。
+3. **长尾策略指标稳健化**：分红支付率形状（是否设上限或区间偏好）、Growth 极值稳健化及 PEG 值域复核。
+4. **深研真实集成**：配置 `ASTOCK_DEEP_RESEARCH_CMD` 对接外部深研 Agent。
 
 每条切片的计划都放在 `docs/superpowers/plans/`，设计权威仍是 `docs/superpowers/specs/2026-09-16-a-stock-lens-design.md`。
 
@@ -392,6 +391,6 @@ uv run mypy
 - `docs/superpowers/specs/2026-09-16-a-stock-lens-design.md`：完整设计规格
 - `docs/REVIEW_NOTES.md`：本次一致性实现中做出的判断与偏离记录
 - `docs/ROADMAP.md`：后续待办清单（含被决策阻塞的项与数据工程遗留）
-- `web/README.md`：前端页面规划
+- `web/README.md`：Web MVP 页面、边界与开发/启动方式
 
 权威顺序：设计 spec → `docs/PRODUCT.md` → `docs/ARCHITECTURE.md` → `README.md`。

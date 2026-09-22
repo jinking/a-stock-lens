@@ -24,6 +24,29 @@ A-Stock Lens 本地只读研究看板，基于 React + TypeScript + Vite 构建�
 | `/stocks/:symbol` | `StockProfilePage` | 单股画像：个股在候选池中的状态、策略契合度、因子明细与血缘追溯 |
 | `/strategies/:strategyId` | `StrategyPage` | 策略筛选：单策略全市场排序 (Ranking) 与双门槛合格池 (Qualified) |
 
+## 本地启动
+
+先在仓库根目录启动 FastAPI：
+
+```bash
+uv run uvicorn --factory astock_lens.api.app:create_app --host 127.0.0.1 --port 8000
+```
+
+再在 `web/` 目录启动前端：
+
+```bash
+npm ci
+npm run dev -- --host 127.0.0.1
+```
+
+浏览器默认访问 `http://127.0.0.1:5173`。前端默认请求 `http://127.0.0.1:8000`；如需更改 API 地址，可设置 `VITE_API_BASE_URL`。
+
+策略页只展示查询 API 返回的排名与双门槛结果；覆盖缺口和服务端资格警告会显式展示。单股画像保留因子数据状态与 Candidate 快照血缘，缺失值不会显示为数值零。
+
+## 当前实施状态
+
+Web MVP 按 `docs/superpowers/plans/2026-09-21-web-mvp.md` 实施，范围为上述四页。单元/组件测试、TypeScript 类型检查、生产构建和本地浏览器验收结果记录在 `docs/decision-packets/2026-09-21-web-mvp-acceptance.md`。远端 GitHub Actions 需提交并推送分支后才能取得运行状态。
+
 ## 开发常用命令
 
 在 `web/` 目录下执行：

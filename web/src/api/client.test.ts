@@ -342,6 +342,7 @@ describe('API Client', () => {
           reasons: ['high roe'],
           risks: [],
           rank: 1,
+          lineage: { universe_snapshot: 'UNIVERSE:2026-09-04', factor_version: 'factor-v1' },
         },
         watchlist_status: 'DISCOVERED',
       };
@@ -375,6 +376,7 @@ describe('API Client', () => {
           strategy_qualifications: [{ strategy_id: 'growth' }],
           reasons: ['strong'],
           risks: [],
+          lineage: { universe_snapshot: 'UNIVERSE:2026-09-04', factor_version: 'factor-v2' },
         },
         watchlist: { symbol: '600000.SH', state: 'DISCOVERED' },
       };
@@ -390,6 +392,7 @@ describe('API Client', () => {
       expect(result.watchlist_status).toBe('DISCOVERED');
       expect(result.candidate?.primary_score).toBe(90);
       expect(result.candidate?.qualified_strategies).toEqual(['growth']);
+      expect(result.candidate?.lineage?.factor_version).toBe('factor-v2');
     });
   });
 
@@ -470,6 +473,29 @@ describe('API Client', () => {
       expect(result.results[0]?.symbol).toBe('600000.SH');
       expect(result.results[0]?.score).toBe(90.0);
     });
+
+    it('rejects missing coverage counts instead of turning unknown coverage into zero', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true, status: 200, json: async () => ({ strategy_id: 'growth', coverage: {}, items: [] }),
+      } as Response);
+      await expect(getStrategyResults('growth', '2026-09-04')).rejects.toMatchObject({
+        status: 502,
+        message: expect.stringContaining('缺少覆盖度'),
+      });
+    });
+
+    it('rejects missing total count in an otherwise normalized response', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true, status: 200, json: async () => ({
+          query: { strategy_id: 'growth', as_of: '2026-09-04', limit: 20 },
+          coverage: { covered_count: 2, coverage_ratio: 1 }, results: [],
+        }),
+      } as Response);
+      await expect(getStrategyResults('growth', '2026-09-04')).rejects.toMatchObject({
+        status: 502,
+        message: expect.stringContaining('缺少覆盖度'),
+      });
+    });
   });
 
   describe('getQualifiedResults', () => {
@@ -515,6 +541,7 @@ describe('API Client', () => {
           absolute_pass_count: 6,
           qualified_count: 5,
         },
+        warnings: ['部分覆盖'],
         items: [
           {
             rank: 1,
@@ -540,8 +567,19 @@ describe('API Client', () => {
       expect(result.qualified_count).toBe(5);
       expect(result.coverage_count).toBe(20);
       expect(result.items[0]?.symbol).toBe('600000.SH');
-      expect(result.items[0]?.qualified).toBe(true);
+      expect(result.items[0]?.qualified).toBeUndefined();
       expect(result.items[0]?.rank_percentile).toBe(0.98);
+      expect(result.warnings).toEqual(['部分覆盖']);
+    });
+
+    it('rejects missing qualification counts instead of reporting an empty qualified pool', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true, status: 200, json: async () => ({ strategy_id: 'growth', items: [] }),
+      } as Response);
+      await expect(getQualifiedResults('growth', '2026-09-04')).rejects.toMatchObject({
+        status: 502,
+        message: expect.stringContaining('缺少资格覆盖度'),
+      });
     });
   });
 });
