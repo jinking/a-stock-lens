@@ -2825,6 +2825,11 @@ def calibrate_qualification_impact(
     typer.echo(f"  {md_path}")
 
 
+from astock_lens.cli.trade import trade_app
+
+app.add_typer(trade_app, name="trade")
+
+
 @calibrate_app.command("market-signal-readiness")
 def calibrate_market_signal_readiness(
     as_of: Annotated[
