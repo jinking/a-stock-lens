@@ -266,9 +266,9 @@ def test_market_validator_missing_context_dimensions_raise() -> None:
 
 
 def test_market_validator_missing_trend_or_liquidity_factors_raise() -> None:
-    """测试缺少 ret_20d、proximity_52w_high 或 avg_amount_20d 因子时抛出异常。"""
+    """测试动量策略缺少 ret_20d、proximity_52w_high 或 avg_amount_20d 因子时抛出异常。"""
     validator = MarketValidator(version="v1")
-    valid_context = _valid_context()
+    valid_context = _valid_context(strategy_id="momentum")
 
     for factor_name in ("ret_20d", "proximity_52w_high", "avg_amount_20d"):
         remaining_factors = tuple(
@@ -279,6 +279,20 @@ def test_market_validator_missing_trend_or_liquidity_factors_raise() -> None:
                 valid_context.model_copy(update={"factors": remaining_factors})
             )
         assert factor_name in str(exc_info.value)
+
+
+def test_market_validator_non_momentum_allows_missing_proximity_52w_high() -> None:
+    """测试非动量策略（如成长/质量次新股）缺少 proximity_52w_high 时仍可正常完成验证。"""
+    validator = MarketValidator(version="v1")
+    valid_context = _valid_context(strategy_id="growth")
+    factors_without_prox = tuple(
+        f for f in valid_context.factors if f.factor != "proximity_52w_high"
+    )
+    result = validator.validate(
+        valid_context.model_copy(update={"factors": factors_without_prox})
+    )
+    assert isinstance(result, MarketValidationResult)
+    assert result.status == MarketValidation.CONFIRMED
 
 
 def test_market_validator_multiple_missing_factors_reported() -> None:

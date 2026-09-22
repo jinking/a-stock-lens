@@ -72,7 +72,10 @@ class MarketValidator:
         missing: list[str] = []
         if factor_map.get("ret_20d") is None:
             missing.append("ret_20d")
-        if factor_map.get("proximity_52w_high") is None:
+        if (
+            context.strategy_id == "momentum"
+            and factor_map.get("proximity_52w_high") is None
+        ):
             missing.append("proximity_52w_high")
         if factor_map.get("avg_amount_20d") is None:
             missing.append("avg_amount_20d")
@@ -113,10 +116,10 @@ class MarketValidator:
 
         # 2. 维度 1: 个股趋势
         ret_20d = float(factor_map["ret_20d"].raw_value)  # type: ignore[arg-type]
-        prox = float(factor_map["proximity_52w_high"].raw_value)  # type: ignore[arg-type]
         stock_trend_positive = False
 
         if context.strategy_id == "momentum":
+            prox = float(factor_map["proximity_52w_high"].raw_value)  # type: ignore[arg-type]
             if ret_20d > 0.064 and prox > 0.85:
                 positive_count += 1
                 stock_trend_positive = True

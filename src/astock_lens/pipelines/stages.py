@@ -288,7 +288,7 @@ def qualification_stage(
 
     qualifications: list[StrategyQualification] = []
     for result in strategy_results:
-        if not result.eligible:
+        if not result.eligible or result.rank_percentile is None:
             continue
         qualifier = qualifiers.get(result.strategy_id)
         if qualifier is None:
