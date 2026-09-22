@@ -132,12 +132,27 @@ def test_market_signal_pipeline_end_to_end_assembly() -> None:
     )
     assert regime_res.regime == MarketRegime.BULL
 
-    # 2. 运行市场验证阶段
+    # 2. 运行市场验证阶段（提供完整的5维证据）
     validation_results = market_validation_stage(
         symbols=symbols,
         factor_results=factors,
         as_of=AS_OF,
         strategy_by_symbol={s: "momentum" for s in symbols},
+        vol_ratio_by_symbol={
+            "300741.SZ": 1.5,
+            "688525.SH": 0.6,
+            "000526.SZ": 1.0,
+        },
+        industry_excess_by_symbol={
+            "300741.SZ": 0.15,
+            "688525.SH": -0.15,
+            "000526.SZ": 0.01,
+        },
+        relative_strength_by_symbol={
+            "300741.SZ": 0.20,
+            "688525.SH": -0.25,
+            "000526.SZ": 0.05,
+        },
     )
     assert len(validation_results) == 3
     mv_map = {r.symbol: r.status for r in validation_results}

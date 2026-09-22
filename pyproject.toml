@@ -24,6 +24,7 @@ data = [
     "pyarrow>=17.0",
 ]
 providers = ["akshare>=1.14"]
+jev = ["typesafe-sdk>=0.7.1,<1.0"]
 
 [project.scripts]
 astock = "astock_lens.cli.app:app"

@@ -48,6 +48,10 @@ from astock_lens.calibration.render import render_json, render_markdown
 from astock_lens.calibration.valuation_coverage import valuation_coverage
 from astock_lens.candidates.models import Candidate
 from astock_lens.candidates.policy import RepresentativeCandidatePolicy
+from astock_lens.data.benchmark import (
+    BENCHMARK_BARS_ENV,
+    read_benchmark_bars,
+)
 from astock_lens.data.bootstrap import (
     bootstrap_liquidity_history,
     bootstrap_strategy_history,
@@ -267,6 +271,14 @@ def _dataset() -> str:
 
 def _securities_dataset() -> str:
     return os.getenv(SECURITIES_DATASET_ENV, DEFAULT_SECURITIES_DATASET)
+
+
+def _benchmark_bars_path() -> Path:
+    """解析基准指数日线 CSV 文件路径。"""
+    configured_path = os.getenv(BENCHMARK_BARS_ENV)
+    if configured_path:
+        return Path(configured_path)
+    return _csv_root() / "benchmark_bars.csv"
 
 
 def _storage_paths() -> StoragePaths:
@@ -1356,6 +1368,13 @@ def _run_daily(day: datetime, *, land: bool) -> DailyRunResult:
     candidate_policy = (
         RepresentativeCandidatePolicy(version="v1") if qualifiers else None
     )
+    benchmark_path = _benchmark_bars_path()
+    benchmark_bars = read_benchmark_bars(
+        path=benchmark_path,
+        benchmark_id="000985.CSI",
+        as_of=day,
+    )
+    industry_by_symbol = _production_industry_map(day)
     return run_daily(
         csv_root=_csv_root(),
         as_of=day,
@@ -1370,6 +1389,9 @@ def _run_daily(day: datetime, *, land: bool) -> DailyRunResult:
         sync=_sync_stage(day) if land else None,
         qualifiers=qualifiers,
         candidate_policy=candidate_policy,
+        benchmark_id="000985.CSI",
+        benchmark_bars=benchmark_bars,
+        industry_by_symbol=industry_by_symbol,
     )
 
 
@@ -1503,6 +1525,34 @@ def industry_export_map(
         for symbol in sorted(mapping):
             writer.writerow((symbol, mapping[symbol]))
     typer.echo(f"industry map: {len(mapping)} symbols written to {output}")
+
+
+def _latest_industry_file(day: datetime, root: Path | None = None) -> Path:
+    """按时点查找不晚于该日期的最新申万行业 CSV 文件。"""
+    directory = (root or _csv_root()) / "westock" / "industry"
+    target_date = day.date()
+    eligible: list[tuple[date, Path]] = []
+    if directory.is_dir():
+        for file in directory.glob("*.csv"):
+            try:
+                file_date = date.fromisoformat(file.stem)
+            except ValueError:
+                continue
+            if file_date <= target_date:
+                eligible.append((file_date, file))
+    if not eligible:
+        raise FileNotFoundError(
+            f"No eligible industry file found in {directory} for date {day.date().isoformat()}"
+        )
+    eligible.sort(key=lambda item: item[0])
+    return eligible[-1][1]
+
+
+def _production_industry_map(day: datetime, root: Path | None = None) -> dict[str, str]:
+    """按时点加载生产申万二级行业映射（含权威静态补充）。"""
+    from astock_lens.data.industry import load_production_industry_map
+
+    return load_production_industry_map(day, root or _csv_root())
 
 
 def _valuation_strategy_configs() -> tuple[StrategyConfig, ...]:

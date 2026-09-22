@@ -529,7 +529,7 @@ def test_real_candidate_snapshots_from_daily_pipeline_validate_cleanly(
     )
     scanners = load_scanners(ROOT / "configs" / "strategies")
     qualifiers = load_canonical_qualifiers(
-        known_factor_names={cfg.name for cfg in configs_factors}
+        known_factor_names=frozenset(cfg.name for cfg in configs_factors)
     )
 
     store: SnapshotStore = JsonSnapshotStore(local_tmp / "snapshots")

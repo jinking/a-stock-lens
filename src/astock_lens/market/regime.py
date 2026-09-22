@@ -47,9 +47,9 @@ class MarketRegimeDetector:
         self.version = version
 
     def detect(self, context: MarketRegimeContext) -> MarketRegimeResult:
-        """Detect the market regime from context.
+        """从上下文中判定市场环境状态。
 
-        Fail-closed: raises ValueError when all essential inputs are None.
+        闭市失败 (Fail-closed)：当市场宽度或基准指数趋势任一缺失时抛出 MarketRegimeEvidenceIncomplete。
         """
         breadth = context.breadth_ratio
         index_trend = context.index_trend
@@ -57,6 +57,14 @@ class MarketRegimeDetector:
         if breadth is None and index_trend is None:
             raise MarketRegimeEvidenceIncomplete(
                 "Missing market regime inputs: both breadth_ratio and index_trend are None"
+            )
+
+        if breadth is None:
+            raise MarketRegimeEvidenceIncomplete("R2 requires breadth_ratio")
+
+        if index_trend is None:
+            raise MarketRegimeEvidenceIncomplete(
+                "R2 A1 requires 000985.CSI benchmark trend"
             )
 
         reasons: list[str] = list(context.reasons)
@@ -70,50 +78,39 @@ class MarketRegimeDetector:
         def _fmt_trend(t: float) -> str:
             return f"ma_20/ma_60 = {t:.4f}" if t > 0.5 else f"{t:+.2%}"
 
-        if breadth is not None:
-            if breadth > 0.55:
-                if index_trend is not None and _is_trend_up(index_trend):
-                    regime = MarketRegime.BULL
-                    reasons.append(
-                        f"全市场宽度强劲 ({breadth:.1%}) 且基准指数均线走多 ({_fmt_trend(index_trend)})"
-                    )
-                else:
-                    regime = MarketRegime.RANGE_UP
-                    reasons.append(
-                        f"全市场宽度强劲 ({breadth:.1%})，指数走势中性或未单边向上"
-                    )
-            elif breadth >= 0.40:
-                regime = MarketRegime.RANGE
-                reasons.append(f"全市场宽度处于均衡震荡区间 ({breadth:.1%})")
-            else:
-                if index_trend is not None and _is_trend_down(index_trend):
-                    regime = MarketRegime.BEAR
-                    reasons.append(
-                        f"全市场宽度偏弱 ({breadth:.1%}) 且基准指数下行 ({_fmt_trend(index_trend)})"
-                    )
-                else:
-                    regime = MarketRegime.RANGE_DOWN
-                    reasons.append(f"全市场宽度偏弱 ({breadth:.1%})，处于防守区间")
-        else:
-            # breadth is None but index_trend is available
-            assert index_trend is not None
-            if index_trend > 1.02 if index_trend > 0.5 else index_trend > 0.02:
+        if breadth > 0.55:
+            if _is_trend_up(index_trend):
                 regime = MarketRegime.BULL
-                reasons.append(f"基准指数单边强劲走多 ({_fmt_trend(index_trend)})")
-            elif index_trend < 0.98 if index_trend > 0.5 else index_trend < -0.02:
-                regime = MarketRegime.BEAR
-                reasons.append(f"基准指数单边下行 ({_fmt_trend(index_trend)})")
+                reasons.append(
+                    f"全市场宽度强劲 ({breadth:.1%}) 且基准指数均线走多 ({_fmt_trend(index_trend)})"
+                )
             else:
-                regime = MarketRegime.RANGE
-                reasons.append(f"基准指数处于横盘震荡 ({_fmt_trend(index_trend)})")
+                regime = MarketRegime.RANGE_UP
+                reasons.append(
+                    f"全市场宽度强劲 ({breadth:.1%})，指数走势中性或未单边向上"
+                )
+        elif breadth >= 0.40:
+            regime = MarketRegime.RANGE
+            reasons.append(f"全市场宽度处于均衡震荡区间 ({breadth:.1%})")
+        else:
+            if _is_trend_down(index_trend):
+                regime = MarketRegime.BEAR
+                reasons.append(
+                    f"全市场宽度偏弱 ({breadth:.1%}) 且基准指数下行 ({_fmt_trend(index_trend)})"
+                )
+            else:
+                regime = MarketRegime.RANGE_DOWN
+                reasons.append(f"全市场宽度偏弱 ({breadth:.1%})，处于防守区间")
 
-        # 极端波动率降级检查
+        # 极端波动率降级检查（审批决策 B3：暂缓启用/Deferred）
         if context.extreme_volatility:
             reasons.append("触发宏观极端波动率预警，下调激进偏多等级防范踩踏风险")
             if regime == MarketRegime.BULL:
                 regime = MarketRegime.RANGE_UP
             elif regime == MarketRegime.RANGE_UP:
                 regime = MarketRegime.RANGE
+        else:
+            reasons.append("宏观极端波动率门禁依据审批决策 B3 暂缓启用 (deferred)")
 
         return MarketRegimeResult(
             as_of=context.as_of,

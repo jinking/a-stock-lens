@@ -195,3 +195,54 @@ def test_candidate_cross_snapshot_validation() -> None:
         as_of=AS_OF,
     )
     assert "cross_snapshot" in _checks(findings_missing_factor)
+
+
+def _market_regime_record(**overrides: object) -> dict[str, object]:
+    record: dict[str, object] = {
+        "as_of": AS_OF.isoformat(),
+        "regime": "BULL",
+        "breadth_ratio": 0.65,
+        "index_trend": 1.05,
+        "reasons": ("宽度走强", "指数上行"),
+        "lineage": {"regime_version": "v1"},
+    }
+    record.update(overrides)
+    return record
+
+
+def test_market_regime_clean_snapshot_passes() -> None:
+    findings = validate_snapshot(
+        "MARKET_REGIME", [_market_regime_record()], as_of=AS_OF
+    )
+    assert findings == ()
+
+
+def test_market_regime_count_must_be_exactly_one() -> None:
+    empty_findings = validate_snapshot("MARKET_REGIME", [], as_of=AS_OF)
+    assert "market_regime_count" in _checks(empty_findings)
+
+    multi_findings = validate_snapshot(
+        "MARKET_REGIME",
+        [_market_regime_record(), _market_regime_record()],
+        as_of=AS_OF,
+    )
+    assert "market_regime_count" in _checks(multi_findings)
+
+
+def test_market_regime_invalid_vocabulary_reported() -> None:
+    bad_rec = _market_regime_record(regime="INVALID_REGIME")
+    findings = validate_snapshot("MARKET_REGIME", [bad_rec], as_of=AS_OF)
+    assert "regime_vocabulary" in _checks(findings)
+
+
+def test_market_regime_missing_required_key_reported() -> None:
+    rec = _market_regime_record()
+    del rec["reasons"]
+    findings = validate_snapshot("MARKET_REGIME", [rec], as_of=AS_OF)
+    assert "required_keys" in _checks(findings)
+
+
+def test_market_regime_empty_version_reported() -> None:
+    bad_lineage = _market_regime_record(lineage={"regime_version": ""})
+    findings = validate_snapshot("MARKET_REGIME", [bad_lineage], as_of=AS_OF)
+    assert "empty_version" in _checks(findings)

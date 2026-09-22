@@ -1093,3 +1093,113 @@ def test_today_api_invalid_as_of_returns_422(local_tmp: Path) -> None:
     client = TestClient(create_app(snapshot_root=local_tmp))
     res = client.get("/today", params={"as_of": "not-a-date"})
     assert res.status_code == 422
+
+
+def test_snapshot_dates_valid_kind_returns_sorted_dates_and_latest(
+    local_tmp: Path,
+) -> None:
+    store = JsonSnapshotStore(local_tmp)
+    dt1 = datetime(2026, 9, 19, 15, 0, tzinfo=UTC)
+    dt2 = datetime(2026, 9, 17, 15, 0, tzinfo=UTC)
+    for dt in (dt1, dt2):
+        store.write(
+            SnapshotKind.CANDIDATE,
+            dt,
+            [
+                Candidate(
+                    symbol="600000.SH",
+                    as_of=dt,
+                    next_action=NextAction.IGNORE,
+                    lineage=SnapshotLineage(factor_version="v1", strategy_version="v1"),
+                )
+            ],
+        )
+
+    client = TestClient(create_app(snapshot_root=local_tmp))
+    response = client.get("/snapshot-dates", params={"kind": "CANDIDATE"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == {
+        "kind": "CANDIDATE",
+        "dates": ["2026-09-17", "2026-09-19"],
+        "latest": "2026-09-19",
+    }
+
+    default_response = client.get("/snapshot-dates")
+    assert default_response.status_code == 200
+    assert default_response.json() == payload
+
+
+def test_snapshot_dates_empty_returns_empty_list_and_none_latest(
+    local_tmp: Path,
+) -> None:
+    client = TestClient(create_app(snapshot_root=local_tmp))
+    response = client.get("/snapshot-dates", params={"kind": "CANDIDATE"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "kind": "CANDIDATE",
+        "dates": [],
+        "latest": None,
+    }
+
+
+def test_snapshot_dates_invalid_kind_returns_422(local_tmp: Path) -> None:
+    client = TestClient(create_app(snapshot_root=local_tmp))
+    response = client.get("/snapshot-dates", params={"kind": "INVALID_KIND"})
+
+    assert response.status_code == 422
+
+
+def test_cors_headers_allowed_origins(local_tmp: Path) -> None:
+    client = TestClient(create_app(snapshot_root=local_tmp))
+
+    preflight = client.options(
+        "/snapshot-dates",
+        headers={
+            "Origin": "http://127.0.0.1:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert preflight.status_code == 200
+    assert (
+        preflight.headers.get("access-control-allow-origin") == "http://127.0.0.1:5173"
+    )
+    assert preflight.headers.get("access-control-allow-credentials") == "true"
+
+    preflight_local = client.options(
+        "/snapshot-dates",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert preflight_local.status_code == 200
+    assert (
+        preflight_local.headers.get("access-control-allow-origin")
+        == "http://localhost:5173"
+    )
+
+    res_127 = client.get(
+        "/snapshot-dates",
+        params={"kind": "CANDIDATE"},
+        headers={"Origin": "http://127.0.0.1:5173"},
+    )
+    assert res_127.headers.get("access-control-allow-origin") == "http://127.0.0.1:5173"
+
+    res_local = client.get(
+        "/snapshot-dates",
+        params={"kind": "CANDIDATE"},
+        headers={"Origin": "http://localhost:5173"},
+    )
+    assert (
+        res_local.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    )
+
+    res_evil = client.get(
+        "/snapshot-dates",
+        params={"kind": "CANDIDATE"},
+        headers={"Origin": "http://evil.com"},
+    )
+    assert "access-control-allow-origin" not in res_evil.headers

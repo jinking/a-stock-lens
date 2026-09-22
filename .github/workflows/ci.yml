@@ -21,6 +21,36 @@ permissions:
   contents: read
 
 jobs:
+  web:
+    name: Web 前端验证（测试 / 类型 / 构建）
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v7
+
+      - name: 安装 Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 安装 Web 依赖
+        working-directory: web
+        run: npm ci
+
+      - name: Web 测试
+        working-directory: web
+        run: npm run test
+
+      - name: Web 类型检查
+        working-directory: web
+        run: npm run typecheck
+
+      - name: Web 生产构建
+        working-directory: web
+        run: npm run build
+
   verify:
     name: 全量验证（ruff / format / mypy / pytest）
     runs-on: ubuntu-latest

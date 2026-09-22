@@ -2205,3 +2205,32 @@ candidate: ~/.workbuddy/plugins/cache/cb_teams_marketplace/finance-data/1.6.0/sk
 - `astock qualified growth --as-of 2026-09-19 --top 20`
 - `astock qualified momentum --as-of 2026-09-19 --top 20`
 - `astock stock 001309.SZ --as-of 2026-09-19`
+
+---
+
+## 四十一、Candidate v2 生产正式闭环与日常全链路验收（Plan A Task 7，2026-09-22）
+
+依据 `docs/superpowers/plans/2026-09-21-production-candidate-v2-closure.md` Task 7，完成了 Candidate v2 在真实生产管线上的首次正式发布与独立第三方产物审计：
+
+### 41.1 核心成果与生产闭环
+1. **真实生产命令行发布**：
+   - 摆脱沙箱测试依赖，通过标准生产命令 `astock daily --as-of 2026-09-17` 一键调度全流程 11 个阶段；
+   - 正式写出五类权威快照：`UNIVERSE`、`FACTOR`、`STRATEGY`、`MARKET_REGIME`、`CANDIDATE`；
+   - 严格恪守历史快照不可变性铁律，`2026-09-19.json` 保持原样不变，`2026-09-17` 成为首个具备完整 5 类快照的 Candidate v2 正式基准日。
+2. **边缘边界与鲁棒性修复**：
+   - 修复单样本总体策略分位数缺失导致资格判定异常问题（无分位数标的依法跳过资格认定）；
+   - 修复次新股（上市满 120 天但未满 52 周）缺少 `proximity_52w_high` 在非动量策略中误触发证据缺失阻断的问题（依据批复规则，仅动量策略强制要求 52 周高点距离，成长/价值/质量/红利仅需 20 日收益率即可完成个股趋势验证）。
+3. **独立第三方产物审计全量 0 Findings**：
+   - `validate_snapshot("UNIVERSE")`: **0 findings**
+   - `validate_snapshot("FACTOR")`: **0 findings**
+   - `validate_snapshot("STRATEGY")`: **0 findings**
+   - `validate_snapshot("MARKET_REGIME")`: **0 findings**
+   - `validate_snapshot("CANDIDATE")`: **0 findings**（50 只候选完全符合 D1 破位否决、E1 走弱预警及 5D 流动性底线独立复算）
+   - `validate_snapshot_set`: **0 findings**（因子、策略、候选跨快照引用与血缘 100% 闭环）
+   - `validate_job_manifest`: **0 findings**（11 阶段全流程调度记录完备）
+4. **用户端日常查询验证**：
+   - `astock today --as-of 2026-09-17`：输出当日空头震荡环境（BEAR）、主策略分布（动量 32、质量 10、成长 7、价值 1）及 Top 10 核心候选；
+   - `astock candidates --as-of 2026-09-17 --top 20`：输出 Top 20 核心候选清单及交易特征信号；
+   - `astock stock 000001.SZ --as-of 2026-09-17`：精准呈现单股画像，含价值策略首选资格与 `VALUE_CONTRARIAN` 企稳特征信号。
+5. **审计决策包归档**：
+   - 形成完整决策与审计记录文件：`docs/decision-packets/2026-09-17-candidate-v2-production-audit.md`。

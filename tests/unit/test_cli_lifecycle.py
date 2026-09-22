@@ -166,6 +166,31 @@ def _formal_run(local_tmp: Path) -> None:
     assert result.exit_code == 0, result.output
 
 
+def test_benchmark_bars_default_to_the_configured_csv_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import astock_lens.cli.app as cli_module
+    from astock_lens.data.benchmark import BENCHMARK_BARS_ENV
+
+    monkeypatch.setenv("ASTOCK_CSV_ROOT", str(tmp_path))
+    monkeypatch.delenv(BENCHMARK_BARS_ENV, raising=False)
+
+    assert cli_module._benchmark_bars_path() == tmp_path / "benchmark_bars.csv"
+
+
+def test_benchmark_bars_explicit_path_overrides_the_csv_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import astock_lens.cli.app as cli_module
+    from astock_lens.data.benchmark import BENCHMARK_BARS_ENV
+
+    benchmark_path = tmp_path / "custom.csv"
+    monkeypatch.setenv("ASTOCK_CSV_ROOT", str(tmp_path / "raw"))
+    monkeypatch.setenv(BENCHMARK_BARS_ENV, str(benchmark_path))
+
+    assert cli_module._benchmark_bars_path() == benchmark_path
+
+
 # --- watch -----------------------------------------------------------------
 
 
@@ -494,6 +519,20 @@ def test_daily_lands_raw_data_first_when_asked(
     monkeypatch.setattr(cli_module, "_bulk_provider", lambda: provider)
 
     raw_root = local_tmp / "raw"
+    industry_dir = raw_root / "westock" / "industry"
+    industry_dir.mkdir(parents=True, exist_ok=True)
+    import shutil
+
+    shutil.copy(
+        CSV_ROOT / "westock" / "industry" / f"{DAY}.csv",
+        industry_dir / f"{DAY}.csv",
+    )
+    if (CSV_ROOT / "benchmark_bars.csv").is_file():
+        shutil.copy(
+            CSV_ROOT / "benchmark_bars.csv",
+            raw_root / "benchmark_bars.csv",
+        )
+
     result = CliRunner().invoke(
         app,
         ["daily", "--as-of", DAY, "--sync", "--allow-incomplete"],

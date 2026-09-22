@@ -136,13 +136,28 @@ def _setup_raw_root(root: Path) -> None:
             f'统一估值查询,统一估值查询,"{escaped2}"\n'
         )
 
-    # 2026-09-17 的旧值与 2026-09-19 的新值
     (val_dir / "2026-09-17.csv").write_text(
         _val_csv(5.0, 1.2, 4.0, 0.9), encoding="utf-8"
     )
     (val_dir / "2026-09-19.csv").write_text(
         _val_csv(8.0, 1.8, 6.0, 1.3), encoding="utf-8"
     )
+
+    # 5. benchmark 与 industry 证据
+    import shutil
+
+    csv_fixture = ROOT / "tests" / "fixtures" / "csv"
+    bm_src = csv_fixture / "benchmark_bars.csv"
+    if bm_src.is_file():
+        shutil.copy(bm_src, root / "benchmark_bars.csv")
+
+    ind_dir = root / "westock" / "industry"
+    ind_dir.mkdir(parents=True, exist_ok=True)
+    ind_src = csv_fixture / "westock" / "industry" / "2026-09-04.csv"
+    if ind_src.is_file():
+        shutil.copy(ind_src, ind_dir / "2026-09-04.csv")
+        shutil.copy(ind_src, ind_dir / "2026-09-17.csv")
+        shutil.copy(ind_src, ind_dir / "2026-09-19.csv")
 
 
 def _canonical_factors(

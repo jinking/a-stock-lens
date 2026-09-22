@@ -47,40 +47,41 @@ V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学�
 
 ## 当前状态
 
-项目处于**每日 Pipeline 切片已贯通**：`CSV → Raw → Normalized → Quality Gate → Factor → Universe → Strategy（横截面评分排名）`，加上 Watchlist 状态机、Job Manifest 与 CLI 生命周期命令，可以端到端跑通，且不需要网络、不需要可选依赖。Candidate 阶段因为入选规则尚未批准而 `BLOCKED`——它不是"今天没有标的入选"，而是"还没有决定怎么选"（见 `docs/ROADMAP.md` 第一节）。
+项目处于**标准每日 Pipeline 已全链路贯通，Candidate v2 正式发布交付**：从数据归一化、全市场 24 个因子计算、研究池（2,303 只）筛选、六策略横截面评分排名，到 **Market Regime（R2 复合宏观与大盘环境）**、**Market Validation（5D 市场验证矩阵）**、**Strategy Signals（多策略特征交易形态信号引擎）**，再到 **BUILD_CANDIDATES（双门槛与代表性择优选择政策）**，均已在标准日常流水线（`astock daily`）中端到端调度闭环，并正式持久化五大权威快照（`UNIVERSE`、`FACTOR`、`STRATEGY`、`MARKET_REGIME`、`CANDIDATE`）。CLI（`today` / `candidates` / `screen` / `qualified` / `stock`）与对应 API 均已完全打通且通过独立产物审查（0 findings）。
 
 | 已具备 | 尚未实现 |
 | --- | --- |
-| 设计三件套（spec / PRODUCT / ARCHITECTURE） | Market Regime、Market Validation、Signal 检测器（阈值 `Deferred`） |
-| 类型化配置加载；阈值/因子/权重全部写在 YAML | React 前端（6 个页面） |
-| Watchlist 状态机（`DISCOVERED → WATCH → DEEP_RESEARCH → TRACK_SIGNAL`）+ Timeline + CLI/API | 深研 Adapter 需要外部命令，默认未配置时明确报错 |
+| 设计三件套（spec / PRODUCT / ARCHITECTURE） | React 前端（Web MVP 四页：Today / Candidates / Stock Profile / Strategy） |
+| 类型化配置加载；阈值/因子/权重全部写在 YAML | 深研 Adapter 真实外部命令接线（默认未配置时明确报错） |
+| Watchlist 状态机（`DISCOVERED → WATCH → DEEP_RESEARCH → TRACK_SIGNAL`）+ Timeline + CLI/API | 第 7 个策略 Industry Trend（行业数据归一化已就位，打分口径待批准） |
 | 领域枚举、时间模型、扩展契约 Protocol | `confidence` 算法（设计未定义，保持 `null`） |
-| 本地 CSV Provider、Normalizer、Data Quality Gate | 权重正式评审（当前是等权草案 `PENDING REVIEW`） |
-| Universe 引擎与不可变 `UniverseSnapshot`（含 deferred rule 上报） | 停牌天数数据源（设置 `long_suspension_days` 阈值的前置依赖） |
-| 动量因子（`ret_20d` / `ret_60d` / `proximity_52w_high`）+ 流动性因子 | Parquet 行情存储 |
-| 横截面评分与排名（percentile 加权混合，作为共享评分组件）；候选动作改由显式 Candidate Policy 决定，不再由分数推断 | Candidate Qualification 规则（四个方案待所有者裁决） |
+| 本地 CSV Provider、Normalizer、Data Quality Gate | 停牌天数数据源（设置 `long_suspension_days` 阈值的前置依赖） |
+| Universe 引擎与不可变 `UniverseSnapshot`（含 deferred rule 上报，申万二级全覆盖） | Growth 极值稳健化、Dividend payout shape、PEG 值域仍待所有者裁决 |
+| 动量与流动性因子 + 财务 Normalized（49 个指标）+ Financial Quality Gate | Parquet 分析数据层不可变数据包布局（临时迁移已跑通，标准切包待推进） |
+| 24 个核心因子（含真实除权日口径 TTM 股息率、估值与时点证据引用） | |
+| **6 个 Scanner 各自独立成类**并在打分（Value / Growth / GARP / Quality / Dividend / Momentum，权重均已评审通过） | |
+| **双门槛资格判定系统（Dual Gate）**：相对排名分位数（Top 10%）+ 绝对质量门槛（各策略独立 YAML），非法配置 fail-closed | |
+| **Market Regime 研判引擎**：R2 复合宏观环境判定（宽度 + 中证全指均线趋势），生成 `MARKET_REGIME` 快照 | |
+| **Market Validation 5 维验证矩阵**：站上均线、行业超额、相对基准超额、量比健康、流动性，支持 D1 破位一票否决 | |
+| **Strategy Signals 信号引擎**：多策略形态信号（突破、回调、价值企稳等），支持 E1 走弱降级预警 | |
+| **Candidate v2 权威发布**：RepresentativeCandidatePolicy 跨策略代表性择优（软保底 3 只、上限 50 只），标准 `astock daily` 生成正式 `CANDIDATE` 快照 | |
 | `DuckDBSnapshotStore` / `DuckDBWatchlistStore` 与 JSON store 同协议互换（`ASTOCK_SNAPSHOT_BACKEND` / `ASTOCK_WATCHLIST_BACKEND`） | |
-| AkShare Provider（腾讯域日线 + 三交易所名单）+ 真实录制契约 fixture | |
-| WeStock CLI Provider（三大表，含 `EndDate` + `InfoPublDate`，批量 100 只 / 11 秒）+ 录制 fixture | 财报的 Normalized / Quality Gate / 基本面因子（下一片） |
-| 财务 Normalized（49 个指标）+ Financial Quality Gate + 观测进入因子上下文 | 全市场日线落地、估值类指标 |
-| 13 个基本面因子 + 7 个估值因子，带时点选择、证据引用（含真实 `available_at`）与单位 | 行业适用的豁免规则（例如银行的毛利率） |
-| **6 个 Scanner 各自独立成类**并在打分：momentum / growth / quality / dividend / value / garp（权重均已于 2026-09-17 评审通过） | Industry Trend（缺行业数据）；Growth 极值稳健化、Dividend payout shape、PEG 值域仍待所有者裁决 |
-| 全市场财报同步已验证（5,576 只 × 三大表，37 分钟，缺口 4–6 只且有名有姓） | AkShare 全市场日线（5564 只 × 全history，尚未跑过） |
-| 评分机器（`strategies/percentile_scorer.py` 共享组件，支持极性）+ 权重评审工具（真实全市场数据）；每个策略一个独立 Scanner 类 | 重跑一次权重评审以确认现行数字 |
-| neodata 一等 Provider（估值 / 行业 / 单季财报查询模板、批量、缺口补抓、凭证状态进 doctor）+ 估值归一化 | 行业数据归一化、Industry Trend |
-| Job Run 记录与 Manifest（每阶段独立可重跑）、`astock daily`；CLI `sync` / `stock` / `screen` / `qualified` / `watch` / `research` / `strategy run`；API `/health` `/universe` `/factors` `/candidates` `/watchlist` `/strategies` `/strategies/{strategy_id}/results` `/qualifications/{strategy_id}/results` `/stocks/{symbol}` | |
-| 独立 Artifact Validator（快照 + Job Manifest，不导入生产代码） | |
+| AkShare Provider（腾讯域日线 5,008 只落地 + 三交易所名单）+ 真实录制契约 fixture | |
+| WeStock CLI Provider（三大表批量，含 `EndDate` + `InfoPublDate`）+ 录制 fixture | |
+| neodata 一等 Provider（估值/行业/分红详细查询模板、批量、缺口补抓、凭证状态进 doctor） | |
+| Job Run 记录与 Manifest（11 阶段清单完整，每阶段独立可重跑）、`astock daily` | |
+| 用户端查询服务：CLI `today` / `candidates` / `screen` / `qualified` / `stock` 与 API 对应路由 | |
+| 独立 Artifact Validator（五大单快照审查 + 跨快照引用闭环 + Job Manifest，不导入生产代码，0 findings） | |
 
 包结构已按 `docs/ARCHITECTURE.md` 建立，`src/astock_lens/` 下的 `backtest`、`portfolio`、`events` 等目录只是预留边界，没有 V1 实现。
 
 ### 本切片刻意留空的部分
 
-- **权重仍是等权草案。** `configs/strategies/momentum.yaml` 的 `weights:` 已生效（三条动量因子各 1.0），但标注 `PENDING REVIEW`——正式评审前它只是占位，不是结论。
 - **`confidence` 恒为 `null`。** 设计要求该字段但未定义算法；资格判定已要求全部因子在场，"因子齐备比例"会恒等于 1.0，那是一个看起来有用实则无信息的数。
 - **停牌天数诚实缺失。** 交易所名单不提供停牌天数，`suspended_trading_days` 允许 `None`（缺失 ≠ 0）。给 `long_suspension_days` 设阈值前，必须先有提供停牌天数的数据源。
 - **快照后端可选。** 默认 JSON（零依赖），`ASTOCK_SNAPSHOT_BACKEND=duckdb` 切到 DuckDB，两者同协议。
 - **窗口不完整即 `NULL`。** 60 日窗口内少一天，`ret_60d` 输出 `NULL`，不用更短的窗口凑数。
-- **五个阶段显式 `BLOCKED`。** Market Regime、Market Validation、Signal 的词表已确认但阈值是 `Deferred`；`UPDATE_WATCHLIST` 没有确认的自动变更规则；`BUILD_CANDIDATES` 的入选规则（Candidate Qualification）也还没有批准——它不是"今天没有标的入选"，而是"还没有决定怎么选"。`astock daily` 把它们记为 `BLOCKED` 并写明原因，`MARKET_REGIME` 与 `CANDIDATE` 快照因此没有生产者（缺失被显式列出，而不是写占位值）。
+- **自选股流转保持显式 `BLOCKED`。** `UPDATE_WATCHLIST` 阶段依规范保持阻塞，因为自选股流转严格由用户主动发起（`spec §13`），管线不作静默自动变更；其余阶段均已全量连通并产出五大正式快照。
 - **深研 Adapter 默认不接。** `ASTOCK_DEEP_RESEARCH_CMD` 未配置时 `astock research` 直接报错——没有可提交的对象时不会伪造 job。
 - **Watchlist 只走确认路径。** 后退、跳步与预留状态都会被拒绝并指出涉及的状态；设计没有定义这些转移，接受它们等于替产品做决定。
 - **血缘版本可并列。** 同一只标的可能被多个 Scanner 打分，`SnapshotLineage` 的版本字段因此是逗号分隔的集合，判定"这条结果是否被该血缘覆盖"用成员关系；详见 `docs/REVIEW_NOTES.md`。
@@ -184,13 +185,13 @@ uv run astock research 300750.SZ                    # 需要 ASTOCK_DEEP_RESEARC
 "只算一下因子"这种命令不该有权改掉当天正式的候选结果，这也是 `scan` 被明确定义为
 non-persistent preview 的原因。
 
-`astock daily` 会为设计的 11 个阶段各写一条 Job Run 到 `ASTOCK_JOB_ROOT/<date>.json`。目前 6 个阶段可跑，`DETECT_REGIME`、`MARKET_VALIDATE`、`RUN_SIGNALS`、`UPDATE_WATCHLIST` 记录为 `BLOCKED` 并写明等待的决策，因此该命令在补齐前退出码为 1；需要允许不完整时显式加 `--allow-incomplete`。
+`astock daily` 会为设计的 11 个阶段各写一条 Job Run 到 `ASTOCK_JOB_ROOT/<date>.json`。当前标准流水线已全量打通并完整产出五大权威快照（`UNIVERSE`、`FACTOR`、`STRATEGY`、`MARKET_REGIME`、`CANDIDATE`）；`UPDATE_WATCHLIST` 阶段按规范保持显式阻塞（因自选股由用户手动管理，不执行无交互自动跃迁）；支持通过 `--allow-incomplete` 在上游缺数时放行部分完成。
 
 `astock sync` 需要 `providers` extra（`uv sync --extra providers`）：它把 AkShare 的名单与日线落到 `ASTOCK_CSV_ROOT`，已经带有目标日期的标的不会重复抓取（`spec §15` 的增量要求）。
 
 接真实数据时用 `astock sync`（AkShare，落地到 `ASTOCK_CSV_ROOT`）或把该变量指向已有落地目录；fixture 录制脚本见 `scripts/record_akshare_fixture.py`。`factors compute` 的 JSON 走 stdout、运行说明走 stderr，因此可以直接管道给别的工具。
 
-环境变量汇总：`ASTOCK_CSV_ROOT`、`ASTOCK_SNAPSHOT_ROOT`、`ASTOCK_DATASET`、`ASTOCK_SECURITIES_DATASET`、`ASTOCK_FACTOR_CONFIG_DIR`、`ASTOCK_UNIVERSE_CONFIG`、`ASTOCK_STRATEGY_CONFIG_DIR`、`ASTOCK_SNAPSHOT_BACKEND`、`ASTOCK_WATCHLIST_ROOT`、`ASTOCK_WATCHLIST_BACKEND`、`ASTOCK_JOB_ROOT`、`ASTOCK_DEEP_RESEARCH_CMD`、`ASTOCK_WESTOCK_BIN`。
+环境变量汇总：`ASTOCK_CSV_ROOT`、`ASTOCK_BENCHMARK_BARS_PATH`、`ASTOCK_SNAPSHOT_ROOT`、`ASTOCK_DATASET`、`ASTOCK_SECURITIES_DATASET`、`ASTOCK_FACTOR_CONFIG_DIR`、`ASTOCK_UNIVERSE_CONFIG`、`ASTOCK_STRATEGY_CONFIG_DIR`、`ASTOCK_SNAPSHOT_BACKEND`、`ASTOCK_WATCHLIST_ROOT`、`ASTOCK_WATCHLIST_BACKEND`、`ASTOCK_JOB_ROOT`、`ASTOCK_DEEP_RESEARCH_CMD`、`ASTOCK_WESTOCK_BIN`。基准日线默认读取 `ASTOCK_CSV_ROOT/benchmark_bars.csv`；只有需要单独存放时才设置 `ASTOCK_BENCHMARK_BARS_PATH` 覆盖。
 
 ### 财务数据源（2026-09-16 设计补遗 §24）
 
@@ -371,13 +372,10 @@ uv run mypy
 
 ## 下一步
 
-1. **AkShare 全市场落地**：`securities` 名单（5564 只）与全市场日线的批量抓取、限流与断点续跑（`astock sync` 的机制已就绪，缺的是全量运行的验证）。
-2. **全市场财报同步**：100 只/批 ≈ 11 秒/表，三大表全市场约 30 分钟，属季度任务；限流与断点续跑尚未验证。
-3. **极值稳健化与分红支付率形状**：Growth 是否缩尾、分红支付率是否设上限或改成区间偏好（现为线性加权，1950% 与 90% 同等对待）。
-4. **估值口径评审**：定了股本/市值口径，Value 与 GARP 才能落地。
-5. **Market Regime / Market Validation / Signal 检测器**：需要先确认各输入的阈值，否则只能继续保持 `BLOCKED`。
-6. **其余 6 个 Scanner**：依赖基本面因子落地。
-7. **React 前端 6 个页面**：目前只有 `web/README.md`。
+1. **Web MVP 四页面验收**：Today / Candidates / Stock Profile / Strategy；执行状态见 `docs/superpowers/plans/2026-09-21-web-mvp.md` 与 `web/README.md`。
+2. **第 7 个 Scanner：Industry Trend**：行业归一化已就位，待行业聚合指标与打分口径批准。
+3. **长尾策略指标稳健化**：分红支付率形状（是否设上限或区间偏好）、Growth 极值稳健化及 PEG 值域复核。
+4. **深研真实集成**：配置 `ASTOCK_DEEP_RESEARCH_CMD` 对接外部深研 Agent。
 
 每条切片的计划都放在 `docs/superpowers/plans/`，设计权威仍是 `docs/superpowers/specs/2026-09-16-a-stock-lens-design.md`。
 
@@ -393,6 +391,6 @@ uv run mypy
 - `docs/superpowers/specs/2026-09-16-a-stock-lens-design.md`：完整设计规格
 - `docs/REVIEW_NOTES.md`：本次一致性实现中做出的判断与偏离记录
 - `docs/ROADMAP.md`：后续待办清单（含被决策阻塞的项与数据工程遗留）
-- `web/README.md`：前端页面规划
+- `web/README.md`：Web MVP 页面、边界与开发/启动方式
 
 权威顺序：设计 spec → `docs/PRODUCT.md` → `docs/ARCHITECTURE.md` → `README.md`。

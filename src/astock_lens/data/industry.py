@@ -215,3 +215,38 @@ def load_supplemental_industry_memberships(
             )
         )
     return tuple(items)
+
+
+def find_latest_industry_file(as_of: datetime, root: Path) -> Path | None:
+    """按时点查找不晚于该日期的最新申万行业 CSV 文件，未找到返回 None。"""
+    from datetime import date
+
+    directory = root / "westock" / "industry"
+    target_date = as_of.date()
+    eligible: list[tuple[date, Path]] = []
+    if directory.is_dir():
+        for file in directory.glob("*.csv"):
+            try:
+                file_date = date.fromisoformat(file.stem)
+            except ValueError:
+                continue
+            if file_date <= target_date:
+                eligible.append((file_date, file))
+    if not eligible:
+        return None
+    eligible.sort(key=lambda item: item[0])
+    return eligible[-1][1]
+
+
+def load_production_industry_map(as_of: datetime, root: Path) -> dict[str, str]:
+    """按时点加载生产申万二级行业映射（含权威静态补充）。"""
+    file = find_latest_industry_file(as_of, root)
+    if file is None:
+        raise FileNotFoundError(
+            f"No eligible industry file found in {root / 'westock' / 'industry'} for date {as_of.date().isoformat()}"
+        )
+    from astock_lens.data.sync import read_industry_memberships
+
+    memberships = read_industry_memberships(file)
+    supplements = load_supplemental_industry_memberships(as_of=as_of)
+    return build_industry_map((*memberships, *supplements), as_of=as_of)

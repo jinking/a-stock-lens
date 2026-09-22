@@ -42,4 +42,11 @@ var/*.log
 tools/bin/*
 !tools/bin/.gitkeep
 tests/.tmp/
+var/test_tmp/
 .worktrees/
+.superpowers/
+
+# Web 前端依赖与构建产物
+node_modules/
+dist/
+*.tsbuildinfo

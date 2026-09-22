@@ -76,6 +76,9 @@ REQUIRED_KEYS: dict[str, frozenset[str]] = {
             "signal",
         }
     ),
+    "MARKET_REGIME": frozenset(
+        {"regime", "as_of", "lineage", "breadth_ratio", "index_trend", "reasons"}
+    ),
 }
 
 # The version keys whose lineage value must be non-empty, per kind.
@@ -83,6 +86,7 @@ VERSION_KEYS: dict[str, tuple[str, ...]] = {
     "UNIVERSE": (),
     "FACTOR": ("factor_version",),
     "STRATEGY": ("strategy_version",),
+    "MARKET_REGIME": ("regime_version",),
     "CANDIDATE": (
         "strategy_version",
         "qualification_version",
@@ -120,6 +124,10 @@ TERMINAL_JOB_STATUSES: frozenset[str] = frozenset(
 
 # Statuses that assert something went wrong, and so must carry the reason.
 PROBLEM_JOB_STATUSES: frozenset[str] = frozenset({"FAILED", "BLOCKED"})
+
+MARKET_REGIME_VOCABULARY: frozenset[str] = frozenset(
+    {"BULL", "RANGE_UP", "RANGE", "RANGE_DOWN", "BEAR", "EXTREME_VOLATILITY"}
+)
 
 
 @dataclass(frozen=True)
@@ -162,6 +170,15 @@ def validate_snapshot(
             )
         )
 
+    if kind == "MARKET_REGIME" and len(records) != 1:
+        findings.append(
+            ArtifactFinding(
+                check="market_regime_count",
+                symbol="",
+                observed=f"market regime snapshot contains {len(records)} records, must contain exactly 1",
+            )
+        )
+
     seen_symbols: set[str] = set()
     for index, record in enumerate(records):
         symbol = _text(record.get("symbol"))
@@ -189,6 +206,7 @@ def validate_snapshot(
         findings.extend(_cited_versions(kind, record, symbol))
         findings.extend(_cited_scores(kind, record, symbol))
         findings.extend(_candidate_checks(kind, record, symbol))
+        findings.extend(_regime_checks(kind, record, symbol))
 
     return tuple(findings)
 
@@ -916,6 +934,24 @@ def _candidate_checks(
                         )
                     )
 
+    return findings
+
+
+def _regime_checks(
+    kind: str, record: Mapping[str, object], symbol: str
+) -> list[ArtifactFinding]:
+    if kind != "MARKET_REGIME":
+        return []
+    findings: list[ArtifactFinding] = []
+    regime = record.get("regime")
+    if not isinstance(regime, str) or regime not in MARKET_REGIME_VOCABULARY:
+        findings.append(
+            ArtifactFinding(
+                check="regime_vocabulary",
+                symbol=symbol,
+                observed=f"regime {regime!r} is not one of {sorted(MARKET_REGIME_VOCABULARY)}",
+            )
+        )
     return findings
 
 
