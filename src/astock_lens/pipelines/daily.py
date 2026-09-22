@@ -194,6 +194,28 @@ def run_daily(
     `repository` 是归一化读取边界的注入点，与 `run_analysis` 等入口同名同义；
     为 `None` 时 NORMALIZE 阶段走 CSV 回放，与迁移前一致。
     """
+    if benchmark_bars is None:
+        bm_file = csv_root / "benchmark_bars.csv"
+        if bm_file.is_file():
+            from astock_lens.data.benchmark import read_benchmark_bars
+
+            try:
+                benchmark_bars = read_benchmark_bars(
+                    path=bm_file,
+                    benchmark_id=benchmark_id,
+                    as_of=as_of,
+                )
+            except (OSError, ValueError):
+                benchmark_bars = None
+
+    if industry_by_symbol is None:
+        from astock_lens.data.industry import load_production_industry_map
+
+        try:
+            industry_by_symbol = load_production_industry_map(as_of, csv_root)
+        except (OSError, ValueError):
+            industry_by_symbol = None
+
     context = _Context(
         csv_root=csv_root,
         as_of=as_of,

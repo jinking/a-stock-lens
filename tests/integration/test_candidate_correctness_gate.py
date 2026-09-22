@@ -48,12 +48,15 @@ def test_value_qualified_symbol_must_keep_value_validation_semantics() -> None:
         _factor("avg_amount_20d", 200_000_000.0, symbol=symbol),
     )
 
-    # 显式传入策略映射，断言验证结果携带并执行 value 语义
+    # 显式传入策略映射与5维证据，断言验证结果携带并执行 value 语义
     results = market_validation_stage(
         symbols=[symbol],
         factor_results=factors,
         as_of=AS_OF,
         strategy_by_symbol={symbol: "value"},
+        vol_ratio_by_symbol={symbol: 1.1},
+        industry_excess_by_symbol={symbol: 0.02},
+        relative_strength_by_symbol={symbol: 0.05},
     )
     assert len(results) == 1
     result = results[0]

@@ -237,6 +237,7 @@ def test_the_snapshots_the_pipeline_can_produce_are_written(local_tmp: Path) -> 
         SnapshotKind.UNIVERSE,
         SnapshotKind.FACTOR,
         SnapshotKind.STRATEGY,
+        SnapshotKind.MARKET_REGIME,
     ):
         assert (local_tmp / "snapshots" / kind.value / "2026-09-04.json").is_file(), (
             kind
@@ -247,10 +248,10 @@ def test_the_snapshots_the_pipeline_can_produce_are_written(local_tmp: Path) -> 
     assert result.snapshot_paths
 
 
-def test_the_missing_market_regime_snapshot_is_reported_not_invented(
+def test_the_missing_candidate_snapshot_is_reported_not_invented(
     local_tmp: Path,
 ) -> None:
-    """No detector means no regime: the gap is named, not filled."""
+    """No approved candidate policy means no candidates: the gap is named, not filled."""
     result = _run(local_tmp)
 
     final = next(
@@ -263,10 +264,7 @@ def test_the_missing_market_regime_snapshot_is_reported_not_invented(
     assert "snapshots written:" in final.note
     assert "blocked business stages:" in final.note
     assert JobStage.BUILD_CANDIDATES.value in final.note
-    assert result.missing_snapshot_kinds == (
-        SnapshotKind.MARKET_REGIME,
-        SnapshotKind.CANDIDATE,
-    )
+    assert result.missing_snapshot_kinds == (SnapshotKind.CANDIDATE,)
 
 
 def test_job_runs_are_persisted_for_the_date(local_tmp: Path) -> None:

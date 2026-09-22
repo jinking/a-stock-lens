@@ -1547,10 +1547,9 @@ def _latest_industry_file(day: datetime, root: Path | None = None) -> Path:
 
 def _production_industry_map(day: datetime, root: Path | None = None) -> dict[str, str]:
     """按时点加载生产申万二级行业映射（含权威静态补充）。"""
-    file = _latest_industry_file(day, root)
-    memberships = read_industry_memberships(file)
-    supplements = load_supplemental_industry_memberships(as_of=day)
-    return build_industry_map((*memberships, *supplements), as_of=day)
+    from astock_lens.data.industry import load_production_industry_map
+
+    return load_production_industry_map(day, root or _csv_root())
 
 
 def _valuation_strategy_configs() -> tuple[StrategyConfig, ...]:

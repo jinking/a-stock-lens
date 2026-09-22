@@ -494,6 +494,20 @@ def test_daily_lands_raw_data_first_when_asked(
     monkeypatch.setattr(cli_module, "_bulk_provider", lambda: provider)
 
     raw_root = local_tmp / "raw"
+    industry_dir = raw_root / "westock" / "industry"
+    industry_dir.mkdir(parents=True, exist_ok=True)
+    import shutil
+
+    shutil.copy(
+        CSV_ROOT / "westock" / "industry" / f"{DAY}.csv",
+        industry_dir / f"{DAY}.csv",
+    )
+    if (CSV_ROOT / "benchmark_bars.csv").is_file():
+        shutil.copy(
+            CSV_ROOT / "benchmark_bars.csv",
+            raw_root / "benchmark_bars.csv",
+        )
+
     result = CliRunner().invoke(
         app,
         ["daily", "--as-of", DAY, "--sync", "--allow-incomplete"],
