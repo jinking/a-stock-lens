@@ -48,17 +48,17 @@ class TradeRiskProposal(DomainRecord):
             raise ValueError("target_price must be positive")
         return self
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def position_value(self) -> float:
         return self.planned_entry_price * self.quantity
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def max_loss_amount(self) -> float:
         return (self.planned_entry_price - self.stop_loss_price) * self.quantity
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def max_loss_pct_of_nav(self) -> float:
         return self.max_loss_amount / self.account_nav
@@ -77,7 +77,7 @@ class ExistingPositionSnapshot(DomainRecord):
             raise ValueError("existing position values must be positive")
         return self
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def is_losing(self) -> bool:
         return self.current_price < self.avg_cost

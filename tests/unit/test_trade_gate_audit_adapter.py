@@ -37,5 +37,5 @@ def test_confidence_adjustment_is_exact() -> None:
 
 def test_adapter_rejects_invalid_output() -> None:
     adapter = CliThesisAuditAdapter(_command("print('[]')"))
-    with pytest.raises(TradeAuditInvocationError | ValidationError):
+    with pytest.raises((TradeAuditInvocationError, ValidationError)):
         adapter.independent_assessment(profile=TradeProfile.EVENT, facts={})
