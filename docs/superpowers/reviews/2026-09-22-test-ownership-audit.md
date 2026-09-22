@@ -45,12 +45,14 @@
 
 | 变化 | 权威保留证明 | 收敛理由 |
 | --- | --- | --- |
-| Candidate policy 分数参数用例合并为一个最高分拒绝用例 | `test_score_does_not_override_a_rejecting_policy` | 原有三个用例仅改变分数；对拒绝策略而言最高分是最强反例，保留了核心不变量证明。 |
+| Candidate policy 四个分数拒绝用例合并为一个最高分拒绝用例 | `test_score_does_not_override_a_rejecting_policy` | 三个参数值仅改变分数；单独的最高分拒绝用例又与参数中的 `100.0` 使用相同输入和断言。最高分是拒绝策略的最强反例。 |
 | 删除 Candidate routing 的纯函数自比较断言 | `test_a_qualified_verdict_routes_to_watch`、`test_an_unqualified_verdict_routes_to_ignore` | 同一调用结果与自身比较恒真，没有额外行为证明。 |
 | Candidate routing 未使用分数的参数用例合并为一个 API 缺席断言 | `test_score_routing_api_is_absent` | 参数值没有进入被测代码；断言路由模块不存在分数决策 API 即覆盖此边界。 |
 | 删除独立的缺失流动性测试 | `test_market_validator_missing_trend_or_liquidity_factors_raise`、`test_market_validator_multiple_missing_factors_reported` | 前者已逐一验证缺少 `avg_amount_20d` 时失败，后者验证错误中列出该因子。 |
 
-当前仓库第一轮可证明的收敛为净减少 8 个 pytest 用例：计划目标写为减少 9 个，但本次核验的分数拒绝参数只有 3 项（计划预期 4 项）。不为追平计划数字删除其他仍有独立责任的测试。
+本轮可证明的收敛为净减少 9 个 pytest 用例。第二轮复核发现第一轮漏算了一个与 `100.0` 参数用例完全相同的独立 Candidate policy 用例；合并后达到计划的第一批减少目标。其余名字相同的用例经边界核验后保留：bootstrap 两个 `batch_size` 用例分别验证公开 `bootstrap_liquidity_history` 参数透传和 `land_bar_chunks` 直接校验；Westock 与 Neodata 未知数据集用例分别锁定不同 Provider 的数据集契约。
+
+第二轮集群盘点记录：bootstrap 6 文件 / 64 个测试函数；candidate 14 / 90；qualification 6 / 36；calibration 2 / 16；provider 4 / 70；Trade Gate 14 / 28；`tests/artifacts/` 的产物校验单独保留。Trade Gate 的 `test_trade_gate_models.py`、`test_trade_gate_profiles.py`、`test_trade_gate_audit_adapter.py` 标记 **KEEP**，分别负责领域模型、Profile 配置和审计 Adapter 契约；当前其余 Trade Gate 测试也未发现可证明的字面重复，不作删除。
 
 ## 并发功能约束
 

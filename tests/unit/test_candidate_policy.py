@@ -146,17 +146,6 @@ def test_no_reviewed_policy_is_an_error_not_an_empty_scan() -> None:
         )
 
 
-def test_a_policy_that_qualifies_nothing_produces_no_candidate() -> None:
-    candidates = candidate_stage(
-        strategy_results=(_result(score=100.0),),
-        lineage=LINEAGE,
-        as_of=AS_OF,
-        policy=_ApprovesNothing(),
-    )
-
-    assert candidates == ()
-
-
 def test_the_policy_is_what_makes_a_candidate() -> None:
     candidates = candidate_stage(
         strategy_results=(_result(score=12.0),),
