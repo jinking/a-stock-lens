@@ -11,6 +11,7 @@ from typing import cast
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from astock_lens.candidates.models import Candidate
 from astock_lens.data.snapshots.resolve import resolve_snapshot_store
@@ -63,6 +64,13 @@ def create_app(
     snapshots.
     """
     application = FastAPI(title=SERVICE_NAME)
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     def paths() -> StoragePaths:
         return resolve_storage_paths()
@@ -87,6 +95,19 @@ def create_app(
     def health() -> dict[str, str]:
         """Report process liveness only."""
         return {"status": "ok", "service": SERVICE_NAME}
+
+    @application.get("/snapshot-dates")
+    def snapshot_dates(
+        kind: SnapshotKind = SnapshotKind.CANDIDATE,
+    ) -> dict[str, object]:
+        """Read stored snapshot dates for one kind."""
+        store = resolve_snapshot_store(root(), database=snapshot_database())
+        dates = sorted(store.dates(kind))
+        return {
+            "kind": kind.value,
+            "dates": dates,
+            "latest": dates[-1] if dates else None,
+        }
 
     @application.get("/factors")
     def factors(symbol: str, as_of: str) -> dict[str, object]:
