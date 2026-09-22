@@ -122,9 +122,12 @@ def test_json_roots_keep_their_existing_env_vars_and_defaults(
     assert defaults.snapshot_root == Path("data/snapshots")
     assert defaults.watchlist_root == Path("data/watchlist")
     assert defaults.job_root == Path("var/jobs")
+    assert defaults.trade_root == Path("data/trades")
     assert [
-        defaults.sources[key] for key in ("snapshot_root", "watchlist_root", "job_root")
+        defaults.sources[key]
+        for key in ("snapshot_root", "watchlist_root", "job_root", "trade_root")
     ] == [
+        "default",
         "default",
         "default",
         "default",
@@ -136,16 +139,19 @@ def test_json_roots_keep_their_existing_env_vars_and_defaults(
             "ASTOCK_SNAPSHOT_ROOT": str(local_tmp / "snapshots"),
             "ASTOCK_WATCHLIST_ROOT": str(local_tmp / "watchlist"),
             "ASTOCK_JOB_ROOT": str(local_tmp / "jobs"),
+            "ASTOCK_TRADE_ROOT": str(local_tmp / "trades"),
         },
     )
 
     assert overridden.snapshot_root == local_tmp / "snapshots"
     assert overridden.watchlist_root == local_tmp / "watchlist"
     assert overridden.job_root == local_tmp / "jobs"
+    assert overridden.trade_root == local_tmp / "trades"
     assert [
         overridden.sources[key]
-        for key in ("snapshot_root", "watchlist_root", "job_root")
+        for key in ("snapshot_root", "watchlist_root", "job_root", "trade_root")
     ] == [
+        "env",
         "env",
         "env",
         "env",

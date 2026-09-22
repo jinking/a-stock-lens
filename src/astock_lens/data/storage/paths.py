@@ -27,10 +27,12 @@ NORMALIZED_ROOT_ENV = "ASTOCK_NORMALIZED_ROOT"
 SNAPSHOT_ROOT_ENV = "ASTOCK_SNAPSHOT_ROOT"
 WATCHLIST_ROOT_ENV = "ASTOCK_WATCHLIST_ROOT"
 JOB_ROOT_ENV = "ASTOCK_JOB_ROOT"
+TRADE_ROOT_ENV = "ASTOCK_TRADE_ROOT"
 
 DEFAULT_SNAPSHOT_ROOT = Path("data/snapshots")
 DEFAULT_WATCHLIST_ROOT = Path("data/watchlist")
 DEFAULT_JOB_ROOT = Path("var/jobs")
+DEFAULT_TRADE_ROOT = Path("data/trades")
 
 ENV = "env"
 CONFIG = "config"
@@ -50,6 +52,7 @@ class StoragePaths:
     snapshot_root: Path
     watchlist_root: Path
     job_root: Path
+    trade_root: Path
     sources: Mapping[str, str]
 
 
@@ -83,6 +86,9 @@ def resolve_storage_paths(
         source, WATCHLIST_ROOT_ENV, DEFAULT_WATCHLIST_ROOT, DEFAULT
     )
     job_root, job_source = _from_env_or(source, JOB_ROOT_ENV, DEFAULT_JOB_ROOT, DEFAULT)
+    trade_root, trade_source = _from_env_or(
+        source, TRADE_ROOT_ENV, DEFAULT_TRADE_ROOT, DEFAULT
+    )
 
     return StoragePaths(
         database=database,
@@ -90,12 +96,14 @@ def resolve_storage_paths(
         snapshot_root=snapshot_root,
         watchlist_root=watchlist_root,
         job_root=job_root,
+        trade_root=trade_root,
         sources={
             "database": database_source,
             "normalized_root": normalized_source,
             "snapshot_root": snapshot_source,
             "watchlist_root": watchlist_source,
             "job_root": job_source,
+            "trade_root": trade_source,
         },
     )
 
