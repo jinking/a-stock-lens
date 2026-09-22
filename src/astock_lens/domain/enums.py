@@ -148,3 +148,36 @@ class SnapshotKind(StrEnum):
     STRATEGY = "STRATEGY"
     MARKET_REGIME = "MARKET_REGIME"
     CANDIDATE = "CANDIDATE"
+
+
+class TradeAction(StrEnum):
+    ENTRY = "ENTRY"
+    ADD = "ADD"
+
+
+class TradeProfile(StrEnum):
+    EVENT = "EVENT"
+    SWING = "SWING"
+    POSITION = "POSITION"
+
+
+class TradeDecision(StrEnum):
+    PASS = "PASS"
+    WAIT = "WAIT"
+    NO_TRADE = "NO_TRADE"
+
+
+class VetoSeverity(StrEnum):
+    HARD = "HARD"
+    CONDITIONAL = "CONDITIONAL"
+
+
+class TradeIntentStatus(StrEnum):
+    DRAFT = "DRAFT"
+    EVALUATED = "EVALUATED"
+    WAITING_TRIGGER = "WAITING_TRIGGER"
+    PLAN_READY = "PLAN_READY"
+    OVERRIDDEN = "OVERRIDDEN"
+    EXECUTED = "EXECUTED"
+    CLOSED = "CLOSED"
+    REVIEWED = "REVIEWED"
