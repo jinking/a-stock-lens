@@ -15,6 +15,8 @@
 | Contract | `tests/contract/` | 扩展契约的公开签名与外部 schema 适配 | 已建立 |
 | Integration | `tests/integration/` | 唯一分析执行链（Normalize → Factor → Universe → Strategy）、`daily` 管线、CLI 快照写入权 | 已建立 |
 
+Trade Gate 增量测试：Unit 覆盖模型、画像、AI Adapter、评分、Veto、引擎、Ledger、生命周期与 Replay；CLI help 与只读 API 路由有基础集成覆盖；`tests/artifacts/trade_gate_validator.py` 独立检查评估 JSON。当前尚未完成五个 Golden Scenario 与完整生命周期集成矩阵。
+
 ## 3. 产物测试
 
 `tests/artifacts/` 是独立 Artifact Validator，**不 import 任何生产代码**，所以实现里的

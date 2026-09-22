@@ -44,8 +44,12 @@ Candidate Builder
       ↓
 Watchlist / Research
       ↓
-API / Web / CLI
+Trade Gate（按需评估，独立 Ledger）
+      ↓
+API / CLI
 ```
+
+Trade Gate 不是 `astock daily` 阶段，不写入正式 SnapshotStore，也不改变 Candidate、Watchlist 状态语义。API 只读已保存的 Trade Ledger，不导入裁决引擎。
 
 禁止：
 

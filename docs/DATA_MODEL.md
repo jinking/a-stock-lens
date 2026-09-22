@@ -78,6 +78,15 @@ V1 活跃路径：
 
 `FinancialObservation`：`symbol`、`metric`、`value`、`unit`、`report_period`、`announce_date`、`available_at`、`as_of`、`source`。
 
+## 8. Trade Gate（增量实现）
+
+- `TradeIntent` 固定一次 ENTRY/ADD 的交易目的、画像、风险提案与创建时刻；所有时间戳带时区。
+- `TradeMarketOverlay` 只携带显式输入的交易时点事实；历史日线不得冒充盘中行情。
+- `TradeGateEvaluation` 保存画像/规则版本、维度分数、Veto、缺失数据、复入触发条件及上下文。
+- JSON Ledger 以记录 ID 追加；相同 ID 同内容幂等、不同内容拒绝覆盖。同一意图可有多次评估。
+- `TradePlan`、`OverrideRecord`、`ExecutionRecord`、`TradeReview` 为独立追加记录。Override 必须记录更小仓位上限、证据、止损规则与风险确认。
+- PASS 只表示 eligible，不是买入推荐；当前服务不连接券商。
+
 数值字段保持可选，缺失即 `None`；是否可用由 Data Quality Gate 判定，而不是由记录本身猜测。
 
 ## 8. Deferred

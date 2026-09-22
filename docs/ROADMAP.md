@@ -6,6 +6,8 @@
 
 **状态快照（2026-09-22 Candidate v2 生产闭环与全链路验收完成：DELIVERED + AUDITED）**
 
+**Trade Gate V1 增量状态（2026-09-22）：部分实现，未完成交付验收。** 已提交领域模型/画像（`d0abf1b`, `c0c0034`）、快照上下文（`f5b9ea0`）、两阶段 AI 审计（`fe09b00`）、规则与裁决（`5cfb840`, `a934f38`）、Ledger（`c210a70`）、服务层（`2c5bcbf`）、回放/统计/Artifact（`3e412fb`）、CLI（`e6cbdcc`）及只读 API（`f484b99`）。仍缺五个 Golden Scenario、完整 CLI 生命周期/评估行为测试、完整 Ledger/API parity、全量门禁验收与 Trade Gate 规格/实施计划原文归档；不得标记 COMPLETE。
+
 本行基线由全量 pytest 及 `tests/artifacts/validator.py` 独立审查实测得出（见 `docs/decision-packets/2026-09-17-candidate-v2-production-audit.md`）。
 标准生产日常调度 `astock daily --as-of 2026-09-17` 11 阶段全量跑通，已正式持久化五大权威生产快照：
 `UNIVERSE`（2,303 只）、`FACTOR`（120,192 条）、`STRATEGY`（13,818 条）、`MARKET_REGIME`（BEAR）、`CANDIDATE`（50 只 Candidate v2 标的）。
