@@ -40,6 +40,13 @@ class DuckDBTradeLedgerStore:
             return None
         return self._duckdb.connect(str(self._database), read_only=not write)
 
+    @staticmethod
+    def _has_table(connection: Any) -> bool:
+        count = connection.execute(
+            "SELECT count(*) FROM information_schema.tables WHERE table_name='trade_ledger'"
+        ).fetchone()[0]
+        return bool(count > 0)
+
     def _write(self, kind: str, record: Any) -> Path:
         payload = record.model_dump(mode="json")
         parent_id = (
@@ -85,6 +92,8 @@ class DuckDBTradeLedgerStore:
         if connection is None:
             return None
         try:
+            if not self._has_table(connection):
+                return None
             row = connection.execute(
                 "SELECT payload FROM trade_ledger WHERE kind=? AND record_id=?",
                 [kind, record_id],
@@ -113,6 +122,8 @@ class DuckDBTradeLedgerStore:
         if connection is None:
             return ()
         try:
+            if not self._has_table(connection):
+                return ()
             rows = connection.execute(
                 "SELECT payload FROM trade_ledger WHERE kind='EVALUATION' AND parent_id=? ORDER BY created_at, record_id",
                 [intent_id],
@@ -131,6 +142,8 @@ class DuckDBTradeLedgerStore:
         if connection is None:
             return ()
         try:
+            if not self._has_table(connection):
+                return ()
             rows = connection.execute(
                 "SELECT payload FROM trade_ledger WHERE kind='EVALUATION' AND symbol=? ORDER BY created_at, record_id",
                 [symbol],

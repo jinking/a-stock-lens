@@ -31,3 +31,14 @@ def test_duckdb_store_round_trips_intent_and_read_does_not_create(tmp_path) -> N
     )
     store.write_intent(intent)
     assert store.read_intent("intent") == intent
+
+
+def test_duckdb_reads_missing_trade_table_as_empty(tmp_path) -> None:
+    duckdb = pytest.importorskip("duckdb")
+    database = tmp_path / "shared.duckdb"
+    connection = duckdb.connect(str(database))
+    connection.execute("CREATE TABLE unrelated (id INTEGER)")
+    connection.close()
+    store = DuckDBTradeLedgerStore(database)
+    assert store.read_intent("missing") is None
+    assert store.evaluations_for_intent("missing") == ()
