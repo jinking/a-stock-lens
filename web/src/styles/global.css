@@ -138,6 +138,70 @@ a {
   font-weight: 600;
 }
 
+.header-date-picker {
+  display: flex;
+  align-items: center;
+  margin-left: 0.75rem;
+  padding-left: 0.75rem;
+  border-left: 1px solid var(--border);
+}
+
+.date-picker-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.date-picker-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.date-select {
+  background-color: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.85rem;
+  font-family: var(--font-mono);
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.date-select:hover,
+.date-select:focus {
+  border-color: var(--accent);
+}
+
+.date-picker-loading {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.date-empty-notice {
+  font-size: 0.75rem;
+  color: var(--warning);
+  background: var(--warning-bg);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.date-picker-error {
+  font-size: 0.75rem;
+  color: var(--contradicted);
+  background: var(--contradicted-bg);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
 .header-actions {
   display: flex;
   align-items: center;
@@ -150,7 +214,7 @@ a {
   border: 1px solid var(--border);
   padding: 0.2rem 0.5rem;
   border-radius: 4px;
-  font-mono: var(--font-mono);
+  font-family: var(--font-mono);
 }
 
 /* 主内容区域 */

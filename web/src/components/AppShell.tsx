@@ -1,6 +1,9 @@
 import { NavLink, Outlet } from 'react-router-dom';
+import { useDateContext } from '../app/DateContext';
 
 export function AppShell() {
+  const { dates, asOf, setAsOf, loading, error } = useDateContext();
+
   return (
     <div className="app-layout">
       <header className="app-header">
@@ -36,6 +39,42 @@ export function AppShell() {
             >
               策略筛选
             </NavLink>
+
+            <div className="header-date-picker" data-testid="header-date-picker">
+              {loading ? (
+                <span className="date-picker-loading" data-testid="date-loading">
+                  加载日期中...
+                </span>
+              ) : error ? (
+                <span className="date-picker-error" data-testid="date-error" title={error}>
+                  {error}
+                </span>
+              ) : dates.length === 0 ? (
+                <span className="date-empty-notice" data-testid="date-empty-notice">
+                  尚无正式 Candidate 快照。先运行标准 astock daily。
+                </span>
+              ) : (
+                <div className="date-picker-control">
+                  <label htmlFor="snapshot-date-select" className="date-picker-label">
+                    快照日期
+                  </label>
+                  <select
+                    id="snapshot-date-select"
+                    aria-label="快照日期"
+                    data-testid="snapshot-date-select"
+                    className="date-select"
+                    value={asOf ?? ''}
+                    onChange={(e) => setAsOf(e.target.value)}
+                  >
+                    {dates.map((date) => (
+                      <option key={date} value={date}>
+                        {date}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
           </nav>
 
           <div className="header-actions">

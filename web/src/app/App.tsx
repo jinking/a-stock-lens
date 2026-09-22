@@ -1,6 +1,11 @@
 import { RouterProvider } from 'react-router-dom';
 import { router } from './router';
+import { DateProvider } from './DateContext';
 
 export function App() {
-  return <RouterProvider router={router} />;
+  return (
+    <DateProvider>
+      <RouterProvider router={router} />
+    </DateProvider>
+  );
 }
