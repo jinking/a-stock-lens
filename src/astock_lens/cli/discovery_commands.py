@@ -352,13 +352,12 @@ def today(
         return
     regime: MarketRegime | None = None
     records = store.read(SnapshotKind.MARKET_REGIME, day)
-    if (
-        records
-        and isinstance(records[0], dict)
-        and isinstance(records[0].get("regime"), str)
-    ):
+    regime_value = (
+        records[0].get("regime") if records and isinstance(records[0], dict) else None
+    )
+    if isinstance(regime_value, str):
         try:
-            regime = MarketRegime(records[0]["regime"])
+            regime = MarketRegime(regime_value)
         except ValueError:
             pass
     overview = build_today_overview(

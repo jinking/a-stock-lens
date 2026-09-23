@@ -4,6 +4,7 @@
 """
 
 import sys
+from datetime import datetime
 
 import typer
 
@@ -44,6 +45,7 @@ __all__ = [
     "_store",
     "app",
     "run_daily",
+    "sys",
 ]
 
 app = typer.Typer(
@@ -80,13 +82,12 @@ def main() -> None:
         setattr(_cli_runtime, name, globals()[name])
         if name != "run_daily":
             setattr(data_commands, name, globals()[name])
-    _cli_runtime.sys = sys
 
 
-def _run_daily(*args: object, **kwargs: object) -> object:
+def _run_daily(day: datetime, *, land: bool) -> object:
     """Compatibility wrapper for callers importing the former app helper."""
     main()
-    return _cli_runtime._run_daily(*args, **kwargs)
+    return _cli_runtime._run_daily(day, land=land)
 
 
 data_commands.register_doctor(app)

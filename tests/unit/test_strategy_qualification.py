@@ -158,9 +158,9 @@ def test_build_qualifiers_succeeds_when_all_configured() -> None:
     qualifiers = build_qualifiers(rules)
     assert len(qualifiers) == 6
     assert set(qualifiers.keys()) == set(CANONICAL_STRATEGY_IDS)
-    assert {strategy_id: item.strategy_id for strategy_id, item in qualifiers.items()} == {
-        strategy_id: strategy_id for strategy_id in CANONICAL_STRATEGY_IDS
-    }
+    assert {
+        strategy_id: item.strategy_id for strategy_id, item in qualifiers.items()
+    } == {strategy_id: strategy_id for strategy_id in CANONICAL_STRATEGY_IDS}
 
 
 def test_factor_threshold_rule_evaluation() -> None:
