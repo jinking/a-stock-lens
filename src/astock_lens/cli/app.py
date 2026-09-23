@@ -8,19 +8,17 @@ did nothing — a failure exits non-zero with the reason.
 import csv
 import hashlib
 import json
-import os
 import platform
 import re
 import sys
 from collections import Counter
 from collections.abc import Callable, Sequence
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
-from zoneinfo import ZoneInfo
 
 import typer
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from astock_lens.calendar.china import get_calendar
 from astock_lens.calibration.candidate_report import (
@@ -46,10 +44,35 @@ from astock_lens.calibration.qualification_impact import (
 )
 from astock_lens.calibration.render import render_json, render_markdown
 from astock_lens.calibration.valuation_coverage import valuation_coverage
-from astock_lens.candidates.models import Candidate
 from astock_lens.candidates.policy import RepresentativeCandidatePolicy
+from astock_lens.cli import discovery_commands, lifecycle_commands
+from astock_lens.cli.runtime import (
+    AS_OF_OPTION,
+    CLOSE_HOUR,
+    MINIMUM_PYTHON,
+    SHANGHAI,
+    STRATEGY_CONFIG_PATH,
+    _as_of,
+    _benchmark_bars_path,
+    _bulk_provider,
+    _configured_config_path,
+    _csv_root,
+    _dataset,
+    _factor_configs,
+    _factor_state,
+    _financial_provider,
+    _job_store,
+    _neodata_provider,
+    _preview_state,
+    _securities_dataset,
+    _snapshot_records,
+    _store,
+    _strategy_dir,
+    _symbol_bar_provider,
+    _universe_config_path,
+    _universe_state,
+)
 from astock_lens.data.benchmark import (
-    BENCHMARK_BARS_ENV,
     read_benchmark_bars,
 )
 from astock_lens.data.bootstrap import (
@@ -59,8 +82,7 @@ from astock_lens.data.bootstrap import (
     strategy_history_requirement,
 )
 from astock_lens.data.bootstrap_progress import BootstrapProgress, render_progress
-from astock_lens.data.bootstrap_sources import SymbolBarFallbackSource
-from astock_lens.data.contracts import DataProvider, FetchRequest
+from astock_lens.data.contracts import FetchRequest
 from astock_lens.data.dividends.models import DividendEvent
 from astock_lens.data.dividends.normalize import normalize_dividend_events
 from astock_lens.data.health import raw_datasets
@@ -70,13 +92,10 @@ from astock_lens.data.industry import (
     load_supplemental_industry_memberships,
 )
 from astock_lens.data.normalize.csv_securities import CsvSecurityNormalizer
-from astock_lens.data.providers.akshare_provider import AkShareProvider
 from astock_lens.data.providers.local import LocalCsvProvider
 from astock_lens.data.providers.neodata import NeodataProvider
 from astock_lens.data.providers.westock import FINANCIAL_DATASETS, WestockCliProvider
-from astock_lens.data.snapshots.resolve import resolve_snapshot_store
-from astock_lens.data.snapshots.store import SnapshotStore
-from astock_lens.data.storage.paths import StoragePaths, resolve_storage_paths
+from astock_lens.data.storage.paths import resolve_storage_paths
 from astock_lens.data.sync import (
     DONE_STATUSES,
     INDUSTRY_ROOT,
@@ -92,42 +111,20 @@ from astock_lens.data.sync import (
     read_symbols,
     read_universe_symbols,
 )
-from astock_lens.discovery import (
-    QualifiedScreenQuery,
-    StrategyScreenQuery,
-    screen_qualified,
-    screen_strategy,
-)
-from astock_lens.discovery.candidates import screen_candidates
-from astock_lens.discovery.today import build_today_overview
-from astock_lens.domain.enums import MarketRegime, SnapshotKind, WatchlistState
-from astock_lens.factors.config import FactorConfig, load_factor_config
+from astock_lens.domain.enums import SnapshotKind
 from astock_lens.factors.contracts import FactorResult
 from astock_lens.jobs.models import StageOutcome
-from astock_lens.jobs.store import JsonJobStore
 from astock_lens.pipelines import stages
 from astock_lens.pipelines.analysis import (
-    AnalysisState,
-    FactorState,
-    compute_factor_state,
     compute_research_universe,
-    run_analysis,
     run_research_analysis,
 )
 from astock_lens.pipelines.daily import DailyRunResult, run_daily
 from astock_lens.qualifications import (
-    QualificationConfigInvalid,
     QualificationRuleNotConfigured,
     load_canonical_qualifiers,
 )
-from astock_lens.research.adapters.cli import (
-    CliDeepResearchAdapter,
-    DeepResearchInvocationError,
-    DeepResearchNotConfigured,
-    resolve_adapter,
-)
-from astock_lens.research.models import ResearchRequest
-from astock_lens.settings import load_app_config, resolve_config_path
+from astock_lens.settings import load_app_config
 from astock_lens.strategies.config import StrategyConfig, load_strategy_config
 from astock_lens.strategies.contracts import StrategyResult
 from astock_lens.strategies.registry import (
@@ -138,40 +135,7 @@ from astock_lens.strategies.registry import (
     strategy_paths,
 )
 from astock_lens.universe.config import load_universe_config
-from astock_lens.universe.models import UniverseSnapshot
 from astock_lens.universe.prefilter import prefilter_listing
-from astock_lens.watchlist.models import WatchlistEntry
-from astock_lens.watchlist.state_machine import (
-    WatchlistTransitionError,
-    open_entry,
-    transition,
-)
-from astock_lens.watchlist.store import WatchlistStore, resolve_watchlist_store
-
-MINIMUM_PYTHON = (3, 12)
-
-CSV_ROOT_ENV = "ASTOCK_CSV_ROOT"
-WATCHLIST_BACKEND_ENV = "ASTOCK_WATCHLIST_BACKEND"
-DATASET_ENV = "ASTOCK_DATASET"
-SECURITIES_DATASET_ENV = "ASTOCK_SECURITIES_DATASET"
-FACTOR_CONFIG_DIR_ENV = "ASTOCK_FACTOR_CONFIG_DIR"
-UNIVERSE_CONFIG_ENV = "ASTOCK_UNIVERSE_CONFIG"
-STRATEGY_CONFIG_DIR_ENV = "ASTOCK_STRATEGY_CONFIG_DIR"
-DEFAULT_CSV_ROOT = Path("data/raw")
-DEFAULT_DATASET = "daily_bars"
-DEFAULT_SECURITIES_DATASET = "securities"
-DEFAULT_FACTOR_CONFIG_DIR = Path("configs/factors")
-DEFAULT_UNIVERSE_CONFIG = Path("configs/universe.yaml")
-DEFAULT_STRATEGY_CONFIG_DIR = Path("configs/strategies")
-
-STRATEGY_CONFIG_PATH = Path("configs/strategies/momentum.yaml")
-LOW_COVERAGE_WARNING_RATIO = 0.90
-
-# A bare trade date means the A-share close on that day.
-SHANGHAI = ZoneInfo("Asia/Shanghai")
-CLOSE_HOUR = 15
-
-AS_OF_OPTION = typer.Option("--as-of", help="Trade date, YYYY-MM-DD.")
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -202,167 +166,6 @@ def main() -> None:
     Without an explicit callback Typer promotes a single command to the root,
     which would make `astock doctor` an error.
     """
-
-
-def _configured_config_path() -> Path:
-    """Return the configuration path the loader would use."""
-    return resolve_config_path()
-
-
-def _as_of(value: str) -> datetime:
-    """Interpret a bare date as the A-share close on that day."""
-    try:
-        day = date.fromisoformat(value)
-    except ValueError as error:
-        raise typer.BadParameter(
-            f"--as-of must be YYYY-MM-DD, got {value!r}"
-        ) from error
-    return datetime(day.year, day.month, day.day, CLOSE_HOUR, tzinfo=SHANGHAI)
-
-
-def _factor_configs() -> tuple[FactorConfig, ...]:
-    """Load every factor configured under the factor directory.
-
-    Every factor is computed for every symbol; the scanner then uses the subset
-    its own configuration requires. Adding a factor is therefore a new file
-    here rather than a code change.
-    """
-    directory = Path(os.getenv(FACTOR_CONFIG_DIR_ENV, str(DEFAULT_FACTOR_CONFIG_DIR)))
-    paths = sorted(directory.glob("*.yaml"))
-    if not paths:
-        typer.echo(f"no factor configuration found under {directory}", err=True)
-        raise typer.Exit(code=1)
-    return tuple(load_factor_config(path) for path in paths)
-
-
-def _factor_state(as_of_value: str) -> FactorState:
-    """把因子算完就停下，配置文件里的路径全部照旧生效。"""
-    return compute_factor_state(
-        csv_root=_csv_root(),
-        as_of=_as_of(as_of_value),
-        factor_configs=_factor_configs(),
-        dataset=_dataset(),
-        securities_dataset=_securities_dataset(),
-    )
-
-
-def _analysis(
-    as_of_value: str, *, scanners: Sequence[RegisteredStrategy]
-) -> AnalysisState:
-    """跑唯一分析执行链；它只计算，不落任何正式快照。"""
-    return run_analysis(
-        csv_root=_csv_root(),
-        as_of=_as_of(as_of_value),
-        universe_config=load_universe_config(_universe_config_path()),
-        factor_configs=_factor_configs(),
-        scanners=scanners,
-        dataset=_dataset(),
-        securities_dataset=_securities_dataset(),
-    )
-
-
-def _csv_root() -> Path:
-    return Path(os.getenv(CSV_ROOT_ENV, str(DEFAULT_CSV_ROOT)))
-
-
-def _dataset() -> str:
-    return os.getenv(DATASET_ENV, DEFAULT_DATASET)
-
-
-def _securities_dataset() -> str:
-    return os.getenv(SECURITIES_DATASET_ENV, DEFAULT_SECURITIES_DATASET)
-
-
-def _benchmark_bars_path() -> Path:
-    """解析基准指数日线 CSV 文件路径。"""
-    configured_path = os.getenv(BENCHMARK_BARS_ENV)
-    if configured_path:
-        return Path(configured_path)
-    return _csv_root() / "benchmark_bars.csv"
-
-
-def _storage_paths() -> StoragePaths:
-    """本次运行生效的存储路径。
-
-    CLI 的每个入口都从这里取路径，不再各自 `os.getenv` 拼默认值——否则同一个
-    进程里两个命令可以指到不同的库而无人发现。
-    """
-    return resolve_storage_paths()
-
-
-def _store() -> SnapshotStore:
-    paths = _storage_paths()
-    return resolve_snapshot_store(paths.snapshot_root, database=paths.database)
-
-
-def _universe_state(as_of_value: str) -> AnalysisState:
-    """跑到 Universe 为止：不配置 Scanner，就不做任何策略计算。"""
-    return _analysis(as_of_value, scanners=())
-
-
-def _preview_state(as_of_value: str) -> AnalysisState:
-    """预览用完整分析链：跑遍所有已实现的 Scanner，但不落盘。"""
-    return _analysis(as_of_value, scanners=load_scanners(_strategy_dir()))
-
-
-def _universe_config_path() -> Path:
-    return Path(os.getenv(UNIVERSE_CONFIG_ENV, str(DEFAULT_UNIVERSE_CONFIG)))
-
-
-def _strategy_dir() -> Path:
-    return Path(os.getenv(STRATEGY_CONFIG_DIR_ENV, str(DEFAULT_STRATEGY_CONFIG_DIR)))
-
-
-def _watchlist_store() -> WatchlistStore:
-    paths = _storage_paths()
-    return resolve_watchlist_store(paths.watchlist_root, database=paths.database)
-
-
-def _job_store() -> JsonJobStore:
-    return JsonJobStore(_storage_paths().job_root)
-
-
-def _financial_provider() -> WestockCliProvider:
-    """The provider financial statements are landed from (design spec §24)."""
-    return WestockCliProvider()
-
-
-def _neodata_provider(batch_size: int | None = None) -> NeodataProvider:
-    """语义与估值数据源（规格 §24 补遗）。
-
-    `batch_size` 只在补抓命令里显式传入：实测源端的"批量"是名义上的，
-    一次请求无论带几只标的，响应都被截到 1–2 个内容块，因此每批带几只
-    直接决定单位标的的调用次数（见 `sync-valuation` 的说明）。
-    """
-    if batch_size is None:
-        return NeodataProvider()
-    return NeodataProvider(batch_size=batch_size)
-
-
-def _bulk_provider() -> DataProvider:
-    """The bulk provider `astock sync` lands data from.
-
-    Named once so a test (or a future provider swap) can replace it without
-    touching the commands that use it.
-    """
-    return AkShareProvider()
-
-
-def _symbol_bar_provider(provider: DataProvider) -> SymbolBarFallbackSource:
-    """The bulk provider narrowed to the symbol-level contract.
-
-    Isolation between symbols is only possible when the provider answers for
-    one symbol at a time. Saying which provider cannot do that here keeps the
-    limitation visible, instead of failing somewhere deep in the flow.
-    """
-    if not isinstance(provider, SymbolBarFallbackSource):
-        typer.echo(
-            f"provider {provider.health().provider} cannot fetch one symbol at a "
-            "time, so the bootstrap cannot isolate failures with it",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-    return provider
 
 
 class _HeartbeatSink:
@@ -402,18 +205,6 @@ def _today_close() -> datetime:
     """The A-share close on the current date in Shanghai."""
     today = datetime.now(SHANGHAI).date()
     return datetime(today.year, today.month, today.day, CLOSE_HOUR, tzinfo=SHANGHAI)
-
-
-def _snapshot_records[T: BaseModel](
-    kind: SnapshotKind, as_of: datetime, model: type[T]
-) -> tuple[T, ...]:
-    """Read one snapshot and parse it back into the model that wrote it."""
-    return tuple(model.model_validate(record) for record in _store().read(kind, as_of))
-
-
-def _value_text(value: float | None, status: object) -> str:
-    """Show a measurement, or the reason there is none."""
-    return "no value" if value is None else f"{value} ({status})"
 
 
 @app.command()
@@ -670,6 +461,8 @@ strategy_app = typer.Typer(
     help="Strategy scanner commands.",
 )
 app.add_typer(strategy_app, name="strategy")
+discovery_commands.register(app)
+lifecycle_commands.register_watch(app)
 
 
 @strategy_app.command("run")
@@ -750,560 +543,6 @@ def _ranked(results: tuple[StrategyResult, ...]) -> tuple[StrategyResult, ...]:
     return tuple(
         sorted(results, key=lambda item: (item.score is None, -(item.score or 0.0)))
     )
-
-
-@app.command()
-def stock(symbol: str, as_of: Annotated[str, AS_OF_OPTION]) -> None:
-    """Show everything the stored snapshots say about one symbol.
-
-    This is the Stock Profile in the terminal (`spec §12.4`): what the Universe
-    decided, which factors were measured, how each scanner scored it, what the
-    candidate says, and what the watchlist records. Nothing is recomputed —
-    every line comes from the snapshots a scan already wrote.
-    """
-    day = _as_of(as_of)
-    universes = _snapshot_records(SnapshotKind.UNIVERSE, day, UniverseSnapshot)
-    if not universes:
-        typer.echo(
-            f"no UNIVERSE snapshot for {as_of}; run the formal pipeline "
-            f"`astock daily --as-of {as_of} --allow-incomplete` first",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
-    universe = universes[0]
-    typer.echo(f"{symbol} ({as_of})")
-    if symbol in universe.included:
-        typer.echo(f"  universe: included (snapshot {universe.snapshot_id})")
-    else:
-        rules = [
-            exclusion.rule.value
-            for exclusion in universe.exclusions
-            if exclusion.symbol == symbol
-        ]
-        named = ", ".join(rules) if rules else "no recorded rule"
-        typer.echo(f"  universe: excluded by {named}")
-
-    factors = [
-        item
-        for item in _snapshot_records(SnapshotKind.FACTOR, day, FactorResult)
-        if item.symbol == symbol
-    ]
-    typer.echo("  factors:" if factors else "  factors: none stored for this symbol")
-    for factor in factors:
-        value = _value_text(factor.raw_value, factor.status)
-        typer.echo(f"    {factor.factor} {factor.factor_version}: {value}")
-
-    strategies = [
-        item
-        for item in _snapshot_records(SnapshotKind.STRATEGY, day, StrategyResult)
-        if item.symbol == symbol
-    ]
-    typer.echo(
-        "  strategies:" if strategies else "  strategies: none scored this symbol"
-    )
-    for result in strategies:
-        score = "no score" if result.score is None else f"score {result.score:.2f}"
-        rank = (
-            "-"
-            if result.rank_percentile is None
-            else f"rank_percentile {result.rank_percentile:.3f}"
-        )
-        typer.echo(
-            f"    {result.strategy_id} {result.strategy_version}: "
-            f"{score} {rank} eligible={result.eligible}"
-        )
-        for reason in result.reasons:
-            typer.echo(f"      {reason}")
-
-    date_str = day.date().isoformat()
-    store = _store()
-    is_candidate_snapshot_published = date_str in store.dates(SnapshotKind.CANDIDATE)
-
-    candidates = [
-        item
-        for item in _snapshot_records(SnapshotKind.CANDIDATE, day, Candidate)
-        if item.symbol == symbol
-    ]
-    if candidates:
-        candidate = candidates[0]
-        typer.echo(f"  candidate: {candidate.next_action.value} (published)")
-        if candidate.primary_strategy_id:
-            typer.echo(f"    primary_strategy: {candidate.primary_strategy_id}")
-        qualified_ids = [
-            q.strategy_id for q in candidate.strategy_qualifications if q.qualified
-        ]
-        if not qualified_ids:
-            qualified_ids = [
-                r.strategy_id
-                for r in candidate.strategy_results
-                if r.rank_percentile is not None and r.rank_percentile >= 0.90
-            ]
-        if qualified_ids:
-            typer.echo(f"    qualified_strategies: {', '.join(qualified_ids)}")
-        if candidate.market_validation is not None:
-            typer.echo(f"    market_validation: {candidate.market_validation.value}")
-        if candidate.signal is not None:
-            typer.echo(f"    signal: {candidate.signal.value}")
-        for rsn in candidate.reasons:
-            typer.echo(f"    reason: {rsn}")
-        for rsk in candidate.risks:
-            typer.echo(f"    risk: {rsk}")
-        lineage = candidate.lineage
-    elif is_candidate_snapshot_published:
-        typer.echo("  candidate: not selected for this date")
-        lineage = strategies[0].lineage if strategies else universe.lineage
-    elif strategies:
-        # 有策略结果却没有候选：只陈述「当天没有发布 Candidate」这一事实，
-        # 不猜测也不宣称原因——资格配置是否获批不在这一行的判断范围内。
-        typer.echo("  candidate: not published for this date")
-        lineage = strategies[0].lineage
-    else:
-        lineage = universe.lineage
-
-    lineage_parts = [
-        f"universe={lineage.universe_snapshot}",
-        f"factor={lineage.factor_version}",
-        f"strategy={lineage.strategy_version}",
-    ]
-    if lineage.qualification_version:
-        lineage_parts.append(f"qualification={lineage.qualification_version}")
-    if lineage.regime_version:
-        lineage_parts.append(f"regime={lineage.regime_version}")
-    if lineage.market_validation_version:
-        lineage_parts.append(f"validation={lineage.market_validation_version}")
-    if lineage.signal_version:
-        lineage_parts.append(f"signal={lineage.signal_version}")
-    typer.echo(f"  lineage: {' '.join(lineage_parts)}")
-
-    entry = _watchlist_store().read(symbol)
-    if entry is not None:
-        _echo_entry(entry)
-
-
-@app.command()
-def screen(
-    strategy: Annotated[str, typer.Argument(help="Strategy id to screen.")],
-    as_of: Annotated[str, AS_OF_OPTION],
-    top: Annotated[
-        int,
-        typer.Option("--top", help="Maximum number of strategy results to show."),
-    ] = 20,
-    min_percentile: Annotated[
-        float | None,
-        typer.Option(
-            "--min-percentile", help="Minimum percentile threshold [0.0, 1.0]."
-        ),
-    ] = None,
-    all_results: Annotated[
-        bool,
-        typer.Option("--all-results", help="Include non-eligible symbols."),
-    ] = False,
-) -> None:
-    """Screen stored strategy evaluation results.
-
-    Only reads SnapshotKind.STRATEGY from the snapshot store.
-    No provider access, no factor or scanner recomputation, and no snapshot writing.
-    """
-    day = _as_of(as_of)
-    records = _snapshot_records(SnapshotKind.STRATEGY, day, StrategyResult)
-    if not records:
-        typer.echo(
-            f"no STRATEGY snapshot for {as_of}\n"
-            f"run `astock daily --as-of {as_of} --allow-incomplete` first",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
-    try:
-        screened = screen_strategy(
-            records,
-            StrategyScreenQuery(
-                strategy_id=strategy,
-                limit=top,
-                eligible_only=not all_results,
-                min_percentile=min_percentile,
-            ),
-        )
-    except ValueError as error:
-        typer.echo(str(error), err=True)
-        raise typer.Exit(code=1) from error
-
-    if screened.coverage.total_count == 0:
-        typer.echo(
-            f"strategy '{strategy}' has no stored results for {as_of}",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
-    typer.echo(f"{strategy} — {as_of}")
-    c = screened.coverage
-    typer.echo(
-        f"coverage: total={c.total_count} eligible={c.eligible_count} "
-        f"scored={c.scored_count} ranked={c.ranked_count}"
-    )
-    if (
-        c.total_count > 0
-        and (c.scored_count / c.total_count) < LOW_COVERAGE_WARNING_RATIO
-    ):
-        typer.echo(
-            f"coverage warning: only {c.scored_count}/{c.total_count} "
-            f"stored results have a score; ranking reflects available data"
-        )
-    typer.echo(f"showing: {len(screened.items)}")
-    for item in screened.items:
-        score_text = f"{item.score:.2f}" if item.score is not None else "None"
-        percentile_text = (
-            f"{item.rank_percentile:.4f}"
-            if item.rank_percentile is not None
-            else "None"
-        )
-        typer.echo(
-            f"  {item.rank}  {item.symbol}  score={score_text}  percentile={percentile_text}"
-        )
-
-
-@app.command()
-def qualified(
-    strategy: Annotated[str, typer.Argument(help="Strategy id to qualify.")],
-    as_of: Annotated[str, AS_OF_OPTION],
-    top: Annotated[
-        int,
-        typer.Option("--top", help="Maximum number of strategy results to show."),
-    ] = 20,
-) -> None:
-    """双门槛合格股票查询（严格只读）。
-
-    只读取已存储的 FACTOR / STRATEGY 快照，严格加载已批准的资格配置
-    （目录可被 ``ASTOCK_QUALIFICATION_DIR`` 覆盖），把两者交给纯查询服务
-    ``screen_qualified`` 做「Top10% + 绝对门槛」双通过判定并展示结果。
-
-    不调用 Provider，不重算因子或策略，不写任何 Snapshot / Watchlist / Job
-    记录。资格配置缺失或非法时 fail-closed 报错退出，绝不降级为零合格
-    正常屏；零合格时展示服务给出的数据健康 warning。
-    """
-    day = _as_of(as_of)
-    factors = _snapshot_records(SnapshotKind.FACTOR, day, FactorResult)
-    if not factors:
-        typer.echo(
-            f"no FACTOR snapshot for {as_of}\n"
-            f"run `astock daily --as-of {as_of} --allow-incomplete` first",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-    strategies = _snapshot_records(SnapshotKind.STRATEGY, day, StrategyResult)
-    if not strategies:
-        typer.echo(
-            f"no STRATEGY snapshot for {as_of}\n"
-            f"run `astock daily --as-of {as_of} --allow-incomplete` first",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
-    factor_names = frozenset(config.name for config in _factor_configs())
-    try:
-        qualifiers = load_canonical_qualifiers(known_factor_names=factor_names)
-    except (QualificationRuleNotConfigured, QualificationConfigInvalid) as error:
-        # fail-closed：配置未批准或已损坏都不是「零合格」，必须显式报错
-        typer.echo(f"qualification configuration is invalid: {error}", err=True)
-        raise typer.Exit(code=1) from error
-
-    try:
-        screened = screen_qualified(
-            factor_results=factors,
-            strategy_results=strategies,
-            qualifiers=qualifiers,
-            query=QualifiedScreenQuery(strategy_id=strategy, limit=top),
-        )
-    except KeyError as error:
-        approved = ", ".join(sorted(qualifiers))
-        typer.echo(
-            f"strategy {strategy!r} has no approved qualification rule; "
-            f"approved strategies are {approved}",
-            err=True,
-        )
-        raise typer.Exit(code=1) from error
-    except ValueError as error:
-        typer.echo(str(error), err=True)
-        raise typer.Exit(code=1) from error
-
-    typer.echo(f"{strategy} — {as_of}")
-    c = screened.coverage
-    typer.echo(
-        f"coverage: eligible={c.strategy_eligible_count} ranked={c.ranked_count} "
-        f"percentile_pass={c.percentile_pass_count} "
-        f"absolute_pass={c.absolute_pass_count} qualified={c.qualified_count}"
-    )
-    typer.echo(f"qualified: {c.qualified_count}")
-    for warning in screened.warnings:
-        typer.echo(f"warning: {warning}")
-    typer.echo(f"showing: {len(screened.items)}")
-    for item in screened.items:
-        score_text = f"{item.score:.2f}" if item.score is not None else "None"
-        typer.echo(
-            f"  {item.rank}  {item.symbol}  score={score_text}  "
-            f"percentile={item.rank_percentile:.4f}"
-        )
-
-
-@app.command()
-def candidates(
-    as_of: Annotated[str, AS_OF_OPTION],
-    top: Annotated[
-        int,
-        typer.Option("--top", help="Maximum number of candidates to show."),
-    ] = 20,
-) -> None:
-    """正式候选股票列表查询（严格只读）。
-
-    只读取已存储的 CANDIDATE 快照，按权威顺序展示候选标的。
-    不调用 Provider，不重算任何因子/策略/验证/信号，不写任何记录。
-    """
-    day = _as_of(as_of)
-    date_str = day.date().isoformat()
-    store = _store()
-
-    if date_str not in store.dates(SnapshotKind.CANDIDATE):
-        typer.echo(
-            f"no CANDIDATE snapshot for {as_of}\n"
-            f"run `astock daily --as-of {as_of} --allow-incomplete` first",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
-    candidate_records = _snapshot_records(SnapshotKind.CANDIDATE, day, Candidate)
-    if not candidate_records:
-        typer.echo("candidates: 0")
-        return
-
-    screen_result = screen_candidates(candidate_records, as_of=day, limit=top)
-
-    typer.echo(
-        f"candidates: {screen_result.total_count} (showing: {len(screen_result.items)})"
-    )
-    header = (
-        f"{'rank':<4} | {'symbol':<9} | {'primary strategy':<16} | "
-        f"{'qualified strategies':<20} | {'market validation':<17} | "
-        f"{'signal':<15} | {'next action':<11}"
-    )
-    typer.echo(header)
-    typer.echo("-" * len(header))
-
-    for item in screen_result.items:
-        mv_text = item.market_validation.value if item.market_validation else "NONE"
-        sig_text = item.signal.value if item.signal else "NO_SIGNAL"
-        qual_text = ",".join(item.qualified_strategy_ids)
-        typer.echo(
-            f"{item.rank:<4} | "
-            f"{item.symbol:<9} | "
-            f"{item.primary_strategy_id:<16} | "
-            f"{qual_text:<20} | "
-            f"{mv_text:<17} | "
-            f"{sig_text:<15} | "
-            f"{item.next_action.value:<11}"
-        )
-
-
-@app.command()
-def today(
-    as_of: Annotated[str, AS_OF_OPTION],
-    top: Annotated[
-        int,
-        typer.Option("--top", help="Number of top candidates to preview."),
-    ] = 10,
-) -> None:
-    """今日盘后候选研究概览（严格只读）。
-
-    聚合展示当天候选股票的整体情况、策略分布、市场验证与信号分布，
-    并展示权威候选顺序的前 N 只核心标的。
-    """
-    day = _as_of(as_of)
-    date_str = day.date().isoformat()
-    store = _store()
-
-    if date_str not in store.dates(SnapshotKind.CANDIDATE):
-        typer.echo(
-            f"no CANDIDATE snapshot for {as_of}\n"
-            f"run `astock daily --as-of {as_of} --allow-incomplete` first",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
-    candidate_records = _snapshot_records(SnapshotKind.CANDIDATE, day, Candidate)
-    if not candidate_records:
-        typer.echo(f"as_of: {date_str}\ncandidates: 0")
-        return
-
-    regime_enum: MarketRegime | None = None
-    regime_records = store.read(SnapshotKind.MARKET_REGIME, day)
-    if regime_records and isinstance(regime_records[0], dict):
-        raw_reg = regime_records[0].get("regime")
-        if isinstance(raw_reg, str):
-            try:
-                regime_enum = MarketRegime(raw_reg)
-            except ValueError:
-                pass
-
-    overview = build_today_overview(
-        candidate_records,
-        as_of=day,
-        market_regime=regime_enum,
-        top_limit=top,
-    )
-
-    typer.echo(f"as_of: {date_str}")
-    typer.echo(f"candidates: {overview.candidate_count}")
-    if overview.market_regime is not None:
-        typer.echo(f"market_regime: {overview.market_regime.value}")
-
-    typer.echo("counts by primary strategy:")
-    for strat, count in sorted(overview.counts_by_primary_strategy.items()):
-        typer.echo(f"  {strat}: {count}")
-
-    typer.echo("counts by market validation:")
-    for mv, count in sorted(overview.counts_by_market_validation.items()):
-        typer.echo(f"  {mv}: {count}")
-
-    typer.echo("counts by signal:")
-    for sig, count in sorted(overview.counts_by_signal.items()):
-        typer.echo(f"  {sig}: {count}")
-
-    typer.echo(f"\ntop {len(overview.top_candidates)} candidates:")
-    header = (
-        f"{'rank':<4} | {'symbol':<9} | {'primary strategy':<16} | "
-        f"{'qualified strategies':<20} | {'market validation':<17} | "
-        f"{'signal':<15} | {'next action':<11}"
-    )
-    typer.echo(header)
-    typer.echo("-" * len(header))
-    for item in overview.top_candidates:
-        mv_text = item.market_validation.value if item.market_validation else "NONE"
-        sig_text = item.signal.value if item.signal else "NO_SIGNAL"
-        qual_text = ",".join(item.qualified_strategy_ids)
-        typer.echo(
-            f"{item.rank:<4} | "
-            f"{item.symbol:<9} | "
-            f"{item.primary_strategy_id:<16} | "
-            f"{qual_text:<20} | "
-            f"{mv_text:<17} | "
-            f"{sig_text:<15} | "
-            f"{item.next_action.value:<11}"
-        )
-
-
-@app.command()
-def watch(
-    symbol: Annotated[
-        str | None, typer.Argument(help="Symbol to track; omit to list the watchlist.")
-    ] = None,
-    thesis: Annotated[str | None, typer.Option("--thesis")] = None,
-    key_question: Annotated[list[str] | None, typer.Option("--key-question")] = None,
-    risk_condition: Annotated[
-        list[str] | None, typer.Option("--risk-condition")
-    ] = None,
-    waiting_for: Annotated[list[str] | None, typer.Option("--waiting-for")] = None,
-    state: Annotated[
-        str | None, typer.Option("--state", help="Move the entry to this state.")
-    ] = None,
-    note: Annotated[str | None, typer.Option("--note")] = None,
-) -> None:
-    """Track a symbol, or list what is already tracked.
-
-    A new entry starts at `DISCOVERED`. `--state` moves it along the path the
-    design confirms — `DISCOVERED → WATCH → DEEP_RESEARCH → TRACK_SIGNAL` — and
-    refuses anything else, including the states V1 must not reach.
-    """
-    store = _watchlist_store()
-    if symbol is None:
-        symbols = store.symbols()
-        if not symbols:
-            typer.echo("watchlist: empty")
-            return
-        for tracked in symbols:
-            entry = store.read(tracked)
-            if entry is not None:
-                typer.echo(
-                    f"{entry.symbol} {entry.state} updated {entry.updated_at.isoformat()}"
-                )
-        return
-
-    now = datetime.now(UTC)
-    entry = store.read(symbol)
-    if entry is None:
-        entry = open_entry(
-            symbol,
-            at=now,
-            thesis=thesis,
-            key_questions=key_question or (),
-            risk_conditions=risk_condition or (),
-            waiting_for=waiting_for or (),
-        )
-    else:
-        entry = _edited(entry, now, thesis, key_question, risk_condition, waiting_for)
-
-    if state is not None:
-        try:
-            entry = transition(entry, _watchlist_state(state), at=now, note=note)
-        except WatchlistTransitionError as error:
-            typer.echo(str(error), err=True)
-            raise typer.Exit(code=1) from error
-
-    store.write(entry)
-    typer.echo(f"{entry.symbol} {entry.state}")
-    _echo_entry(entry)
-
-
-def _watchlist_state(value: str) -> WatchlistState:
-    """Parse a state name, naming the vocabulary when it does not match."""
-    try:
-        return WatchlistState(value.upper())
-    except ValueError as error:
-        known = ", ".join(item.value for item in WatchlistState)
-        raise typer.BadParameter(
-            f"{value!r} is not a watchlist state; known states are {known}"
-        ) from error
-
-
-def _edited(
-    entry: WatchlistEntry,
-    now: datetime,
-    thesis: str | None,
-    key_question: list[str] | None,
-    risk_condition: list[str] | None,
-    waiting_for: list[str] | None,
-) -> WatchlistEntry:
-    """Apply the fields the caller actually supplied, and nothing else."""
-    updates: dict[str, object] = {}
-    if thesis is not None:
-        updates["thesis"] = thesis
-    if key_question:
-        updates["key_questions"] = tuple(key_question)
-    if risk_condition:
-        updates["risk_conditions"] = tuple(risk_condition)
-    if waiting_for:
-        updates["waiting_for"] = tuple(waiting_for)
-    if not updates:
-        return entry
-    return entry.model_copy(update=updates | {"updated_at": now})
-
-
-def _echo_entry(entry: WatchlistEntry) -> None:
-    """Print one watchlist entry with the reasoning that put it there."""
-    typer.echo(f"  watchlist: {entry.state} (since {entry.updated_at.isoformat()})")
-    if entry.thesis is not None:
-        typer.echo(f"    thesis: {entry.thesis}")
-    for question in entry.key_questions:
-        typer.echo(f"    key question: {question}")
-    for risk in entry.risk_conditions:
-        typer.echo(f"    risk: {risk}")
-    for waiting in entry.waiting_for:
-        typer.echo(f"    waiting for: {waiting}")
-    for event in entry.timeline:
-        origin = event.from_state.value if event.from_state else "new"
-        detail = f" ({event.note})" if event.note else ""
-        typer.echo(
-            f"    timeline: {event.at.isoformat()} {origin} -> {event.to_state}{detail}"
-        )
 
 
 @app.command()
@@ -2439,96 +1678,6 @@ def _land_valuation(day: datetime, *, symbols: list[str] | None) -> DatasetLandi
     )
 
 
-@app.command()
-def research(
-    symbol: Annotated[
-        str | None, typer.Argument(help="Symbol to research, or a job id below.")
-    ] = None,
-    status: Annotated[
-        str | None, typer.Option("--status", help="Poll this job instead.")
-    ] = None,
-    result: Annotated[
-        str | None, typer.Option("--result", help="Read this job's summary instead.")
-    ] = None,
-    thesis: Annotated[
-        str | None, typer.Option("--thesis", help="Override the watchlist thesis.")
-    ] = None,
-) -> None:
-    """Hand a research request to the deep research adapter.
-
-    The request is built from the watchlist entry's own reasoning, so the
-    other system receives the questions this one was tracking. No adapter is
-    configured by default: without `ASTOCK_DEEP_RESEARCH_CMD` there is nothing
-    to submit to, and nothing is invented in its place.
-    """
-    try:
-        adapter = resolve_adapter()
-    except DeepResearchNotConfigured as error:
-        typer.echo(str(error), err=True)
-        raise typer.Exit(code=1) from error
-
-    try:
-        _research_action(
-            adapter, symbol=symbol, status=status, result=result, thesis=thesis
-        )
-    except (DeepResearchInvocationError, ValidationError) as error:
-        typer.echo(f"deep research adapter failed: {error}", err=True)
-        raise typer.Exit(code=1) from error
-
-
-def _research_action(
-    adapter: CliDeepResearchAdapter,
-    *,
-    symbol: str | None,
-    status: str | None,
-    result: str | None,
-    thesis: str | None,
-) -> None:
-    """Poll a job, read a summary, or submit a new request."""
-    if status is not None:
-        observed = adapter.status(status)
-        typer.echo(
-            f"{observed.job_id} {observed.state} "
-            f"(terminal: {observed.is_terminal}) observed "
-            f"{observed.observed_at.isoformat()}"
-        )
-        if observed.message is not None:
-            typer.echo(f"  {observed.message}")
-        return
-
-    if result is not None:
-        summary = adapter.result(result)
-        typer.echo(
-            f"{summary.job_id} {summary.symbol} completed "
-            f"{summary.completed_at.isoformat()}"
-        )
-        typer.echo(f"  summary: {summary.summary}")
-        typer.echo(f"  artifact: {summary.artifact_reference}")
-        return
-
-    if symbol is None:
-        typer.echo(
-            "research needs a symbol to submit, or --status/--result with a job id",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
-    entry = _watchlist_store().read(symbol)
-    job = adapter.submit(
-        ResearchRequest(
-            symbol=symbol,
-            as_of=datetime.now(UTC),
-            thesis=thesis if thesis is not None else (entry.thesis if entry else None),
-            key_questions=entry.key_questions if entry else (),
-            risk_conditions=entry.risk_conditions if entry else (),
-            waiting_for=entry.waiting_for if entry else (),
-        )
-    )
-    typer.echo(
-        f"{job.job_id} submitted for {job.symbol} at {job.submitted_at.isoformat()}"
-    )
-
-
 def _file_sha256(path: Path) -> str:
     """一份映射文件的摘要：让报告里的"用的是哪份文件"可以被复算。"""
     digest = hashlib.sha256()
@@ -2607,6 +1756,9 @@ def _load_industry_map(path: Path) -> dict[str, str]:
         raise typer.Exit(code=1)
 
     return mapping
+
+
+lifecycle_commands.register_research(app)
 
 
 @calibrate_app.command("candidates")
