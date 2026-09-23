@@ -166,7 +166,7 @@ def fetch(self, request):
 
 ### 4.2 工厂函数切换
 
-文件：`src/astock_lens/cli/app.py:313`（`_bulk_provider`）
+文件：`src/astock_lens/cli/runtime.py`（`_bulk_provider`；`app.py` 只负责 CLI 组装）
 
 ```python
 def _bulk_provider() -> DataProvider:
@@ -196,9 +196,15 @@ def _bulk_provider() -> DataProvider:
 
 ## 5. 测试策略（TDD 强制）
 
+### 5.0 Test Delta Budget
+
+本切片先盘点并复用现有 Provider 契约测试，再决定新增测试。默认预算为：新增 0、删除 0、净变化 0；只有现有测试无法表达 WeStock 特有行为时才增加用例，并在实施计划和工作记忆中说明原因。优先参数化既有 Provider 契约测试，不为相同的 RawDataset 通用契约复制一套测试。
+
+新测试仅保留以下 WeStock 特有行为：成交量乘以 100、quote 优先于 kline、缺失标的语义，以及尚未被现有测试覆盖的 Provider 选择行为。
+
 ### 5.1 单元测试（先写，红）
 
-文件：`tests/unit/test_westock_bars.py`（新）
+文件：`tests/unit/test_westock_bars.py`（只有在现有测试无法覆盖时新增）
 
 | 测试 | 断言 |
 |---|---|
@@ -214,7 +220,7 @@ def _bulk_provider() -> DataProvider:
 
 ### 5.2 契约测试
 
-文件：`tests/contract/test_westock_bars.py`（新）
+文件：`tests/contract/test_westock_bars.py`（只有在现有契约测试无法参数化时新增）
 
 | 测试 | 断言 |
 |---|---|
@@ -268,8 +274,8 @@ def _bulk_provider() -> DataProvider:
 
 ## 8. 验收标准（Definition of Done）
 
-- [ ] `WestockBarsProvider` 实现 + 单元测试红→绿
-- [ ] 契约测试全绿
+- [ ] `WestockBarsProvider` 实现；新增测试数量符合 Test Delta Budget，且先复用/参数化既有契约测试
+- [ ] 复用后的契约测试全绿；仅 WeStock 特有行为保留新增测试
 - [ ] `_bulk_provider()` 默认 westock，`ASTOCK_BULK_PROVIDER=akshare` 回退可用
 - [ ] 端到端冒烟：westock 50 只 vs AkShare 50 只，row_count 一致（≤ 5% 误差）
 - [ ] AkShareProvider **完全不动**（仍作 fallback）
@@ -312,4 +318,4 @@ def _bulk_provider() -> DataProvider:
 - Fixture：`tests/fixtures/westock/*.md`（已固化）
 - 现有 westock Provider：`src/astock_lens/data/providers/westock.py`（WestockCliProvider，财务三表）
 - 现有 AkShare Provider：`src/astock_lens/data/providers/akshare_provider.py`（待替换）
-- CLI 工厂：`src/astock_lens/cli/app.py:313`（`_bulk_provider`）
+- CLI 工厂：`src/astock_lens/cli/runtime.py`（`_bulk_provider`；`app.py` 只负责 CLI 组装）

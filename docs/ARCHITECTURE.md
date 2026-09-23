@@ -15,7 +15,7 @@ V1 采用：
 
 ## 2. 依赖方向
 
-严格保持单向依赖：
+研究主链严格保持单向依赖：
 
 ```text
 External Provider
@@ -44,12 +44,27 @@ Candidate Builder
       ↓
 Watchlist / Research
       ↓
-Trade Gate（按需评估，独立 Ledger）
-      ↓
-API / CLI
+API / Web / CLI
 ```
 
 Trade Gate 不是 `astock daily` 阶段，不写入正式 SnapshotStore，也不改变 Candidate、Watchlist 状态语义。API 只读已保存的 Trade Ledger，不导入裁决引擎。
+
+### 2.1 Stock Discovery / Research Context
+
+这是全市场发现与研究生命周期上下文，负责上面的 Provider → Candidate → Watchlist / Research 主链。它产出研究事实、候选对象和研究状态，但不输出买卖结论。
+
+### 2.2 Trade Gate Context
+
+这是独立的交易准入上下文，按需消费研究事实并写入独立 Ledger：
+
+```text
+Research facts → Trade Gate profiles / audit → TradeDecision → Trade Ledger
+```
+
+- Trade Gate 消费研究事实，不重新计算因子或策略；
+- Trade Gate 不是每日 Pipeline 阶段；
+- `TradeDecision` 不改变 Candidate admission，也不改变 Candidate、Watchlist 状态；
+- V1 不把 Evaluation / Execution / Review 的完整用户流程描述为已完成。
 
 禁止：
 
@@ -540,6 +555,29 @@ astock daily
 - Quality Top Quantile 应表现为高 ROE/ROIC、稳定盈利、现金流质量更高；
 - Value 应整体估值分位更低、FCF Yield 更高；
 - Momentum 应整体 RS 更高、距离阶段新高更近。
+
+### 20.5 Testing Architecture
+
+#### Test Ownership
+
+每个行为只由离它最近、最能解释失败原因的一层负责证明：领域不变量由 Unit 负责，Provider 字段与状态契约由 Contract 负责，跨模块接线由 Integration 负责，快照和 Candidate 产物由 Artifact Validator 负责。Trade Gate 的模型、Profile 和审计 Adapter 测试保持各自边界，不在高层重复证明。
+
+#### Pure Refactor Rule
+
+纯重构必须保持公开命令、输出、异常、数据产物和快照哈希不变。没有行为变更时，默认不新增测试；应优先复用既有测试，并用帮助输出、产物指纹或等价回归证明行为未漂移。
+
+#### Test Delta Budget
+
+每个切片在计划中声明测试增量：新增测试数、删除测试数和净变化。预算为零时不得为了“补覆盖率”顺手增加测试；若发现必须新增测试的缺口，先记录裁决并更新计划。
+
+#### 新测试的四个合法理由
+
+只有以下理由可以新增测试：
+
+1. 新增公开行为或用户契约；
+2. 修复此前未被测试锁定的缺陷；
+3. 新增外部 Provider 的特有字段、错误或选择语义；
+4. 补齐产物、架构边界或安全不变量的独立验证。
 
 ## 21. 性能目标
 

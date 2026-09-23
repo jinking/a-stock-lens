@@ -41,7 +41,7 @@ External Provider → Raw → Normalized → Data Quality Gate → Universe
 
 V1 做：全 A 股 Universe、每日增量同步、约 40–60 个核心 Factor、7 个独立 Scanner（Value / Growth / GARP / Quality / Dividend / Momentum / Industry Trend）、Market Regime、Market Validation、Signal、Candidate 快照、Watchlist 状态机、深研适配器、6 个前端页面。
 
-V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学习选股、LLM 直接决定买卖、复杂 Portfolio Optimizer、完整历史回测平台、期货/期权、港股/美股、多用户与权限、云端 SaaS 部署。
+V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学习选股、LLM 直接决定买卖、复杂 Portfolio Optimizer、完整历史回测平台、期货/期权、港股/美股、多用户与权限、云端 SaaS 部署。Trade Gate 是独立的可选交易准入上下文：当前已落地模型、Profile、审计 Adapter、规则与 Ledger 基础，但不宣称完整 Evaluation / Execution / Review 用户流程已交付，也不进入 `astock daily`。
 
 详见 `docs/PRODUCT.md`。
 
@@ -72,6 +72,7 @@ V1 不做：自动下单、券商交易 API、分钟级实时扫描、机器学�
 | Job Run 记录与 Manifest（11 阶段清单完整，每阶段独立可重跑）、`astock daily` | |
 | 用户端查询服务：CLI `today` / `candidates` / `screen` / `qualified` / `stock` 与 API 对应路由 | |
 | 独立 Artifact Validator（五大单快照审查 + 跨快照引用闭环 + Job Manifest，不导入生产代码，0 findings） | |
+| Trade Gate 基础域（模型、Profile、审计 Adapter、规则与独立 Ledger） | 完整交易评估、执行与复盘用户流程 |
 
 包结构已按 `docs/ARCHITECTURE.md` 建立，`src/astock_lens/` 下的 `backtest`、`portfolio`、`events` 等目录只是预留边界，没有 V1 实现。
 

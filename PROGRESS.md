@@ -1,5 +1,12 @@
 # PROGRESS
 
+## 复杂度收敛切片（2026-09-23）
+
+- **Trade Gate 状态**：模型、Trade Profile、审计 Adapter、规则/裁决、独立 Ledger、服务层、只读 API 与 CLI 基础已落地；它消费研究事实，不重算因子/策略，不进入 `astock daily`。完整 Evaluation / Execution / Review 用户流程尚未以代码证据交付，不能标记为完成。
+- **保持不变**：Trade Gate 源码、配置、测试与既有命令本切片冻结；`TradeDecision` 不改变 Candidate admission。
+- **复杂度拆分**：统一策略资格实现、合并候选/市场验证重复测试、拆分发现/研究生命周期 CLI，并完成 CLI 数据、管线、校准命令分层；CLI 帮助输出与原基线一致。
+- **测试实测**：Task 4 CLI 回归 **160 passed / 3 warnings**，未新增测试；Task 5/6 测试净增量为 **-4**。后续全量验收以最终命令输出为准，不用历史估算替代实测。
+
 ## 二阶段 · 第一刀（任务 2.1 + 2.2）—— 2026-09-19 11:08 开工
 
 ### 任务 0 核验（二阶段）
