@@ -38,7 +38,6 @@ from astock_lens.strategies.config import StrategyConfig, load_strategy_config
 # 2. 策略缺任意一个估值侧必需因子就不可打分；
 # 3. 未来时点的观测不计入当期覆盖；
 # 4. 因子语义按 `ValuationFactor` 走——负 PEG 不是"更匹配"，是 `NOT_APPLICABLE`。
-# """
 #
 
 
@@ -250,7 +249,6 @@ def test_the_report_serializes_to_json_shape() -> None:
 #   没有时序表时（板块查询）以查询日为日期，并计数为 `dated_from_query`；
 # - `--` / `暂无数据` 是"没有值"，不是 0；
 # - 分类标签（"低于"）进 `text_value`，只作证据、不进排名。
-# """
 #
 
 

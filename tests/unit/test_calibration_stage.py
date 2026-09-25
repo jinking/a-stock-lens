@@ -46,7 +46,6 @@ from astock_lens.strategies.contracts import FactorContribution, StrategyResult
 # 所有者要批的是六个绝对门槛；能支撑这个决定的东西只有两类：因子在全池的真实分布，
 # 以及 0.90 线上下具体是谁、他们的因子值是多少。这些测试钉住三件事——分布只由有值
 # 观测算出、样本自带可核对的证据、以及缺行业覆盖时报告必须失败而不是装作完整。
-# """
 #
 
 
@@ -243,7 +242,6 @@ def test_rendering_is_byte_stable_under_shuffled_input() -> None:
 # 来源：tests/unit/test_qualification_impact.py（5 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# 资格影响审计单元测试：计数独立性与失败原因聚合。"""
 #
 
 

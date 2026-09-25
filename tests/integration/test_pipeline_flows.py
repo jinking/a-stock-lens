@@ -139,7 +139,6 @@ from astock_lens.universe.models import (
 #
 # 本文件同时替代已经退休的 first slice / daily scan 两个入口的测试：那两条链路
 # 各有一套组装逻辑，正是本阶段要消灭的"同一个项目里有两个真相"。
-# """
 #
 
 
@@ -359,7 +358,6 @@ def test_a_missing_input_never_became_zero() -> None:
 #
 # Spec: docs/superpowers/specs/2026-09-21-candidate-correctness-product-query-design.md
 # Plan: docs/superpowers/plans/2026-09-21-candidate-correctness-safety-gate.md
-# """
 #
 
 
@@ -609,7 +607,6 @@ def test_multi_qualified_symbol_derives_deterministic_primary_strategy_mapping()
 # 来源：tests/integration/test_candidate_qualification_pipeline.py（5 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# Candidate qualification & selection pipeline integration tests."""
 #
 
 
@@ -814,7 +811,6 @@ def test_market_validation_contradicted_disqualifies_candidate() -> None:
 # 来源：tests/integration/test_daily_candidate_pipeline.py（1 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# Integration test verifying full daily pipeline execution through candidate stage."""
 #
 
 
@@ -880,7 +876,6 @@ def test_daily_pipeline_executes_regime_validation_signal_and_candidates(
 # 来源：tests/integration/test_daily_production_evidence.py（4 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# Integration tests verifying benchmark and industry evidence wiring into daily pipeline."""
 #
 
 
@@ -1236,7 +1231,6 @@ def test_step4_qualified_symbol_missing_industry_evidence_fails_closed(
 # 来源：tests/integration/test_dividend_factor_pipeline.py（1 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# 分红事件与因子分析执行链集成测试 (Plan D Task 3)."""
 #
 
 
@@ -1323,7 +1317,6 @@ def test_pipeline_computes_dividend_yield_ttm_from_landed_events(
 # 来源：tests/integration/test_dividend_qualified_discovery.py（2 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# 红利策略双门槛合格发现与审计集成测试 (Plan D Task 4)."""
 #
 
 
@@ -1434,7 +1427,6 @@ def test_dividend_qualified_discovery_blocks_when_yield_falls_below_threshold() 
 # canonical observations, gated, with the point-in-time fields intact — and a
 # statement that was never landed is *named* rather than silently treated as an
 # empty one.
-# """
 #
 
 
@@ -1622,7 +1614,6 @@ def _date(year: int, month: int, day: int) -> object:
 # 3. Snapshot immutability: same-date changed-content raises SnapshotConflictError.
 # 4. Independent artifact validator rules for MARKET_REGIME snapshot.
 # 5. `astock today` displays the persisted market regime value.
-# """
 #
 
 
@@ -1924,7 +1915,6 @@ def test_step6_seed_market_regime_and_candidate_today_cli_prints_it(
 # 来源：tests/integration/test_market_signal_pipeline.py（1 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# End-to-end integration test for Market Regime, Market Validation, and Signal pipeline."""
 #
 
 
@@ -2134,7 +2124,6 @@ def test_market_signal_pipeline_end_to_end_assembly() -> None:
 #    与只读研究分析结果语义完全一致；
 # 2. 时点隔离：新日期的估值变化只改变估值相关因子与策略（Value/GARP），不改变纯成长因子；
 # 3. 候选门禁持续生效：未批准绝对质量规则前，Candidate 保持为空且 BUILD_CANDIDATES 阶段 BLOCKED。
-# """
 #
 
 
@@ -2416,7 +2405,6 @@ def test_newer_valuation_changes_only_valuation_dependent_evidence(
 # 4. GARP 回归：``pe_ttm`` 参与绝对判定，``pe_percentile`` 不参与。
 #
 # 装配使用真实生产规则（``configs/qualifications``），以获得生产级强证据。
-# """
 #
 
 
@@ -2617,7 +2605,6 @@ def test_garp_qualification_uses_pe_ttm_and_not_pe_percentile() -> None:
 #
 # The provider is a fake on purpose: a test that reaches AkShare would report
 # whether the network is up, not whether the flow is correct.
-# """
 #
 
 
@@ -3112,7 +3099,6 @@ def test_only_the_research_universe_is_asked_for_expensive_history(
 #    - stored StrategyResult -> discovery service -> API response
 #    - 严格保持 symbol、score、rank_percentile、strategy_version
 #    - 严格保留 None，绝不静默兜底为 0.0
-# """
 #
 
 
@@ -3604,7 +3590,6 @@ def test_daily_pipeline_to_discovery_workflow_end_to_end(local_tmp: Path) -> Non
 # 2. 未来日期的落地文件不可见（时点由文件选择保证）；
 # 3. 归一化后的估值观测进入因子上下文，且每个因子只看到自己标的的行；
 # 4. 估值因子因此能给出 `VALUE`，而不是 `NOT_APPLICABLE`。
-# """
 #
 
 

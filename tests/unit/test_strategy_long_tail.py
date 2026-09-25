@@ -51,7 +51,6 @@ from astock_lens.universe.models import UniverseSnapshot
 #
 # Factor names are read from the configuration rather than written here, so the
 # scanner's contract stays under test when the strategy's factor set changes.
-# """
 #
 
 
@@ -195,7 +194,6 @@ def test_explain_reports_a_missing_value_as_missing() -> None:
 # * 缺证据的标的不合格，理由点名缺的是哪个因子；
 # * `explain()` 能把分数展开到因子层；
 # * 每个类真的是自己的类，不是同一个通用类换了个名字。
-# """
 #
 
 
@@ -358,7 +356,6 @@ def test_the_cross_section_ranks_exactly_the_eligible_population() -> None:
 # matter how many scanners or symbols the run has. The second test uses a
 # counting sequence, so it fails against the old implementation for the right
 # reason rather than by inspecting code.
-# """
 #
 
 
@@ -549,7 +546,6 @@ def test_factor_results_are_walked_once_per_stage_not_once_per_scanner() -> None
 #
 # 只比对业务输出：`eligible`、`score`、`rank_percentile`、因子贡献。Scanner 的类名
 # 不在比对范围内——它正是本次重构要改的东西。
-# """
 #
 
 
@@ -669,7 +665,6 @@ def test_the_fixture_was_recorded_before_this_refactor() -> None:
 #
 # 以及一条边界：这个组件**不知道**任何策略的资格规则。调用方注入自己的判定，
 # 组件只负责排名——否则"资格规则"就会重新变成配置推断出来的东西。
-# """
 #
 
 

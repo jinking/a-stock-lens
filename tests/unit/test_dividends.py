@@ -41,7 +41,6 @@ from astock_lens.factors.contracts import FactorContext
 # - 各覆盖统计（任意事件、已实施现金分红、除权日、登记日）精确吻合；
 # - 能够确定性渲染 JSON 与 Markdown 格式报告；
 # - 证明审计过程严格只读。
-# """
 #
 
 
@@ -223,7 +222,6 @@ def test_dividend_coverage_cli_read_only(
 # - 缺失日期保留为 None；
 # - source_text 完整保留源证据；
 # - 不进行任何 TTM 聚合或年化计算。
-# """
 #
 
 
@@ -331,7 +329,6 @@ def test_source_evidence_preservation() -> None:
 # - B1: 严格排除预案，仅聚合已实施分红；
 # - C1: 以 as_of 当日收盘价为分母，单位为 %；
 # - 边界：停牌/缺价返回 NULL，无分红记录返回 NOT_APPLICABLE，有记录但过去一年派息为0返回 0.0。
-# """
 #
 
 
@@ -576,7 +573,6 @@ def test_dividend_yield_ttm_status_boundaries() -> None:
 # 来源：tests/unit/test_normalized_dataset_dividends.py（1 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# NormalizedDataset 分红事件契约测试。"""
 #
 
 

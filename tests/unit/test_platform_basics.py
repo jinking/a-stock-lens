@@ -42,7 +42,6 @@ def test_package_imports() -> None:
 # 来源：tests/unit/test_trading_calendar.py（6 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# 中国 A 股交易日历单元测试。"""
 #
 
 
@@ -93,7 +92,6 @@ def test_custom_dates_override() -> None:
 # 来源：tests/unit/test_docs_consistency.py（1 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# 文档一致性测试：防止已闭环的 Candidate v2 / Market / Signal 状态在文档中出现过期断言。"""
 #
 
 

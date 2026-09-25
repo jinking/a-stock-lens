@@ -48,7 +48,6 @@ from astock_lens.universe.config import UniverseConfig, load_universe_config
 # tests pin the two rulings this slice records: the liquidity floor came from the
 # project owner (20,000,000 CNY), and the long-suspension day count is explicitly
 # deferred rather than guessed.
-# """
 #
 
 
@@ -182,7 +181,6 @@ def test_digest_is_stable_and_content_sensitive() -> None:
 #
 # 另按裁决补充：strategy_id 缺失 qualifier 时必须显式抛错（fail loudly），
 # 不得返回「零合格」假装正常。
-# """
 #
 
 
@@ -467,7 +465,6 @@ def test_qualified_screen_query_rejects_non_positive_limit() -> None:
 # 来源：tests/unit/test_discovery_service.py（8 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# Unit tests for the strategy discovery query layer."""
 #
 
 

@@ -31,7 +31,6 @@ from astock_lens.domain.models import FinancialObservation
 # The gate reports; it never repairs. Every rule here traces to
 # `docs/ARCHITECTURE.md` §4.4, and invalid bars stay in the dataset so the
 # verdict is visible instead of being filtered away silently.
-# """
 #
 
 
@@ -135,7 +134,6 @@ def test_gate_does_not_mutate_its_input() -> None:
 #
 # A statement that yielded nothing at all is P1, which is what makes the module
 # that needs fundamentals degrade loudly instead of scoring nothing.
-# """
 #
 
 

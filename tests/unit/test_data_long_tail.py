@@ -36,7 +36,6 @@ from astock_lens.factors.contracts import FactorResult
 # unreadable exchange, listing date, or board flag rejects the whole row instead
 # of yielding a profile with a guessed field. That is the same rule the daily-bar
 # normalizer applies to an unreadable symbol or trade date.
-# """
 #
 
 
@@ -228,7 +227,6 @@ def test_an_empty_payload_yields_no_profiles_and_no_failures() -> None:
 # rather than fail. Writing one is decided by content: the same content is
 # idempotent, different content is refused instead of silently replacing the day's
 # formal result.
-# """
 #
 
 

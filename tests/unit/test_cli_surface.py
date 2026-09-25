@@ -37,7 +37,6 @@ from astock_lens.research.models import ResearchJob, ResearchJobStatus, Research
 # The rule these tests pin down: the CLI is a first-class surface. A scan can be
 # driven from cron or an agent with no Web UI, and it must fail loudly rather
 # than print a reassuring summary for a run that did nothing.
-# """
 #
 
 
@@ -187,7 +186,6 @@ def test_sync_research_on_non_trading_day_skips_market_sync(local_tmp: Path) -> 
 # 来源：tests/unit/test_cli_industry_loader.py（7 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# Tests for deterministic production industry loader (Task 4)."""
 #
 
 
@@ -365,7 +363,6 @@ def test_includes_supplemental_industry_memberships(tmp_path: Path) -> None:
 # matters here is that the boundary is honest: job states are passed through
 # unchanged because they belong to the other system, and a command that fails
 # produces an error — never a fabricated job, status or summary.
-# """
 #
 
 

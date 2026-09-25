@@ -32,7 +32,6 @@ from astock_lens.market.validation import (
 # 来源：tests/unit/test_market_regime.py（5 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# Market regime detector unit tests."""
 #
 
 
@@ -242,7 +241,6 @@ def test_r2_b3_volatility_deferred_reason() -> None:
 # 来源：tests/unit/test_market_validator.py（8 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# Market validation 5-dimension matrix unit tests."""
 #
 
 

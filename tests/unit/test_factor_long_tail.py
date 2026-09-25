@@ -38,7 +38,6 @@ from astock_lens.factors.registry import FactorRegistry
 # The rule these tests pin down: an incomplete window produces `NULL`, never a
 # number computed from fewer days than the window declares. Averaging a shorter
 # stretch would silently answer a different question.
-# """
 #
 
 
@@ -195,7 +194,6 @@ def test_unknown_symbol_is_null() -> None:
 # trailing window, so a symbol trading at its own peak scores 1.0 and a symbol
 # far below its peak scores lower. The expected values are recomputed from the
 # fixture's own columns, not from the factor.
-# """
 #
 
 
@@ -383,7 +381,6 @@ def test_a_configuration_for_another_factor_is_rejected() -> None:
 # **倍数非正即不适用**。负现金流、负净资产、负增长给出的负倍数不是"更便宜"，
 # 是这个量不存在；让它以"越低越便宜"的姿态排到榜首，会把最差的公司选成最便宜的。
 # 百分位不受此约束——`0.000` 是合法分位。
-# """
 #
 
 
@@ -538,7 +535,6 @@ def test_the_freshness_key_must_be_declared() -> None:
 # 来源：tests/unit/test_factor_registry.py（4 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# Factor registry tests."""
 #
 
 

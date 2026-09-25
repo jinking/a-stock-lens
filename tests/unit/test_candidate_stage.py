@@ -74,7 +74,6 @@ from astock_lens.strategies.contracts import StrategyResult
 # `next_action` is a parameter whose default is the inert `IGNORE`, and a
 # candidate whose evidence disagrees with its declared lineage is refused rather
 # than published with a contradictory provenance.
-# """
 #
 
 
@@ -287,7 +286,6 @@ def test_candidate_builder_no_signal_under_approved_decision_f1() -> None:
 # 来源：tests/unit/test_candidate_calibration.py（5 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# Unit tests for calibration report engine and deterministic rendering."""
 #
 
 
@@ -503,7 +501,6 @@ def test_the_denominator_is_the_scored_population_not_the_industry_map() -> None
 #
 # Plan: docs/superpowers/plans/2026-09-21-candidate-today-query-experience.md Task 1
 # Spec: docs/superpowers/specs/2026-09-21-candidate-correctness-product-query-design.md
-# """
 #
 
 
@@ -636,7 +633,6 @@ def test_screen_candidates_empty_records() -> None:
 # 来源：tests/unit/test_candidate_evidence.py（6 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# CandidateEvidence 与 CandidateSelection 领域模型测试。"""
 #
 
 
@@ -869,7 +865,6 @@ def test_candidate_builder_rejects_symbol_mismatch() -> None:
 # * 没有批准的 policy 时，Candidate 阶段明确报错，而不是安静地返回空集；
 # * policy 说入选，才有 Candidate；policy 说不入选，分数再高也没有 Candidate；
 # * Builder 不参与资格判定，它只组装证据。
-# """
 #
 
 
@@ -1056,7 +1051,6 @@ def test_a_policy_verdict_is_ineligible_without_eligible_evidence() -> None:
 #
 # Spec: docs/superpowers/specs/2026-09-21-candidate-correctness-product-query-design.md
 # Plan: docs/superpowers/plans/2026-09-21-candidate-correctness-safety-gate.md Task 2
-# """
 #
 
 
@@ -1175,7 +1169,6 @@ def test_candidate_model_carries_primary_strategy_id() -> None:
 #
 # `DEEP_RESEARCH` 与 `TRACK_SIGNAL` 需要 Signal 层，而该层至今没有实现，所以
 # 它们依然不可达：猜一个触发条件等于替项目所有者做产品决定。
-# """
 #
 
 
@@ -1248,7 +1241,6 @@ def test_score_routing_api_is_absent() -> None:
 # - Accurate tracking of complete 5D evidence vs missing industry/benchmark/volume;
 # - Deterministic counts of BREAKDOWN, TREND_WEAKEN, NO_SIGNAL;
 # - Markdown output formatting and strict read-only guarantee.
-# """
 #
 
 

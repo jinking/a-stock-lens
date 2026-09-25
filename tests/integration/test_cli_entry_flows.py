@@ -80,7 +80,6 @@ from tests.support import strip_ansi
 # 后半部分钉住行业映射这份证据：外部映射缺标的时仍出诊断并如实列出缺口，仓库规范
 # 映射缺标的一律拒绝；映射日期只能来自命令行声明或数据本身，**绝不来自文件 mtime，
 # 也绝不把分析时点顶替上去**。
-# """
 #
 
 
@@ -455,7 +454,6 @@ def test_a_mapping_date_without_an_external_map_is_refused(local_tmp: Path) -> N
 # - Generates deterministic JSON and Markdown reports with the calibration warning;
 # - Guarantees zero production mutation across snapshot, watchlist, and job roots;
 # - Fails loudly on invalid or corrupt industry maps.
-# """
 #
 
 
@@ -732,7 +730,6 @@ def test_calibrate_candidates_canonical_merges_supplement(tmp_path: Path) -> Non
 #
 # Plan: docs/superpowers/plans/2026-09-21-candidate-today-query-experience.md Task 2
 # Spec: docs/superpowers/specs/2026-09-21-candidate-correctness-product-query-design.md
-# """
 #
 
 
@@ -904,7 +901,6 @@ def test_candidates_cli_is_strictly_read_only(local_tmp: Path, monkeypatch) -> N
 # 目标行为写在计划 `a-stock-lens-core-hardening-plan.md` Task 1 / Task 3：
 # `factors compute` 与 `strategy run` 是纯计算，`scan` 是预览，`daily` 是唯一
 # 正式 Snapshot writer。测试先失败，实现随后跟上。
-# """
 #
 
 
@@ -1097,7 +1093,6 @@ def test_scan_does_not_replace_a_formal_candidate_snapshot(local_tmp: Path) -> N
 # - 当一轮没有带来任何新标的时停止继续请求 (no-progress stop)；
 # - 块身份合并：后一轮落地的数据不会冲掉前一轮已落地的标的 (survive later rounds)；
 # - 目标路径严格为 data/raw/neodata/dividend_history/YYYY-MM-DD.csv。
-# """
 #
 
 
@@ -1323,7 +1318,6 @@ def test_sync_dividends_landed_blocks_survive_later_rounds(
 # - 缺少快照：缺少 FACTOR 或 STRATEGY 快照时退出非 0，并点名缺失类别；
 # - 配置非法：资格配置损坏或未知阈值键时立即失败（fail loudly）；
 # - 确定性输出：在 --output-dir 下生成符合命名的 .json 和 .md 产物。
-# """
 #
 
 
@@ -1504,7 +1498,6 @@ def test_invalid_qualification_config_fails_loudly(
 #   qualifiers, and writes only the two audit files under ``--output-dir``;
 # - it guarantees zero production mutation across snapshot / watchlist / job roots;
 # - it fails loudly when the required snapshots are absent.
-# """
 #
 
 
@@ -1684,7 +1677,6 @@ def test_qualification_impact_cli_fails_on_missing_snapshot(tmp_path: Path) -> N
 #
 # 资格配置一律从仓库 `configs/qualifications` 复制到临时目录（已批准阈值，
 # 测试不发明任何数值），再通过 `ASTOCK_QUALIFICATION_DIR` 注入。
-# """
 #
 
 
@@ -2111,7 +2103,6 @@ def test_qualified_read_only_guarantee(tmp_path: Path) -> None:
 # - 合格标的过滤与 --all-results 开关；
 # - --min-percentile 百分位过滤；
 # - 只读保证：快照、自选与作业目录完全不被修改。
-# """
 #
 
 
@@ -2493,7 +2484,6 @@ def test_screen_read_only_guarantee(tmp_path: Path) -> None:
 #
 # Plan: docs/superpowers/plans/2026-09-21-candidate-today-query-experience.md Task 4
 # Spec: docs/superpowers/specs/2026-09-21-candidate-correctness-product-query-design.md
-# """
 #
 
 
@@ -2681,7 +2671,6 @@ def test_trade_commands_are_registered() -> None:
 # 4. 覆盖报告的分母是显式研究池，不是"已落地的标的"。
 #
 # 全程不联网：provider 由假源替换，只回放构造的内容块。
-# """
 #
 
 

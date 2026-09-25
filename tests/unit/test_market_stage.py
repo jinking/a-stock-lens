@@ -43,7 +43,6 @@ from astock_lens.qualifications.models import StrategyQualification
 #
 # Auditable evidence layer: ensures volume ratio is computed deterministically
 # from validated bars without future leakage and without silent fallbacks.
-# """
 #
 
 
@@ -255,7 +254,6 @@ def test_missing_relative_strength_inputs_result_in_none() -> None:
 # - Strict rejection when SW1 is requested but only SW2 exists (no relabeling);
 # - Strict fail-closed when benchmark or membership is missing;
 # - Exact calculation of industry 20d return and excess return.
-# """
 #
 
 
@@ -433,7 +431,6 @@ def test_exact_industry_excess_calculation() -> None:
 # - 缺失值纪律：NULL/NOT_APPLICABLE/STALE 永不退化为数值 0；
 # - 合格标的范围：严格仅针对各策略合格标的 (StrategyQualification.qualified == True)；
 # - 严禁枚举越界：报告中绝对不出现 MarketRegime/MarketValidation/Signal 判决枚举。
-# """
 #
 
 
@@ -690,7 +687,6 @@ def test_assert_vocabulary_boundary_no_verdict_fields() -> None:
 # - Strict fail-closed when benchmark series or bars are insufficient (< 60 bars);
 # - Deterministic calculation of ret_60d and trend_value (ma_20 / ma_60);
 # - No future bar leakage.
-# """
 #
 
 

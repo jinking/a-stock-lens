@@ -45,7 +45,6 @@ from astock_lens.domain.enums import DataStatus
 #
 # 这条测试用可计数的 `read_raw_rows` 替代品把成本钉住：一次运行读取落地文件的次数
 # 必须是常数级（每轮扩展一次 + 收尾一次），而不是随标的数增长。
-# """
 #
 
 
@@ -332,7 +331,6 @@ def test_a_symbol_that_already_has_enough_bars_is_not_fetched_again(
 # 来源：tests/unit/test_bootstrap_scheduler.py（4 例）
 # ===========================================================================
 # 模块 docstring（逐字折为注释）：
-# 有界 completion-order fallback 调度器的回归测试。"""
 #
 
 
