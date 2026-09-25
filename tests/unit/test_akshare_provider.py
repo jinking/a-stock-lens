@@ -305,8 +305,14 @@ def test_an_empty_response_is_a_source_error() -> None:
     assert dataset.payload is None
 
 
-def test_an_unexpected_column_set_is_a_source_error() -> None:
-    """A source that drops a required column cannot be mapped; say so."""
+def test_an_unexpected_column_set_is_a_source_error_for_that_symbol() -> None:
+    """A source that drops a required column on one symbol is recorded against
+    that symbol, not the whole batch.
+
+    The contract changed: previously any single-symbol source failure aborted
+    the whole fetch and reported `SOURCE_ERROR` for the dataset; now it is
+    routed to `missing_symbols` so the surviving symbols' work is kept.
+    """
     transport = _recorded()
     key = next(key for key in transport._frames if key[0] == "stock_zh_a_hist_tx")
     columns, rows = transport._frames[key]
@@ -321,9 +327,66 @@ def test_an_unexpected_column_set_is_a_source_error() -> None:
 
     dataset = _provider(transport).fetch(_bars_request())
 
+    # Single-symbol failure no longer aborts the batch: status reflects the
+    # surviving symbol, and the broken one shows up in `missing_symbols`.
+    assert dataset.status is DataStatus.VALUE
+    assert dataset.row_count == 25  # only the surviving symbol's bars
+    assert dataset.payload is not None
+    assert len(dataset.payload.rows) == 25
+    # The broken symbol's code (key in transport._frames) appears in missing.
+    assert len(dataset.missing_symbols) == 1
+
+
+def test_partial_batch_failure_keeps_surviving_symbols_value() -> None:
+    """Half-success fetch: payload carries the survivors, missing has the rest.
+
+    Regression for the 12h33m cold-start: a single symbol's transient
+    timeout used to discard the entire batch's worth of memory. The new
+    per-symbol contract lets the rest of the day's data land and surfaces
+    the missing list verbatim.
+    """
+    transport = _recorded()
+
+    def flaky(
+        endpoint: str, params: dict[str, str]
+    ) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...]]:
+        # `sh600519` returns nothing; the rest replay normally.
+        if params.get("symbol") == "sh600519":
+            return (
+                ("date", "open", "high", "low", "close", "volume", "amount", "turnover"),
+                (),
+            )
+        return transport(endpoint, params)
+
+    dataset = _provider(flaky).fetch(_bars_request())  # type: ignore[arg-type]
+
+    assert dataset.status is DataStatus.VALUE
+    assert dataset.row_count == 25  # sz000001 only
+    assert dataset.payload is not None
+    assert "600519.SH" in dataset.missing_symbols
+    assert "000001.SZ" not in dataset.missing_symbols
+    assert dataset.message is not None
+    assert "1 of 2" in dataset.message
+
+
+def test_when_every_symbol_fails_the_dataset_is_source_error() -> None:
+    """All-symbol failure: status=SOURCE_ERROR, payload=None, all in missing."""
+
+    def empty_for_all(
+        endpoint: str, params: dict[str, str]
+    ) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...]]:
+        return (
+            ("date", "open", "high", "low", "close", "volume", "amount", "turnover"),
+            (),
+        )
+
+    dataset = _provider(empty_for_all).fetch(_bars_request())  # type: ignore[arg-type]
+
     assert dataset.status is DataStatus.SOURCE_ERROR
     assert dataset.row_count == 0
     assert dataset.payload is None
+    assert set(dataset.missing_symbols) == set(BAR_SYMBOLS)
+    assert dataset.message is not None and "every symbol" in dataset.message
 
 
 def test_bars_without_symbols_are_a_caller_error() -> None:

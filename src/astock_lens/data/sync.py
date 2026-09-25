@@ -23,6 +23,7 @@ import csv
 import json
 import os
 import re
+import sys
 import tempfile
 from collections.abc import Sequence
 from datetime import date, datetime
@@ -95,7 +96,7 @@ class SyncResult(DomainRecord):
         return tuple(
             landing.dataset
             for landing in self.landings
-            if landing.status not in DONE_STATUSES
+            if landing.status not in DONE_STATUSES or landing.symbols_missing
         )
 
     @property
@@ -492,6 +493,7 @@ def _iso_day(value: str) -> str | None:
 def land_raw(
     *,
     provider: DataProvider,
+    listing_provider: DataProvider | None = None,
     root: Path,
     as_of: datetime,
     symbols: Sequence[str] | None = None,
@@ -506,7 +508,10 @@ def land_raw(
     different market than the one it says it covers.
     """
     listing = _land_listing(
-        provider=provider, root=root, as_of=as_of, dataset=securities_dataset
+        provider=listing_provider or provider,
+        root=root,
+        as_of=as_of,
+        dataset=securities_dataset,
     )
     wanted = tuple(symbols) if symbols is not None else _listed_symbols(listing.payload)
 
@@ -592,11 +597,23 @@ def _land_dataset(
     path = root / f"{dataset}.csv"
     requested = tuple(symbols) if symbols is not None else None
     skipped: tuple[str, ...] = ()
+    prior_landed = 0  # 让 progress 报告"累计 / 名单总数"，避免分母不直观
 
     if requested is not None:
         already = landed_symbols(path, as_of=as_of)
         skipped = tuple(sorted(already.intersection(requested)))
         requested = tuple(symbol for symbol in requested if symbol not in already)
+        prior_landed = len(skipped)
+        # 让"已跳过"在用户进度的第一行就可见：进度回调的分母会按累计口径走
+        # （prior + wanted），但用户读到的第一行如果不显式标 skipped，会误以为
+        # "从头下载"——这就是 spec §15 的"already landed"对外部应该是 first-class
+        # 而不是 buried 的事实。
+        if skipped:
+            sys.stderr.write(
+                f"{dataset}: 已跳过 {len(skipped)} 只已落地标的，"
+                f"本次 fetch {len(requested)} 只\n"
+            )
+            sys.stderr.flush()
         if not requested:
             return _Landed(
                 landing=DatasetLanding(
@@ -610,7 +627,10 @@ def _land_dataset(
                 )
             )
 
-    raw = provider.fetch(FetchRequest(dataset=dataset, as_of=as_of, symbols=requested))
+    raw = provider.fetch(
+        FetchRequest(dataset=dataset, as_of=as_of, symbols=requested),
+        prior_landed=prior_landed,
+    )
     payload = raw.payload
     if raw.status is not DataStatus.VALUE or payload is None or not payload.rows:
         return _Landed(
@@ -639,6 +659,8 @@ def _land_dataset(
             rows_written=written,
             rows_total=total,
             symbols_skipped=skipped,
+            symbols_missing=raw.missing_symbols,
+            note=raw.message,
         ),
         payload=payload,
     )

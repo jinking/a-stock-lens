@@ -37,6 +37,14 @@ def test_akshare_provider_satisfies_the_provider_contract() -> None:
     assert provider is not None
 
 
+def test_westock_bars_provider_satisfies_the_provider_contract() -> None:
+    from astock_lens.data.providers.westock_bars import WestockBarsProvider
+
+    provider: DataProvider = WestockBarsProvider()
+
+    assert provider is not None
+
+
 def test_snapshot_store_contract_is_stable() -> None:
     assert {"write", "read"} <= set(SnapshotStore.__dict__)
 

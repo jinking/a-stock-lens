@@ -135,11 +135,23 @@ class DataProvider(Protocol):
         """Report availability and freshness without fetching data."""
         ...
 
-    def fetch(self, request: FetchRequest) -> RawDataset:
+    def fetch(
+        self,
+        request: FetchRequest,
+        *,
+        prior_landed: int = 0,
+    ) -> RawDataset:
         """Fetch raw data for one request.
 
         Missing values must be returned as missing. A provider never
         substitutes a fabricated or zero value.
+
+        `prior_landed` is the count of symbols the caller has already
+        persisted at the disk level for `request.as_of`. Providers that
+        emit per-symbol progress callbacks should add it so the bar
+        reports cumulative progress over the full listing instead of the
+        residual fetch subset. Providers that do not emit progress
+        callbacks may ignore it.
         """
         ...
 

@@ -67,7 +67,13 @@ class StubProvider:
             checked_at=datetime(2026, 9, 4, 15, 5, tzinfo=UTC),
         )
 
-    def fetch(self, request: FetchRequest) -> RawDataset:
+    def fetch(
+        self,
+        request: FetchRequest,
+        *,
+        prior_landed: int = 0,
+    ) -> RawDataset:
+        del prior_landed  # stub does not emit progress
         self.requests.append(request)
         if request.dataset == "securities":
             return self._dataset(
@@ -115,7 +121,13 @@ class StubFinancialProvider:
             message=None if self._healthy else "binary missing",
         )
 
-    def fetch(self, request: FetchRequest) -> RawDataset:
+    def fetch(
+        self,
+        request: FetchRequest,
+        *,
+        prior_landed: int = 0,
+    ) -> RawDataset:
+        del prior_landed  # stub does not emit progress
         self.requests.append(request)
         symbols: Sequence[str] = request.symbols or ()
         rows = tuple(
@@ -577,7 +589,13 @@ class ListingProvider(StubProvider):
         self.symbols = tuple(f"{index:06d}.SZ" for index in range(count))
         self.symbol_requests: list[str] = []
 
-    def fetch(self, request: FetchRequest) -> RawDataset:
+    def fetch(
+        self,
+        request: FetchRequest,
+        *,
+        prior_landed: int = 0,
+    ) -> RawDataset:
+        del prior_landed  # stub does not emit progress
         if request.dataset != "securities":
             return super().fetch(request)
         self.requests.append(request)
@@ -766,7 +784,13 @@ def test_sync_financials_needs_a_symbol_list(
     import astock_lens.cli.app as cli_module
 
     class NoListingProvider(StubProvider):
-        def fetch(self, request: FetchRequest) -> RawDataset:
+        def fetch(
+            self,
+            request: FetchRequest,
+            *,
+            prior_landed: int = 0,
+        ) -> RawDataset:
+            del prior_landed  # stub does not emit progress
             self.requests.append(request)
             return RawDataset(
                 provider="stub",
@@ -846,7 +870,13 @@ def test_sync_lands_valuation_for_the_named_symbols(
                 checked_at=datetime(2026, 9, 4, 15, 5, tzinfo=UTC),
             )
 
-        def fetch(self, request: FetchRequest) -> RawDataset:
+        def fetch(
+            self,
+            request: FetchRequest,
+            *,
+            prior_landed: int = 0,
+        ) -> RawDataset:
+            del prior_landed  # stub does not emit progress
             rows = (
                 (
                     "统一估值查询",
@@ -977,7 +1007,7 @@ def test_doctor_reports_the_provider_it_would_use_for_bulk_data() -> None:
     result = CliRunner().invoke(app, ["doctor"])
 
     assert result.exit_code == 0, result.output
-    assert "akshare" in result.stdout.lower()
+    assert "westock" in result.stdout.lower()
 
 
 def test_doctor_reports_the_financial_statement_provider(

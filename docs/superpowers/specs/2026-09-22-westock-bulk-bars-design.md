@@ -1,7 +1,7 @@
 # Westock 替换 AkShare 当 bulk daily bars — 设计规格
 
 **Date:** 2026-09-22  
-**Status:** 设计草案，待金总评审  
+**Status:** 已按授权实施；本规格同步记录修订后的数据契约。  
 **Path:** Provider 层增量（架构边界内）
 
 > 把 `astock daily --sync` 单日跑 1.5 小时缩短到 3–5 分钟，**不引入新数据源依赖**（westock 是已装的 CLI，listing 复用本地快照）。本规格新增一个 Provider、改一个工厂函数，不删 AkShare。
@@ -71,7 +71,7 @@
 | `close` | 9.04 | 9.04 (`last`) | 9.04 (`price`) | **quote.price** |
 | `volume` | **53266700** | **532667** | 532667 | **kline.volume × 100**（westock 单位是"手"=100 股）|
 | `amount` | **480795700** | 480800000 | **480795737** | **quote.amount**（kline 有 ~5000 元取整误差）|
-| `turnover_rate` | 0.0016 (=0.16%) | 0.16 | 0.16 | **quote.turnover_rate**（已是 % 单位）|
+| `turnover_rate` | 0.0016 (=0.16%) | 0.16 | 0.16 | **quote.turnover_rate × 0.01**（源是 %，Raw 保持小数比例）|
 
 **关键陷阱**：
 
@@ -108,7 +108,7 @@ class WestockBarsProvider:
     listing 不在本 Provider 范围——复用本地 data/raw/securities.csv。
     """
 
-    BATCH_SIZE = 200        # 实测 250 稳态，留 25% 余量
+    BATCH_SIZE = 100        # 按所有者要求每 100 只回显一次进度
     DEFAULT_TIMEOUT = 30.0  # 与 WestockCliProvider 一致
 
     def __init__(self, *, binary=None, batch_size=BATCH_SIZE,
@@ -120,7 +120,7 @@ class WestockBarsProvider:
         按 code join，输出 BAR_EMIT_COLUMNS。
         """
         # 1. 校验 request.symbols 非空
-        # 2. 切批（BATCH_SIZE = 200）
+        # 2. 切批（BATCH_SIZE = 100）
         # 3. 逐批调 kline + quote，捕获 _SourceError
         # 4. 按 code 内 join
         # 5. 应用列映射 + 单位换算（volume × 100）
@@ -188,17 +188,13 @@ def _bulk_provider() -> DataProvider:
 
 ### 4.3 listing 复用
 
-`data/raw/securities.csv`（已有 5568 行）即全市场 listing 缓存。`_land_securities_listing` 行为不变（仍调 `_bulk_provider().fetch(FetchRequest(dataset='securities', ...))`），但**新默认 Provider 不支持 securities 数据集**。
-
-**方案**：在 WestockBarsProvider.fetch 内部对 `request.dataset == 'securities'` 显式 raise `NotImplementedError`，让上层 `_land_securities_listing` 走 listing 缓存路径（`_csv_root() / "securities.csv"`）。
-
-> 待 §6 实施计划中确认：listing 实际数据流是否真的走 WestockBarsProvider.fetch('securities')？还是走 LocalCsvProvider 直读 raw 缓存？需先读 `_land_listing` 源码。
+`astock daily --sync` 有本地 `securities.csv` 时通过 `LocalCsvProvider` 读取名单，不重复调用 AkShare；冷启动缺少名单时由 AkShare 获取。显式 `astock sync` 与 `sync-bootstrap` 仍刷新名单，使用 `_listing_provider()`：WeStock 行情 Provider 配 AkShare，测试或显式 AkShare Provider 保持同一 Provider。`WestockBarsProvider` 不接收 `securities` 数据集。
 
 ## 5. 测试策略（TDD 强制）
 
 ### 5.0 Test Delta Budget
 
-本切片先盘点并复用现有 Provider 契约测试，再决定新增测试。默认预算为：新增 0、删除 0、净变化 0；只有现有测试无法表达 WeStock 特有行为时才增加用例，并在实施计划和工作记忆中说明原因。优先参数化既有 Provider 契约测试，不为相同的 RawDataset 通用契约复制一套测试。
+本切片复用既有 RawDataset 契约，并为批量双命令、数据单位/日期校验、错误状态、默认 Provider 路由及 listing 分流新增聚焦测试；这些行为不能由现有 AkShare 测试表达。
 
 新测试仅保留以下 WeStock 特有行为：成交量乘以 100、quote 优先于 kline、缺失标的语义，以及尚未被现有测试覆盖的 Provider 选择行为。
 
@@ -212,7 +208,7 @@ def _bulk_provider() -> DataProvider:
 | `test_volume_unit_conversion` | westock 532667 → emit 53266700 |
 | `test_amount_prefers_quote_over_kline` | emit 用 quote.amount（480795737），不用 kline 取整值（480800000）|
 | `test_close_prefers_quote_price` | emit 用 quote.price（9.04），不用 kline.last |
-| `test_turnover_rate_unit` | emit 0.2（已是 %），不是 0.002 |
+| `test_turnover_rate_unit` | WeStock 0.2% → emit 0.002（既有 Raw 小数比例契约）|
 | `test_invalid_codes_report_missing` | fixture `sh999999` 上报 `missing_symbols=['sh999999']`，不补 0 |
 | `test_partial_response_reports_missing` | partial + missing_symbols |
 | `test_rate_limited_returns_source_error` | 不写 0 行 |
@@ -247,43 +243,32 @@ def _bulk_provider() -> DataProvider:
 - `kline_mixed_valid_invalid_2026-09-22.md`
 - `connect_exchange_sh_sz.md`（listing 替代源证据）
 
-## 6. 待澄清事项
+## 6. 实施结论与边界
 
-下列点需在 §7 实施计划前再查一次源码确认：
+- listing 流程已按 §4.3 分离；WeStock Provider 复用既有 Markdown 表解析器。
+- AkShare 的日线请求 `adjust=""` 是不复权，因此 WeStock 明确使用 `--fq nofq`；使用 `qfq` 会改变下游历史价格语义。
+- WeStock 换手率是百分数，输出 Raw 必须乘 `0.01`；成交量以“手”计，输出 Raw 乘 `100` 转成股。
+- quote 必须返回目标交易日，缺失/日期不符不落行。停牌或无 quote 的标的按缺失报告，不造零值；当前接口没有足够证据区分停牌与源端漏数。
+- 实测只完成三只标的真实 WeStock 冒烟，未完成 50 只 AkShare 对照。两种 CLI 最终都访问腾讯接口，不能把对照描述成独立供应商验证；全市场延迟提升尚未实测。
+- 全市场运行实测：200 只首批成功后，紧接着的 kline 批次返回 `LOCAL_RATE_LIMITED`。冷却后单独请求 200 只可成功。Provider 遇到该状态会停止后续批次并保留所有缺失标的；Raw 落库与 CLI 必须将部分覆盖标成未完成，不能报告完整成功。具体安全请求间隔待源端证据确认，不臆定速率。
+- CLI 每完成一批输出已处理/总数、成功、缺失和待处理数；批次大小 100 只，限流批次同样显式显示。
 
-1. **`_land_securities_listing` 真实数据流**：是 `_bulk_provider().fetch('securities')` 还是直接读本地 csv？这决定了 WestockBarsProvider 是否需要支持 securities 数据集。
-2. **westock kline/quote 的 markdown 解析**：现有 `WestockCliProvider` 用 `parse_tables(completed.stdout)` 解析 markdown 表格，新 Provider 复用同一解析器还是另写？
-3. **kline 的 `last` 字段是否一定是 `close`**？fixture 中三只都是 `last == quote.price`，但这是巧合还是契约？需 spot check 更多 fixture。
-4. **停牌股 quote 返回全 0 的处理** —— 是否要按 `SOURCE_ERROR` 还是 `NULL`？fixture `quote_bj920566` 是正常交易的，没覆盖停牌 case。
+## 7. 实施记录
 
-## 7. 实施计划（待 superpowers 第 3 步生成）
+工作已按测试先行完成：
 
-工作将拆为以下任务（每个 2–5 分钟）：
-
-1. 开 worktree + 跑测试基线（10 min）
-2. RED：写 `test_westock_bars.py` 单元测试 9 个，全部 fail
-3. GREEN：`WestockBarsProvider` 最小实现让单元测试全绿
-4. RED：写 `test_westock_bars_contract.py` 契约测试
-5. GREEN：实现 CLI 工厂切换 + 列映射常量 + `_invoke` subprocess
-6. 端到端冒烟：50 只标的 vs AkShare
-7. AGENTS.md 边界自检（架构边界、6 种状态、时区、禁止静默兜底）
-8. 收尾：跑 `ruff check` + `mypy` + `pytest` 全绿
-9. 工作记忆 + skill 更新
-
-**总工程量：~4.5 h**（详见 §7 实施计划文档，金总拍板后再写）
+新增 Provider、默认工厂与 listing 分流均有测试；全量 pytest、ruff、格式、mypy 均通过。
 
 ## 8. 验收标准（Definition of Done）
 
-- [ ] `WestockBarsProvider` 实现；新增测试数量符合 Test Delta Budget，且先复用/参数化既有契约测试
-- [ ] 复用后的契约测试全绿；仅 WeStock 特有行为保留新增测试
-- [ ] `_bulk_provider()` 默认 westock，`ASTOCK_BULK_PROVIDER=akshare` 回退可用
-- [ ] 端到端冒烟：westock 50 只 vs AkShare 50 只，row_count 一致（≤ 5% 误差）
-- [ ] AkShareProvider **完全不动**（仍作 fallback）
-- [ ] 工作记忆更新（决策、字段映射、未解决问题）
-- [ ] fixture 6 份覆盖关键场景
-- [ ] `uv run ruff check .` 通过
-- [ ] `uv run mypy` 通过
-- [ ] `uv run pytest tests/contract/ tests/unit/` 全绿
+- [x] `WestockBarsProvider` 实现，复用 RawDataset 契约并测试 WeStock 特有行为
+- [x] `_bulk_provider()` 默认 WeStock，`ASTOCK_BULK_PROVIDER=akshare` 显式回退
+- [ ] 真实三标的 WeStock 冒烟通过；50 只 AkShare 对照未完成
+- [x] AkShareProvider **未修改**，保留名单/历史补抓/显式回退
+- [x] 工作记忆与数据单位决策已记录
+- [x] fixture 与单位/错误状态测试覆盖关键场景
+- [x] `uv run ruff check .`、格式、`uv run mypy` 通过
+- [x] 全量 `uv run pytest -q`：1274 passed
 
 ## 9. 架构边界自检
 
@@ -317,5 +302,5 @@ def _bulk_provider() -> DataProvider:
 - 实测 spike：`.workbuddy/memory/2026-09-22.md`（2026-09-22 当日）
 - Fixture：`tests/fixtures/westock/*.md`（已固化）
 - 现有 westock Provider：`src/astock_lens/data/providers/westock.py`（WestockCliProvider，财务三表）
-- 现有 AkShare Provider：`src/astock_lens/data/providers/akshare_provider.py`（待替换）
+- 现有 AkShare Provider：`src/astock_lens/data/providers/akshare_provider.py`（保留）
 - CLI 工厂：`src/astock_lens/cli/runtime.py`（`_bulk_provider`；`app.py` 只负责 CLI 组装）

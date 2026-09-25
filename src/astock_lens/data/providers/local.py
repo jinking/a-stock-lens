@@ -62,8 +62,18 @@ class LocalCsvProvider:
             checked_at=checked_at,
         )
 
-    def fetch(self, request: FetchRequest) -> RawDataset:
-        """Read one dataset, applying only the filters the caller asked for."""
+    def fetch(
+        self,
+        request: FetchRequest,
+        *,
+        prior_landed: int = 0,
+    ) -> RawDataset:
+        """Read one dataset, applying only the filters the caller asked for.
+
+        `prior_landed` is accepted for protocol compatibility; the local
+        reader does not emit progress callbacks, so the value is unused.
+        """
+        del prior_landed  # unused: local reader does not report progress
         fetched_at = datetime.now(UTC)
         path = self._root / f"{request.dataset}.csv"
 

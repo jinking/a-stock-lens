@@ -140,8 +140,8 @@ a-stock-lens/
 ```text
 Bulk / Screening                Research Enhancement
 ----------------                --------------------
-AkShare（名单、日线）             a-share-deep-research
-腾讯 WeStock CLI（三大表）         ├─ westock-npm
+腾讯 WeStock CLI（日线批量、三大表） a-share-deep-research
+AkShare（名单、显式日线回退）        ├─ westock-npm
 neodata（估值 / 行业 / 语义）      └─ westock-cli
 交易所公开数据
 免费备用源
