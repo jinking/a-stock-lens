@@ -144,35 +144,62 @@ def test_the_implemented_stages_succeed_and_count_their_rows(local_tmp: Path) ->
     assert by_stage[JobStage.RUN_STRATEGIES].rows_in == 6
 
 
+# 「BUILD_CANDIDATES 被阻断」两行：行序与原用例一致，label 兼作运行根目录名，
+# 行与行不共享现场（原用例各自拿一份新的 `local_tmp`）。
+# 列 = label, qualifiers, expected_errors, no_candidates：
+#   - `layers-missing` 是原
+#     test_the_candidate_stage_is_blocked_while_its_layers_are_missing：
+#     两层齐缺（资格规则与候选政策都没装配），两条 error 文案都要点名，
+#     且没有任何候选被写出来冒充完整结果；
+#   - `policy-deferred` 是原 test_the_blocked_candidate_stage_names_the_deferred_policy：
+#     生产资格规则已装配、只有候选政策 Deferred；该行原本只断言阻断与文案，
+#     所以 `no_candidates` 为 False，不额外加强。
+BLOCKED_CANDIDATE_CASES = (
+    # 原 docstring：未配置资格门槛与候选政策时，BUILD_CANDIDATES 安全阻断。
+    (
+        "layers-missing",
+        None,
+        (
+            "strategy qualification rules are not configured",
+            "candidate qualification policy is Deferred",
+        ),
+        True,
+    ),
+    # 原 docstring：入选规则未批准时，阶段必须点名 Deferred，而不是退回某个默认规则。
+    (
+        "policy-deferred",
+        _DEFAULT_QUALIFIERS,
+        ("candidate qualification policy is Deferred",),
+        False,
+    ),
+)
+
+
 def test_the_candidate_stage_is_blocked_while_its_layers_are_missing(
     local_tmp: Path,
 ) -> None:
-    """未配置资格门槛与候选政策时，BUILD_CANDIDATES 安全阻断。"""
-    result = _run(local_tmp, qualifiers=None)
+    """未配置资格门槛与候选政策时，BUILD_CANDIDATES 安全阻断。
 
-    run = next(
-        item for item in result.runs if item.job_type is JobStage.BUILD_CANDIDATES
-    )
-    assert run.status is JobStatus.BLOCKED
-    assert run.error is not None
-    assert "strategy qualification rules are not configured" in run.error
-    assert "candidate qualification policy is Deferred" in run.error
-    # 没有任何候选被写出来冒充完整结果。
-    assert result.candidates == ()
-
-
-def test_the_blocked_candidate_stage_names_the_deferred_policy(
-    local_tmp: Path,
-) -> None:
-    """入选规则未批准时，阶段必须点名 Deferred，而不是退回某个默认规则。"""
-    result = _run(local_tmp)
-
-    run = next(
-        item for item in result.runs if item.job_type is JobStage.BUILD_CANDIDATES
-    )
-    assert run.status is JobStatus.BLOCKED
-    assert run.error is not None
-    assert "candidate qualification policy is Deferred" in run.error
+    原 2 条阻断用例逐条成行；循环只收集，断言在表外一次完成，
+    失败消息点名行 label 与该行的实际值。
+    """
+    wrong = []
+    for label, qualifiers, expected_errors, no_candidates in BLOCKED_CANDIDATE_CASES:
+        result = _run(local_tmp / label, qualifiers=qualifiers)
+        run = next(
+            item for item in result.runs if item.job_type is JobStage.BUILD_CANDIDATES
+        )
+        if run.status is not JobStatus.BLOCKED:
+            wrong.append(f"{label}: status 为 {run.status}，期望 BLOCKED")
+        if run.error is None:
+            wrong.append(f"{label}: run.error 为 None")
+        else:
+            for expected in expected_errors:
+                if expected not in run.error:
+                    wrong.append(f"{label}: error={run.error!r} 不含 {expected!r}")
+        if no_candidates and result.candidates != ():
+            wrong.append(f"{label}: candidates={result.candidates!r}，期望 ()")
+    assert not wrong, "BUILD_CANDIDATES 未被安全阻断:\n" + "\n".join(wrong)
 
 
 def test_the_blocked_stages_name_the_decision_they_wait_for(local_tmp: Path) -> None:

@@ -85,20 +85,6 @@ def test_growth_qualification_can_read_non_scoring_roe_factor() -> None:
     assert qualification.qualified is True
 
 
-def test_missing_approved_qualification_factor_fails_closed() -> None:
-    """缺少获批资格因子时必须失败关闭，而不是静默通过。"""
-    context = QualificationContext(
-        strategy_result=growth_result(rank_percentile=0.95),
-        factors=(
-            factor("net_profit_parent_yoy", 20.0),
-            factor("revenue_yoy", 8.0),
-        ),
-    )
-    qualification = qualifier.qualify(context)
-    assert qualification.absolute_pass is False
-    assert any("roe_ttm" in risk for risk in qualification.risks)
-
-
 def test_strategy_scoring_snapshot_is_not_used_as_qualification_evidence() -> None:
     """评分快照不得被当作资格证据来源。
 

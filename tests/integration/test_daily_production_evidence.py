@@ -239,74 +239,17 @@ def test_step3_insufficient_59_benchmark_bars_regime_fails_closed(
     assert not (tmp_path / "snapshots" / "CANDIDATE" / "2026-09-04.json").exists()
 
 
-def test_step4_qualified_symbol_missing_industry_evidence_fails_closed(
-    tmp_path: Path,
-) -> None:
-    """Step 4: 达标标的缺失申万行业证据时，MARKET_VALIDATE 必须严格阻断 fail-closed。"""
-    factor_configs = tuple(
-        load_factor_config(path)
-        for path in sorted((CONFIGS / "factors").glob("*.yaml"))
-    )
-    factor_names = frozenset(c.name for c in factor_configs)
-    qualifiers = load_canonical_qualifiers(known_factor_names=factor_names)
-    policy = RepresentativeCandidatePolicy(
-        version="v1", soft_reserve_per_strategy=3, max_candidates=50
-    )
-
-    store = JsonSnapshotStore(tmp_path / "snapshots")
-    job_store = JsonJobStore(tmp_path / "jobs")
-
-    bars_70 = _benchmark_bars_tuple(count=70)
-    # 构造缺失 300750.SZ（达标标的）的行业映射表
+def _missing_industry_evidence_case(root: Path) -> tuple[Path, dict[str, str]]:
+    """缺失 300750.SZ（达标标的）的行业映射表；CSV 仍用共享夹具目录，与原来一致。"""
     incomplete_industry_map = {
         k: v for k, v in ALL_INDUSTRY_MAP.items() if k != "300750.SZ"
     }
-
-    result = run_daily(
-        csv_root=FIXTURE_CSV,
-        as_of=AS_OF,
-        universe_config=load_universe_config(CONFIGS / "universe.yaml"),
-        factor_configs=factor_configs,
-        scanners=load_scanners(CONFIGS / "strategies"),
-        strategy_directory=CONFIGS / "strategies",
-        store=store,
-        job_store=job_store,
-        dataset="daily_bars_long",
-        qualifiers=qualifiers,
-        candidate_policy=policy,
-        benchmark_id=BENCHMARK_ID,
-        benchmark_bars=bars_70,
-        industry_by_symbol=incomplete_industry_map,
-    )
-
-    runs_by_type = {run.job_type: run for run in result.runs}
-    assert runs_by_type[JobStage.DETECT_REGIME].status == JobStatus.SUCCEEDED
-    assert runs_by_type[JobStage.MARKET_VALIDATE].status == JobStatus.FAILED
-    assert "300750.SZ missing required 5D evidence: industry_excess_return_20d" in str(
-        runs_by_type[JobStage.MARKET_VALIDATE].error
-    )
-
-    # 下游阶段终止，未产生候选集与快照
-    assert JobStage.BUILD_CANDIDATES not in runs_by_type
-    assert len(result.candidates) == 0
-    assert not (tmp_path / "snapshots" / "CANDIDATE" / "2026-09-04.json").exists()
+    return FIXTURE_CSV, incomplete_industry_map
 
 
-def test_step5_qualified_symbol_insufficient_volume_bars_fails_closed(
-    tmp_path: Path,
-) -> None:
-    """Step 5: 达标标的有效果量不足 20 根 bar 时，MARKET_VALIDATE 必须严格阻断 fail-closed。"""
-    factor_configs = tuple(
-        load_factor_config(path)
-        for path in sorted((CONFIGS / "factors").glob("*.yaml"))
-    )
-    factor_names = frozenset(c.name for c in factor_configs)
-    qualifiers = load_canonical_qualifiers(known_factor_names=factor_names)
-    policy = RepresentativeCandidatePolicy(
-        version="v1", soft_reserve_per_strategy=3, max_candidates=50
-    )
-
-    csv_root = tmp_path / "csv"
+def _insufficient_volume_bars_case(root: Path) -> tuple[Path, dict[str, str]]:
+    """把 300750.SZ 的历史成交量置零，只留最后 19 根（有效量 bar < 20）。"""
+    csv_root = root / "csv"
     csv_root.mkdir(parents=True, exist_ok=True)
     shutil.copy(FIXTURE_CSV / "securities.csv", csv_root / "securities.csv")
 
@@ -326,36 +269,97 @@ def test_step5_qualified_symbol_insufficient_volume_bars_fails_closed(
         writer.writeheader()
         writer.writerows(rows)
 
-    store = JsonSnapshotStore(tmp_path / "snapshots")
-    job_store = JsonJobStore(tmp_path / "jobs")
+    return csv_root, ALL_INDUSTRY_MAP
+
+
+# 「MARKET_VALIDATE 对已资格标的 fail-closed」两行：行序与原用例一致，
+# label 兼作该行的运行根目录名，行与行不共享现场（原用例各自拿一份新的 `tmp_path`）。
+# 列 = label, prepare, expected_evidence：
+#   - `missing-industry-evidence` 是原
+#     test_step4_qualified_symbol_missing_industry_evidence_fails_closed
+#     （Step 4，docstring：达标标的缺失申万行业证据时，MARKET_VALIDATE 必须严格阻断 fail-closed。）；
+#   - `insufficient-volume-bars` 是原
+#     test_step5_qualified_symbol_insufficient_volume_bars_fails_closed
+#     （Step 5，docstring：达标标的有效果量不足 20 根 bar 时，MARKET_VALIDATE 必须严格阻断 fail-closed。）。
+# 两行的 run_daily 公共参数一致；step5 原本显式写的
+# `securities_dataset="securities"` 就是 step4 走的默认值，故在公共调用里显式写出。
+MARKET_VALIDATE_FAIL_CLOSED_CASES = (
+    (
+        "missing-industry-evidence",
+        _missing_industry_evidence_case,
+        "300750.SZ missing required 5D evidence: industry_excess_return_20d",
+    ),
+    (
+        "insufficient-volume-bars",
+        _insufficient_volume_bars_case,
+        "300750.SZ missing required 5D evidence: volume_ratio_5_20",
+    ),
+)
+
+
+def test_step4_qualified_symbol_missing_industry_evidence_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """Step 4 / Step 5: 达标标的缺证据时，MARKET_VALIDATE 必须严格阻断 fail-closed。
+
+    原 step4 / step5 两条 fail-closed 用例逐条成行（同一规则的两个缺失维度：
+    行业证据 / 有效量）；循环只收集，断言在表外一次完成，失败消息点名行 label。
+    """
+    factor_configs = tuple(
+        load_factor_config(path)
+        for path in sorted((CONFIGS / "factors").glob("*.yaml"))
+    )
+    factor_names = frozenset(c.name for c in factor_configs)
+    qualifiers = load_canonical_qualifiers(known_factor_names=factor_names)
+    policy = RepresentativeCandidatePolicy(
+        version="v1", soft_reserve_per_strategy=3, max_candidates=50
+    )
     bars_70 = _benchmark_bars_tuple(count=70)
 
-    result = run_daily(
-        csv_root=csv_root,
-        as_of=AS_OF,
-        universe_config=load_universe_config(CONFIGS / "universe.yaml"),
-        factor_configs=factor_configs,
-        scanners=load_scanners(CONFIGS / "strategies"),
-        strategy_directory=CONFIGS / "strategies",
-        store=store,
-        job_store=job_store,
-        dataset="daily_bars_long",
-        securities_dataset="securities",
-        qualifiers=qualifiers,
-        candidate_policy=policy,
-        benchmark_id=BENCHMARK_ID,
-        benchmark_bars=bars_70,
-        industry_by_symbol=ALL_INDUSTRY_MAP,
-    )
+    wrong = []
+    for label, prepare, expected_evidence in MARKET_VALIDATE_FAIL_CLOSED_CASES:
+        case_root = tmp_path / label
+        csv_root, industry_by_symbol = prepare(case_root)
 
-    runs_by_type = {run.job_type: run for run in result.runs}
-    assert runs_by_type[JobStage.DETECT_REGIME].status == JobStatus.SUCCEEDED
-    assert runs_by_type[JobStage.MARKET_VALIDATE].status == JobStatus.FAILED
-    assert "300750.SZ missing required 5D evidence: volume_ratio_5_20" in str(
-        runs_by_type[JobStage.MARKET_VALIDATE].error
-    )
+        result = run_daily(
+            csv_root=csv_root,
+            as_of=AS_OF,
+            universe_config=load_universe_config(CONFIGS / "universe.yaml"),
+            factor_configs=factor_configs,
+            scanners=load_scanners(CONFIGS / "strategies"),
+            strategy_directory=CONFIGS / "strategies",
+            store=JsonSnapshotStore(case_root / "snapshots"),
+            job_store=JsonJobStore(case_root / "jobs"),
+            dataset="daily_bars_long",
+            securities_dataset="securities",
+            qualifiers=qualifiers,
+            candidate_policy=policy,
+            benchmark_id=BENCHMARK_ID,
+            benchmark_bars=bars_70,
+            industry_by_symbol=industry_by_symbol,
+        )
 
-    # 下游阶段终止，未产生候选集与快照
-    assert JobStage.BUILD_CANDIDATES not in runs_by_type
-    assert len(result.candidates) == 0
-    assert not (tmp_path / "snapshots" / "CANDIDATE" / "2026-09-04.json").exists()
+        runs_by_type = {run.job_type: run for run in result.runs}
+        regime = runs_by_type[JobStage.DETECT_REGIME]
+        if regime.status != JobStatus.SUCCEEDED:
+            wrong.append(
+                f"{label}: DETECT_REGIME status 为 {regime.status}，期望 SUCCEEDED"
+            )
+        validate = runs_by_type[JobStage.MARKET_VALIDATE]
+        if validate.status != JobStatus.FAILED:
+            wrong.append(
+                f"{label}: MARKET_VALIDATE status 为 {validate.status}，期望 FAILED"
+            )
+        if expected_evidence not in str(validate.error):
+            wrong.append(
+                f"{label}: error={str(validate.error)!r} 不含 {expected_evidence!r}"
+            )
+        # 下游阶段终止，未产生候选集与快照
+        if JobStage.BUILD_CANDIDATES in runs_by_type:
+            wrong.append(f"{label}: 下游 BUILD_CANDIDATES 不得运行")
+        if len(result.candidates) != 0:
+            wrong.append(f"{label}: candidates 有 {len(result.candidates)} 条，期望 0")
+        candidate_snapshot = case_root / "snapshots" / "CANDIDATE" / "2026-09-04.json"
+        if candidate_snapshot.exists():
+            wrong.append(f"{label}: 候选快照不得产出 {candidate_snapshot}")
+    assert not wrong, "MARKET_VALIDATE 未 fail-closed:\n" + "\n".join(wrong)

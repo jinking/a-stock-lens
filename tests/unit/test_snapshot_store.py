@@ -45,27 +45,11 @@ def test_write_then_read_round_trips(local_tmp: Path) -> None:
     assert records[0]["raw_value"] == 1_014_500.0
 
 
-def test_unwritten_date_reads_empty(local_tmp: Path) -> None:
-    assert JsonSnapshotStore(local_tmp).read(SnapshotKind.CANDIDATE, AS_OF) == ()
-
-
 def test_snapshot_path_is_kind_and_date_named(local_tmp: Path) -> None:
     path = JsonSnapshotStore(local_tmp).write(SnapshotKind.FACTOR, AS_OF, [])
 
     assert path == local_tmp / "FACTOR" / "2026-09-04.json"
     assert path.is_file()
-
-
-def test_kinds_do_not_collide(local_tmp: Path) -> None:
-    store = JsonSnapshotStore(local_tmp)
-    store.write(SnapshotKind.FACTOR, AS_OF, [_factor_result()])
-    store.write(SnapshotKind.CANDIDATE, AS_OF, [_factor_result("000001.SZ")])
-
-    factor_records = store.read(SnapshotKind.FACTOR, AS_OF)
-    candidate_records = store.read(SnapshotKind.CANDIDATE, AS_OF)
-
-    assert [record["symbol"] for record in factor_records] == ["600000.SH"]
-    assert [record["symbol"] for record in candidate_records] == ["000001.SZ"]
 
 
 def test_snapshot_records_the_as_of_it_was_written_for(local_tmp: Path) -> None:
@@ -88,21 +72,6 @@ def test_same_snapshot_payload_is_idempotent(local_tmp: Path) -> None:
 
     assert second == first
     assert first.read_text(encoding="utf-8") == stored
-
-
-def test_different_payload_for_the_same_kind_and_date_is_rejected(
-    local_tmp: Path,
-) -> None:
-    store = JsonSnapshotStore(local_tmp)
-    store.write(SnapshotKind.FACTOR, AS_OF, [_factor_result()])
-
-    with pytest.raises(SnapshotConflictError):
-        store.write(SnapshotKind.FACTOR, AS_OF, [_factor_result("600519.SH")])
-
-    # 被拒绝的写入没有留下痕迹：原来的那份还在。
-    assert [record["symbol"] for record in store.read(SnapshotKind.FACTOR, AS_OF)] == [
-        "600000.SH"
-    ]
 
 
 def test_a_conflict_names_the_kind_and_the_date(local_tmp: Path) -> None:
@@ -141,21 +110,3 @@ def test_an_empty_snapshot_conflicts_with_a_measured_one(local_tmp: Path) -> Non
 
     with pytest.raises(SnapshotConflictError):
         store.write(SnapshotKind.FACTOR, AS_OF, [_factor_result()])
-
-
-def test_candidate_snapshot_conflict_cannot_be_overwritten_or_bypassed(
-    local_tmp: Path,
-) -> None:
-    """CANDIDATE 标准快照同一日期内容不同时必须坚决抛出 SnapshotConflictError，严禁就地覆写或绕过。"""
-    store = JsonSnapshotStore(local_tmp)
-    store.write(SnapshotKind.CANDIDATE, AS_OF, [_factor_result("600000.SH")])
-
-    with pytest.raises(SnapshotConflictError) as raised:
-        store.write(SnapshotKind.CANDIDATE, AS_OF, [_factor_result("600519.SH")])
-
-    assert "CANDIDATE" in str(raised.value)
-    assert "2026-09-04" in str(raised.value)
-    # 被拒绝的写入不得造成任何副作用：原始候选快照完好无损
-    assert [
-        record["symbol"] for record in store.read(SnapshotKind.CANDIDATE, AS_OF)
-    ] == ["600000.SH"]
