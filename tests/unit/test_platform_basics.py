@@ -45,40 +45,74 @@ def test_package_imports() -> None:
 #
 
 
-def test_regular_weekday_is_trade_date() -> None:
+# 逐日判定六行：行序与原用例一致，label 即原测试名，逐日注释逐字保留。
+# 列 = label, day, expected；比对方式与原断言同为 `is`。
+TRADE_DATE_CASES: tuple[tuple[str, date, bool], ...] = (
+    # test_regular_weekday_is_trade_date:
+    #   2026-09-18 是周五，正常交易日
+    ("test_regular_weekday_is_trade_date", date(2026, 9, 18), True),
+    # test_weekend_is_not_trade_date:
+    #   2026-09-19 是周六，2026-09-20 是周日
+    ("test_weekend_is_not_trade_date", date(2026, 9, 19), False),
+    ("test_weekend_is_not_trade_date", date(2026, 9, 20), False),
+    # test_statutory_holiday_is_not_trade_date:
+    #   2026-01-01 元旦，周四，休市
+    ("test_statutory_holiday_is_not_trade_date", date(2026, 1, 1), False),
+    #   2026-05-01 劳动节，周五，休市
+    ("test_statutory_holiday_is_not_trade_date", date(2026, 5, 1), False),
+    #   2026-10-01 国庆节，周四，休市
+    ("test_statutory_holiday_is_not_trade_date", date(2026, 10, 1), False),
+)
+
+
+def test_is_trade_date_matches_every_documented_day() -> None:
+    """原 3 条逐日判定用例收表：交易日 / 周末 / 法定假日共 6 日逐日断言。"""
     calendar = ChinaTradingCalendar()
-    # 2026-09-18 是周五，正常交易日
-    assert calendar.is_trade_date(date(2026, 9, 18)) is True
+    wrong = []
+    for label, day, expected in TRADE_DATE_CASES:
+        actual = calendar.is_trade_date(day)
+        if actual is not expected:
+            wrong.append(
+                f"{label}: {day.isoformat()} 得到 {actual!r}，期望 {expected!r}"
+            )
+    assert not wrong, "交易日判定与文档不符:\n" + "\n".join(wrong)
 
 
-def test_weekend_is_not_trade_date() -> None:
+# 最近交易日三行：行序与原用例一致，label 即原测试名；比对方式与原断言同为 `==`。
+LATEST_TRADE_DATE_CASES: tuple[tuple[str, date, date], ...] = (
+    # test_latest_trade_date_on_trade_date_returns_self:
+    #   2026-09-18 是周五，返回自身。
+    (
+        "test_latest_trade_date_on_trade_date_returns_self",
+        date(2026, 9, 18),
+        date(2026, 9, 18),
+    ),
+    # test_latest_trade_date_on_weekend_returns_previous_friday:
+    #   周六、周日都回退到同一个周五。
+    (
+        "test_latest_trade_date_on_weekend_returns_previous_friday",
+        date(2026, 9, 19),
+        date(2026, 9, 18),
+    ),
+    (
+        "test_latest_trade_date_on_weekend_returns_previous_friday",
+        date(2026, 9, 20),
+        date(2026, 9, 18),
+    ),
+)
+
+
+def test_latest_trade_date_matches_every_documented_day() -> None:
+    """原 2 条「最近交易日」用例收表：交易日返回自身，周末回退到前一个周五。"""
     calendar = ChinaTradingCalendar()
-    # 2026-09-19 是周六，2026-09-20 是周日
-    assert calendar.is_trade_date(date(2026, 9, 19)) is False
-    assert calendar.is_trade_date(date(2026, 9, 20)) is False
-
-
-def test_statutory_holiday_is_not_trade_date() -> None:
-    calendar = ChinaTradingCalendar()
-    # 2026-01-01 元旦，周四，休市
-    assert calendar.is_trade_date(date(2026, 1, 1)) is False
-    # 2026-05-01 劳动节，周五，休市
-    assert calendar.is_trade_date(date(2026, 5, 1)) is False
-    # 2026-10-01 国庆节，周四，休市
-    assert calendar.is_trade_date(date(2026, 10, 1)) is False
-
-
-def test_latest_trade_date_on_trade_date_returns_self() -> None:
-    calendar = ChinaTradingCalendar()
-    d = date(2026, 9, 18)
-    assert calendar.get_latest_trade_date(d) == d
-
-
-def test_latest_trade_date_on_weekend_returns_previous_friday() -> None:
-    calendar = ChinaTradingCalendar()
-    friday = date(2026, 9, 18)
-    assert calendar.get_latest_trade_date(date(2026, 9, 19)) == friday
-    assert calendar.get_latest_trade_date(date(2026, 9, 20)) == friday
+    wrong = []
+    for label, day, expected in LATEST_TRADE_DATE_CASES:
+        actual = calendar.get_latest_trade_date(day)
+        if actual != expected:
+            wrong.append(
+                f"{label}: {day.isoformat()} 得到 {actual!r}，期望 {expected!r}"
+            )
+    assert not wrong, "最近交易日与文档不符:\n" + "\n".join(wrong)
 
 
 def test_custom_dates_override() -> None:
