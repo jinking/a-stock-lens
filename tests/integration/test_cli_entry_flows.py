@@ -23,7 +23,7 @@ import csv
 import hashlib
 import json
 import shutil
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -405,42 +405,68 @@ def _flat(output: str) -> str:
     return " ".join(strip_ansi(output).split())
 
 
-def test_a_mapping_date_without_a_timezone_is_refused(local_tmp: Path) -> None:
-    """裸时间不是事实：没有时区的映射日期被拒绝。"""
-    csv_root = local_tmp / "csv"
-    csv_root.mkdir()
-    surviving = _write_fixture(csv_root)
+def _external_map_with_bare_date(
+    local_tmp: Path, csv_root: Path, surviving: tuple[str, ...]
+) -> tuple[str, ...]:
+    """裸时间不是事实：外部映射就位，但声明的时间没有时区。"""
     industry_map = _write_external(local_tmp / "industry.csv", surviving)
-
-    result = _run(
-        local_tmp,
-        csv_root,
+    return (
         "--industry-map",
         str(industry_map),
         "--industry-map-as-of",
         "2026-09-16T15:00:00",
     )
 
-    assert result.exit_code == 2  # Click 的用法错误码：拒绝就是拒绝
-    assert "timezone" in _flat(result.output)
 
-
-def test_a_mapping_date_without_an_external_map_is_refused(local_tmp: Path) -> None:
+def _declared_date_without_external_map(
+    local_tmp: Path, csv_root: Path, surviving: tuple[str, ...]
+) -> tuple[str, ...]:
     """映射日期描述的是一份外部映射；没有那份映射时它无话可说。"""
-    csv_root = local_tmp / "csv"
-    csv_root.mkdir()
-    surviving = _write_fixture(csv_root)
     _write_canonical(csv_root, surviving)
+    return ("--industry-map-as-of", MEMBERSHIP_AS_OF)
 
-    result = _run(
-        local_tmp,
-        csv_root,
-        "--industry-map-as-of",
-        MEMBERSHIP_AS_OF,
-    )
 
-    assert result.exit_code == 2
-    assert "--industry-map" in _flat(result.output)
+# 两行是「不可用的映射日期声明必须以 Click 用法错误拒绝」同一断言的参数枚举。
+MAPPING_DATE_USAGE_ERROR_CASES: tuple[
+    tuple[str, Callable[[Path, Path, tuple[str, ...]], tuple[str, ...]], str], ...
+] = (
+    (
+        "test_a_mapping_date_without_a_timezone_is_refused",
+        _external_map_with_bare_date,
+        "timezone",
+    ),
+    (
+        "test_a_mapping_date_without_an_external_map_is_refused",
+        _declared_date_without_external_map,
+        "--industry-map",
+    ),
+)
+
+
+def test_unusable_mapping_date_declarations_are_refused(local_tmp: Path) -> None:
+    wrong = []
+    for label, prepare_args, expected_fragment in MAPPING_DATE_USAGE_ERROR_CASES:
+        case_root = local_tmp / label
+        case_root.mkdir()
+        csv_root = case_root / "csv"
+        csv_root.mkdir()
+        surviving = _write_fixture(csv_root)
+        extra = prepare_args(case_root, csv_root, surviving)
+
+        result = _run(case_root, csv_root, *extra)
+
+        if result.exit_code != 2:
+            wrong.append(
+                f"{label}: 期望 Click 用法错误码 2，实际 {result.exit_code}；"
+                f"输出 {result.output!r}"
+            )
+            continue
+        if expected_fragment not in _flat(result.output):
+            wrong.append(
+                f"{label}: 输出缺少 {expected_fragment!r}；"
+                f"实际 {_flat(result.output)!r}"
+            )
+    assert not wrong, "映射日期用法错误未被拒绝:\n" + "\n".join(wrong)
 
 
 # ===========================================================================
@@ -580,29 +606,7 @@ def test_calibrate_candidates_generates_reports_without_production_mutation(
     assert job_sentinel.read_text(encoding="utf-8") == "job untouched"
 
 
-def test_calibrate_candidates_fails_on_missing_industry_file(tmp_path: Path) -> None:
-    runner = CliRunner()
-    result = runner.invoke(
-        app,
-        [
-            "calibrate",
-            "candidates",
-            "--as-of",
-            DAY,
-            "--industry-map",
-            str(tmp_path / "nonexistent.csv"),
-            "--output-dir",
-            str(tmp_path / "out"),
-        ],
-        env={"ASTOCK_CSV_ROOT": str(CSV_ROOT)},
-    )
-    assert result.exit_code != 0
-    assert "not found" in result.output.lower()
-
-
-def test_calibrate_candidates_fails_on_duplicate_symbol_in_industry_csv(
-    tmp_path: Path,
-) -> None:
+def _duplicate_symbol_industry_csv(tmp_path: Path) -> Path:
     industry_csv = tmp_path / "duplicate_industry.csv"
     _write_industry_csv(
         industry_csv,
@@ -611,49 +615,71 @@ def test_calibrate_candidates_fails_on_duplicate_symbol_in_industry_csv(
             ("600000.SH", "非银金融"),
         ],
     )
-
-    runner = CliRunner()
-    result = runner.invoke(
-        app,
-        [
-            "calibrate",
-            "candidates",
-            "--as-of",
-            DAY,
-            "--industry-map",
-            str(industry_csv),
-            "--output-dir",
-            str(tmp_path / "out"),
-        ],
-        env={"ASTOCK_CSV_ROOT": str(CSV_ROOT)},
-    )
-    assert result.exit_code != 0
-    assert "duplicate symbol" in result.output.lower()
+    return industry_csv
 
 
-def test_calibrate_candidates_fails_on_missing_header_in_industry_csv(
-    tmp_path: Path,
-) -> None:
+def _missing_header_industry_csv(tmp_path: Path) -> Path:
     industry_csv = tmp_path / "bad_header.csv"
     industry_csv.write_text("code,sector\n600000.SH,银行\n", encoding="utf-8")
+    return industry_csv
 
-    runner = CliRunner()
-    result = runner.invoke(
-        app,
-        [
-            "calibrate",
-            "candidates",
-            "--as-of",
-            DAY,
-            "--industry-map",
-            str(industry_csv),
-            "--output-dir",
-            str(tmp_path / "out"),
-        ],
-        env={"ASTOCK_CSV_ROOT": str(CSV_ROOT)},
-    )
-    assert result.exit_code != 0
-    assert "columns" in result.output.lower()
+
+# 三行是「坏行业映射必须响亮失败」同一断言的参数枚举；行 label 为原用例名。
+CALIBRATION_INDUSTRY_ERROR_CASES: tuple[
+    tuple[str, Callable[[Path], Path], str], ...
+] = (
+    (
+        "test_calibrate_candidates_fails_on_missing_industry_file",
+        lambda tmp_path: tmp_path / "nonexistent.csv",
+        "not found",
+    ),
+    (
+        "test_calibrate_candidates_fails_on_duplicate_symbol_in_industry_csv",
+        _duplicate_symbol_industry_csv,
+        "duplicate symbol",
+    ),
+    (
+        "test_calibrate_candidates_fails_on_missing_header_in_industry_csv",
+        _missing_header_industry_csv,
+        "columns",
+    ),
+)
+
+
+def test_calibrate_candidates_fails_loudly_on_bad_industry_maps(tmp_path: Path) -> None:
+    wrong = []
+    for (
+        label,
+        prepare_industry_map,
+        expected_message,
+    ) in CALIBRATION_INDUSTRY_ERROR_CASES:
+        case_root = tmp_path / label
+        case_root.mkdir()
+        industry_csv = prepare_industry_map(case_root)
+        result = CliRunner().invoke(
+            app,
+            [
+                "calibrate",
+                "candidates",
+                "--as-of",
+                DAY,
+                "--industry-map",
+                str(industry_csv),
+                "--output-dir",
+                str(case_root / "out"),
+            ],
+            env={"ASTOCK_CSV_ROOT": str(CSV_ROOT)},
+        )
+        if result.exit_code == 0:
+            wrong.append(
+                f"{label}: 期望非零退出，实际 exit_code=0；输出 {result.output!r}"
+            )
+            continue
+        if expected_message not in result.output.lower():
+            wrong.append(
+                f"{label}: 输出缺少 {expected_message!r}；实际 {result.output!r}"
+            )
+    assert not wrong, "坏行业映射未按预期失败:\n" + "\n".join(wrong)
 
 
 def test_calibrate_candidates_canonical_merges_supplement(tmp_path: Path) -> None:
@@ -1891,35 +1917,7 @@ def test_qualified_top_limit_truncates_items_not_coverage(tmp_path: Path) -> Non
     assert "qualified: 2" in out
 
 
-def test_qualified_missing_factor_snapshot(tmp_path: Path) -> None:
-    """Step 2: 缺 FACTOR 快照 → 非零退出 + 规范提示。"""
-    snapshot_root = tmp_path / "snapshots"
-    watchlist_root = tmp_path / "watchlist"
-    job_root = tmp_path / "jobs"
-    qualification_dir = _qualification_dir(tmp_path)
-
-    result = _qualified_cli_invoke(
-        snapshot_root,
-        watchlist_root,
-        job_root,
-        qualification_dir,
-        "qualified",
-        "growth",
-        "--as-of",
-        QUALIFIED_CLI_DAY,
-    )
-
-    assert result.exit_code != 0
-    assert f"no FACTOR snapshot for {QUALIFIED_CLI_DAY}" in strip_ansi(result.output)
-
-
-def test_qualified_missing_strategy_snapshot(tmp_path: Path) -> None:
-    """Step 3: 缺 STRATEGY 快照 → 非零退出 + 规范提示。"""
-    snapshot_root = tmp_path / "snapshots"
-    watchlist_root = tmp_path / "watchlist"
-    job_root = tmp_path / "jobs"
-    qualification_dir = _qualification_dir(tmp_path)
-
+def _seed_factor_snapshot_only(snapshot_root: Path) -> None:
     store = JsonSnapshotStore(snapshot_root)
     store.write(
         SnapshotKind.FACTOR,
@@ -1927,29 +1925,61 @@ def test_qualified_missing_strategy_snapshot(tmp_path: Path) -> None:
         (_qualified_cli_factor("600000.SH", "roe_ttm", 9.0),),
     )
 
-    result = _qualified_cli_invoke(
-        snapshot_root,
-        watchlist_root,
-        job_root,
-        qualification_dir,
-        "qualified",
-        "growth",
-        "--as-of",
-        QUALIFIED_CLI_DAY,
-    )
 
-    assert result.exit_code != 0
-    assert f"no STRATEGY snapshot for {QUALIFIED_CLI_DAY}" in strip_ansi(result.output)
+# 两行是「所需快照缺失必须响亮失败」同一断言的参数枚举（缺 FACTOR / 缺 STRATEGY）。
+QUALIFIED_MISSING_SNAPSHOT_CASES: tuple[
+    tuple[str, Callable[[Path], None], str], ...
+] = (
+    (
+        "test_qualified_missing_factor_snapshot",
+        lambda snapshot_root: None,
+        "FACTOR",
+    ),
+    (
+        "test_qualified_missing_strategy_snapshot",
+        _seed_factor_snapshot_only,
+        "STRATEGY",
+    ),
+)
 
 
-def test_qualified_invalid_config_fails_closed(tmp_path: Path) -> None:
-    """Step 4: 非法资格配置必须报错退出，绝不打印零结果正常屏。"""
-    snapshot_root = tmp_path / "snapshots"
-    watchlist_root = tmp_path / "watchlist"
-    job_root = tmp_path / "jobs"
-    qualification_dir = _qualification_dir(tmp_path)
-    _seed_growth_snapshots(snapshot_root)
+def test_qualified_missing_snapshot_fails_loudly(tmp_path: Path) -> None:
+    wrong = []
+    for label, seed_snapshots, missing_kind in QUALIFIED_MISSING_SNAPSHOT_CASES:
+        case_root = tmp_path / label
+        case_root.mkdir()
+        snapshot_root = case_root / "snapshots"
+        watchlist_root = case_root / "watchlist"
+        job_root = case_root / "jobs"
+        qualification_dir = _qualification_dir(case_root)
+        seed_snapshots(snapshot_root)
 
+        result = _qualified_cli_invoke(
+            snapshot_root,
+            watchlist_root,
+            job_root,
+            qualification_dir,
+            "qualified",
+            "growth",
+            "--as-of",
+            QUALIFIED_CLI_DAY,
+        )
+
+        if result.exit_code == 0:
+            wrong.append(
+                f"{label}: 期望非零退出，实际 exit_code=0；输出 {result.output!r}"
+            )
+            continue
+        expected_message = f"no {missing_kind} snapshot for {QUALIFIED_CLI_DAY}"
+        if expected_message not in strip_ansi(result.output):
+            wrong.append(
+                f"{label}: 输出缺少 {expected_message!r}；"
+                f"实际 {strip_ansi(result.output)!r}"
+            )
+    assert not wrong, "所需快照缺失未按预期失败:\n" + "\n".join(wrong)
+
+
+def _write_unapproved_growth_rule(qualification_dir: Path) -> None:
     # 未批准的因子名 → load_canonical_qualifiers 抛 QualificationConfigInvalid
     (qualification_dir / "growth.yaml").write_text(
         "strategy_id: growth\n"
@@ -1960,51 +1990,69 @@ def test_qualified_invalid_config_fails_closed(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    result = _qualified_cli_invoke(
-        snapshot_root,
-        watchlist_root,
-        job_root,
-        qualification_dir,
-        "qualified",
+
+# 两行是「请求无法被兑现时必须显式报错、绝不降级为正常屏」同一断言的参数枚举：
+# 非法资格配置 fail-closed / 未批准策略显式 not-found。
+QUALIFIED_UNHONORABLE_REQUEST_CASES: tuple[
+    tuple[str, Callable[[Path], None], str, tuple[str, ...]], ...
+] = (
+    (
+        "test_qualified_invalid_config_fails_closed",
+        _write_unapproved_growth_rule,
         "growth",
-        "--as-of",
-        QUALIFIED_CLI_DAY,
-    )
-
-    assert result.exit_code != 0
-    out = strip_ansi(result.output)
-    assert "qualification configuration is invalid" in out
-    assert "not_an_approved_factor" in out
-    # 绝不降级为正常的零合格屏
-    assert "qualified:" not in out
-    assert "showing:" not in out
-
-
-def test_qualified_unknown_strategy_fails_loudly(tmp_path: Path) -> None:
-    """请求的策略不在已批准 qualifiers 中：显式 not-found，不打印正常表格。"""
-    snapshot_root = tmp_path / "snapshots"
-    watchlist_root = tmp_path / "watchlist"
-    job_root = tmp_path / "jobs"
-    qualification_dir = _qualification_dir(tmp_path)
-    _seed_growth_snapshots(snapshot_root)
-
-    result = _qualified_cli_invoke(
-        snapshot_root,
-        watchlist_root,
-        job_root,
-        qualification_dir,
-        "qualified",
+        ("qualification configuration is invalid", "not_an_approved_factor"),
+    ),
+    (
+        "test_qualified_unknown_strategy_fails_loudly",
+        lambda qualification_dir: None,
         "foo",
-        "--as-of",
-        QUALIFIED_CLI_DAY,
-    )
+        ("foo", "no approved qualification rule"),
+    ),
+)
 
-    assert result.exit_code != 0
-    out = strip_ansi(result.output)
-    assert "foo" in out
-    assert "no approved qualification rule" in out
-    assert "qualified:" not in out
-    assert "showing:" not in out
+
+def test_qualified_unhonorable_requests_fail_loudly(tmp_path: Path) -> None:
+    wrong = []
+    for (
+        label,
+        prepare_qualification_dir,
+        strategy,
+        expected_fragments,
+    ) in QUALIFIED_UNHONORABLE_REQUEST_CASES:
+        case_root = tmp_path / label
+        case_root.mkdir()
+        snapshot_root = case_root / "snapshots"
+        watchlist_root = case_root / "watchlist"
+        job_root = case_root / "jobs"
+        qualification_dir = _qualification_dir(case_root)
+        _seed_growth_snapshots(snapshot_root)
+        prepare_qualification_dir(qualification_dir)
+
+        result = _qualified_cli_invoke(
+            snapshot_root,
+            watchlist_root,
+            job_root,
+            qualification_dir,
+            "qualified",
+            strategy,
+            "--as-of",
+            QUALIFIED_CLI_DAY,
+        )
+
+        if result.exit_code == 0:
+            wrong.append(
+                f"{label}: 期望非零退出，实际 exit_code=0；输出 {result.output!r}"
+            )
+            continue
+        out = strip_ansi(result.output)
+        for fragment in expected_fragments:
+            if fragment not in out:
+                wrong.append(f"{label}: 输出缺少 {fragment!r}；实际 {out!r}")
+        # 绝不降级为正常的零合格屏
+        for forbidden in ("qualified:", "showing:"):
+            if forbidden in out:
+                wrong.append(f"{label}: 不应出现 {forbidden!r}；实际 {out!r}")
+    assert not wrong, "无法兑现的请求未按预期失败:\n" + "\n".join(wrong)
 
 
 def test_qualified_dividend_zero_result_warns(tmp_path: Path) -> None:
@@ -2237,36 +2285,7 @@ def test_screen_mixed_strategy_snapshot_top_limit(tmp_path: Path) -> None:
     assert "300750.SZ" not in result.stdout
 
 
-def test_screen_missing_snapshot(tmp_path: Path) -> None:
-    """Step 2: 快照不存在时输出规范提示并返回非零。"""
-    snapshot_root = tmp_path / "snapshots"
-    watchlist_root = tmp_path / "watchlist"
-    job_root = tmp_path / "jobs"
-
-    result = _screen_cli_invoke(
-        snapshot_root,
-        watchlist_root,
-        job_root,
-        "screen",
-        "growth",
-        "--as-of",
-        SCREEN_CLI_DAY,
-    )
-
-    assert result.exit_code != 0
-    expected_message = (
-        f"no STRATEGY snapshot for {SCREEN_CLI_DAY}\n"
-        f"run `astock daily --as-of {SCREEN_CLI_DAY} --allow-incomplete` first"
-    )
-    assert expected_message in result.output
-
-
-def test_screen_unknown_strategy(tmp_path: Path) -> None:
-    """Step 3: 快照存在但没有所请求的策略结果时报错并退出。"""
-    snapshot_root = tmp_path / "snapshots"
-    watchlist_root = tmp_path / "watchlist"
-    job_root = tmp_path / "jobs"
-
+def _seed_growth_strategy_snapshot(snapshot_root: Path) -> None:
     store = JsonSnapshotStore(snapshot_root)
     store.write(
         SnapshotKind.STRATEGY,
@@ -2278,18 +2297,65 @@ def test_screen_unknown_strategy(tmp_path: Path) -> None:
         ],
     )
 
-    result = _screen_cli_invoke(
-        snapshot_root,
-        watchlist_root,
-        job_root,
-        "screen",
-        "foo",
-        "--as-of",
-        SCREEN_CLI_DAY,
-    )
 
-    assert result.exit_code != 0
-    assert f"strategy 'foo' has no stored results for {SCREEN_CLI_DAY}" in result.output
+# 两行是「screen 无法诚实出表时必须响亮失败」同一断言的参数枚举：
+# 缺 STRATEGY 快照 / 快照里没有所请求的策略。
+SCREEN_UNSERVICEABLE_REQUEST_CASES: tuple[
+    tuple[str, Callable[[Path], None], str, str], ...
+] = (
+    (
+        "test_screen_missing_snapshot",
+        lambda snapshot_root: None,
+        "growth",
+        (
+            f"no STRATEGY snapshot for {SCREEN_CLI_DAY}\n"
+            f"run `astock daily --as-of {SCREEN_CLI_DAY} --allow-incomplete` first"
+        ),
+    ),
+    (
+        "test_screen_unknown_strategy",
+        _seed_growth_strategy_snapshot,
+        "foo",
+        f"strategy 'foo' has no stored results for {SCREEN_CLI_DAY}",
+    ),
+)
+
+
+def test_screen_unserviceable_requests_fail_loudly(tmp_path: Path) -> None:
+    wrong = []
+    for (
+        label,
+        seed_snapshots,
+        strategy,
+        expected_message,
+    ) in SCREEN_UNSERVICEABLE_REQUEST_CASES:
+        case_root = tmp_path / label
+        case_root.mkdir()
+        snapshot_root = case_root / "snapshots"
+        watchlist_root = case_root / "watchlist"
+        job_root = case_root / "jobs"
+        seed_snapshots(snapshot_root)
+
+        result = _screen_cli_invoke(
+            snapshot_root,
+            watchlist_root,
+            job_root,
+            "screen",
+            strategy,
+            "--as-of",
+            SCREEN_CLI_DAY,
+        )
+
+        if result.exit_code == 0:
+            wrong.append(
+                f"{label}: 期望非零退出，实际 exit_code=0；输出 {result.output!r}"
+            )
+            continue
+        if expected_message not in result.output:
+            wrong.append(
+                f"{label}: 输出缺少 {expected_message!r}；实际 {result.output!r}"
+            )
+    assert not wrong, "screen 无法服侍的请求未按预期失败:\n" + "\n".join(wrong)
 
 
 def test_screen_low_coverage_warning(tmp_path: Path) -> None:
