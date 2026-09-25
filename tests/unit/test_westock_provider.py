@@ -95,16 +95,22 @@ def _provider(
     return WestockCliProvider(binary, runner=runner, **kwargs)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("dataset", DATASETS)
-def test_every_recorded_statement_parses_into_one_table(dataset: str) -> None:
-    tables = parse_tables(_recorded(dataset))
-
-    assert len(tables) == 1
-    columns = tables[0].columns
-    assert "EndDate" in columns
-    assert "InfoPublDate" in columns
-    assert "code" in columns
-    assert len(tables[0].rows) == 24  # three symbols, eight periods
+def test_every_recorded_statement_parses_into_one_table() -> None:
+    wrong = []
+    for dataset in DATASETS:
+        tables = parse_tables(_recorded(dataset))
+        if len(tables) != 1:
+            wrong.append(f"{dataset}: 解析出 {len(tables)} 张表")
+            continue
+        columns = tables[0].columns
+        missing = [
+            name for name in ("EndDate", "InfoPublDate", "code") if name not in columns
+        ]
+        if missing or len(tables[0].rows) != 24:
+            wrong.append(
+                f"{dataset}: 缺列={missing} 行数={len(tables[0].rows)}（期望 24）"
+            )
+    assert not wrong, "每份录制报表应解析成一张表:\n" + "\n".join(wrong)
 
 
 def test_fetch_returns_the_recorded_cells_verbatim() -> None:
@@ -137,20 +143,19 @@ def test_the_publication_field_is_always_requested() -> None:
     assert argv[argv.index("--limit") + 1] == "8"
 
 
-@pytest.mark.parametrize(
-    ("dataset", "statement"),
-    (
+def test_each_dataset_maps_to_its_statement() -> None:
+    wrong = []
+    for dataset, statement in (
         ("financial_income", "income"),
         ("financial_balance", "balance"),
         ("financial_cashflow", "cashflow"),
-    ),
-)
-def test_each_dataset_maps_to_its_statement(dataset: str, statement: str) -> None:
-    runner = ReplayRunner(_recorded(dataset))
-
-    _provider(runner).fetch(_request(dataset))
-
-    assert runner.argv[0][runner.argv[0].index("--type") + 1] == statement
+    ):
+        runner = ReplayRunner(_recorded(dataset))
+        _provider(runner).fetch(_request(dataset))
+        actual = runner.argv[0][runner.argv[0].index("--type") + 1]
+        if actual != statement:
+            wrong.append(f"{dataset}: --type={actual!r}（期望 {statement!r}）")
+    assert not wrong, "每份数据集应映射到自己的报表类型:\n" + "\n".join(wrong)
 
 
 def test_symbols_the_source_did_not_return_are_named() -> None:

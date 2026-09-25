@@ -21,6 +21,14 @@ from astock_lens.strategies.eligibility import EligibilityScanner
 AS_OF = datetime(2026, 9, 4, 15, 0, tzinfo=UTC)
 SYMBOL = "600519.SH"
 
+NON_VALUE_STATUSES = (
+    DataStatus.NULL,
+    DataStatus.STALE,
+    DataStatus.INVALID,
+    DataStatus.SOURCE_ERROR,
+    DataStatus.NOT_APPLICABLE,
+)
+
 
 def _config(**overrides: object) -> StrategyConfig:
     payload: dict[str, object] = {
@@ -91,28 +99,24 @@ def test_a_missing_factor_makes_the_symbol_ineligible_and_says_which() -> None:
     assert "gross_margin was not computed for this symbol" in result.risks
 
 
-@pytest.mark.parametrize(
-    "status",
-    [
-        DataStatus.NULL,
-        DataStatus.STALE,
-        DataStatus.INVALID,
-        DataStatus.SOURCE_ERROR,
-        DataStatus.NOT_APPLICABLE,
-    ],
-)
-def test_any_status_other_than_value_is_not_eligible(status: DataStatus) -> None:
-    """The six states stay distinguishable; none of them counts as evidence."""
-    scanner = EligibilityScanner(_config())
-    context = _context(
-        _factor("roe_ttm", DataStatus.VALUE),
-        _factor("gross_margin", status, value=None),
-    )
-
-    result = scanner.score(context)
-
-    assert result.eligible is False
-    assert f"gross_margin is {status}, not VALUE" in result.risks
+def test_any_status_other_than_value_is_not_eligible() -> None:
+    """六个状态保持可区分；除 VALUE 外都不算证据。"""
+    wrong = []
+    for status in NON_VALUE_STATUSES:
+        scanner = EligibilityScanner(_config())
+        context = _context(
+            _factor("roe_ttm", DataStatus.VALUE),
+            _factor("gross_margin", status, value=None),
+        )
+        result = scanner.score(context)
+        if (
+            result.eligible is not False
+            or f"gross_margin is {status}, not VALUE" not in result.risks
+        ):
+            wrong.append(
+                f"{status}: eligible={result.eligible!r} risks={result.risks!r}"
+            )
+    assert not wrong, "非 VALUE 状态不应算证据:\n" + "\n".join(wrong)
 
 
 def test_a_population_gets_one_verdict_each_and_no_ranking() -> None:
