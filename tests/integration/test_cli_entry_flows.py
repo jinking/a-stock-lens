@@ -408,7 +408,7 @@ def _flat(output: str) -> str:
 def _external_map_with_bare_date(
     local_tmp: Path, csv_root: Path, surviving: tuple[str, ...]
 ) -> tuple[str, ...]:
-    """裸时间不是事实：外部映射就位，但声明的时间没有时区。"""
+    """裸时间不是事实：没有时区的映射日期被拒绝。"""
     industry_map = _write_external(local_tmp / "industry.csv", surviving)
     return (
         "--industry-map",
