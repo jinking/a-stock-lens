@@ -83,72 +83,106 @@ def test_a_clean_manifest_produces_no_findings() -> None:
     assert validate_job_manifest(_manifest(), as_of=AS_OF) == ()
 
 
-def test_an_empty_manifest_is_a_finding() -> None:
-    assert "manifest_stages" in _checks(validate_job_manifest([], as_of=AS_OF))
-
-
-def test_a_stage_with_no_recorded_run_is_reported() -> None:
-    records = [item for item in _manifest() if item["job_type"] != "RUN_SIGNALS"]
-
-    findings = validate_job_manifest(records, as_of=AS_OF)
-
-    assert "manifest_stages" in _checks(findings)
-    assert any("RUN_SIGNALS" in finding.observed for finding in findings)
-
-
-def test_a_duplicated_verdict_is_reported() -> None:
-    findings = validate_job_manifest([*_manifest(), _record("NORMALIZE")], as_of=AS_OF)
-
-    assert "duplicate_stage" in _checks(findings)
-
-
-def test_a_blocked_stage_without_a_reason_is_reported() -> None:
-    findings = validate_job_manifest(
-        _manifest("DETECT_REGIME", error=None), as_of=AS_OF
-    )
-
-    assert "job_status" in _checks(findings)
-
-
-def test_a_successful_stage_carrying_an_error_is_reported() -> None:
-    findings = validate_job_manifest(_manifest(error="leftover"), as_of=AS_OF)
-
-    assert "job_status" in _checks(findings)
-
-
-def test_a_terminal_stage_without_a_finish_time_is_reported() -> None:
-    findings = validate_job_manifest(_manifest(finished_at=None), as_of=AS_OF)
-
-    assert "job_status" in _checks(findings)
-
-
-def test_a_finish_before_the_start_is_reported() -> None:
-    """A job may finish after `as_of` — that is when the pipeline runs. What
-    cannot happen is finishing before it started."""
-    findings = validate_job_manifest(
+# 「清单里的坏记录必须报出 finding」九行：行序与原用例一致，label 即原测试名；
+# 原 docstring 逐字保留为行注释，没有 docstring 的成员不写。
+# 列 = label, records, expected_codes, observed_fragments：
+#   - `records` 逐行保留原载荷（`_manifest(...)` 覆写、拼接与空清单）；
+#   - `expected_codes` 对应原 `assert "<code>" in _checks(findings)`；
+#   - `observed_fragments` 对应原 `any("<片段>" in finding.observed ...)`，
+#     空元组表示该成员原本没有这条断言。
+MANIFEST_FINDING_CASES = (
+    # test_an_empty_manifest_is_a_finding
+    (
+        "test_an_empty_manifest_is_a_finding",
+        [],
+        ("manifest_stages",),
+        (),
+    ),
+    # test_a_stage_with_no_recorded_run_is_reported
+    (
+        "test_a_stage_with_no_recorded_run_is_reported",
+        [item for item in _manifest() if item["job_type"] != "RUN_SIGNALS"],
+        ("manifest_stages",),
+        ("RUN_SIGNALS",),
+    ),
+    # test_a_duplicated_verdict_is_reported
+    (
+        "test_a_duplicated_verdict_is_reported",
+        [*_manifest(), _record("NORMALIZE")],
+        ("duplicate_stage",),
+        (),
+    ),
+    # test_a_blocked_stage_without_a_reason_is_reported
+    (
+        "test_a_blocked_stage_without_a_reason_is_reported",
+        _manifest("DETECT_REGIME", error=None),
+        ("job_status",),
+        (),
+    ),
+    # test_a_successful_stage_carrying_an_error_is_reported
+    (
+        "test_a_successful_stage_carrying_an_error_is_reported",
+        _manifest(error="leftover"),
+        ("job_status",),
+        (),
+    ),
+    # test_a_terminal_stage_without_a_finish_time_is_reported
+    (
+        "test_a_terminal_stage_without_a_finish_time_is_reported",
+        _manifest(finished_at=None),
+        ("job_status",),
+        (),
+    ),
+    # test_a_finish_before_the_start_is_reported
+    #   A job may finish after `as_of` — that is when the pipeline runs. What
+    #   cannot happen is finishing before it started.
+    (
+        "test_a_finish_before_the_start_is_reported",
         _manifest(
             finished_at=AS_OF.isoformat(), started_at="2026-09-04T16:00:00+00:00"
         ),
-        as_of=AS_OF,
-    )
+        ("timestamp",),
+        (),
+    ),
+    # test_a_stage_outside_the_design_is_reported
+    #   原用例先绑定 invented = _record("NORMALIZE") | {"job_type": "INVENT_SOMETHING"}，
+    #   此处按同一表达式内联。
+    (
+        "test_a_stage_outside_the_design_is_reported",
+        [*_manifest(), _record("NORMALIZE") | {"job_type": "INVENT_SOMETHING"}],
+        ("known_stage",),
+        (),
+    ),
+    # test_a_manifest_for_another_date_is_reported
+    (
+        "test_a_manifest_for_another_date_is_reported",
+        _manifest(as_of="2026-09-05T15:00:00+00:00"),
+        ("timestamp",),
+        (),
+    ),
+)
 
-    assert "timestamp" in _checks(findings)
 
+def test_every_broken_manifest_reports_its_finding() -> None:
+    """九份坏清单各自报出自己的 finding：期望代码在，observed 点名关键对象。
 
-def test_a_stage_outside_the_design_is_reported() -> None:
-    invented = _record("NORMALIZE") | {"job_type": "INVENT_SOMETHING"}
-
-    findings = validate_job_manifest([*_manifest(), invented], as_of=AS_OF)
-
-    assert "known_stage" in _checks(findings)
-
-
-def test_a_manifest_for_another_date_is_reported() -> None:
-    findings = validate_job_manifest(
-        _manifest(as_of="2026-09-05T15:00:00+00:00"), as_of=AS_OF
-    )
-
-    assert "timestamp" in _checks(findings)
+    原 9 条「X is reported / is a finding」用例逐条成行；循环只收集，
+    断言在表外一次完成，失败消息点名行 label（即原测试名）。
+    """
+    wrong = []
+    for label, records, expected_codes, observed_fragments in MANIFEST_FINDING_CASES:
+        findings = validate_job_manifest(records, as_of=AS_OF)
+        codes = _checks(findings)
+        for code in expected_codes:
+            if code not in codes:
+                wrong.append(f"{label}: 期望 {code}，实际 {sorted(codes)}")
+        for fragment in observed_fragments:
+            if not any(fragment in finding.observed for finding in findings):
+                wrong.append(
+                    f"{label}: observed 未点名 {fragment!r}，"
+                    f"实际 {[finding.observed for finding in findings]}"
+                )
+    assert not wrong, "清单校验未报出预期 finding:\n" + "\n".join(wrong)
 
 
 def test_the_manifest_a_daily_run_writes_validates_cleanly(local_tmp: Path) -> None:

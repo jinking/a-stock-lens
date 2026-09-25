@@ -109,18 +109,234 @@ def _checks(findings: tuple[ArtifactFinding, ...]) -> list[str]:
     return [finding.check for finding in findings]
 
 
-def test_a_missing_required_key_is_reported() -> None:
-    findings = validate_snapshot("FACTOR", [{"symbol": "600000.SH"}], as_of=AS_OF)
+def _a_cited_factor_version_that_was_not_stored() -> tuple[ArtifactFinding, ...]:
+    """`SNAPSHOT_FINDING_CASES` 第 15 行的 payload：因子存的是 v1、被引的是 v2。
 
-    assert "required_keys" in _checks(findings)
+    原用例 `test_a_candidate_citing_a_factor_version_that_was_not_stored_is_a_finding`
+    的就地构造逐字承载；`_strategy_record_for` / `_candidate_for_set` 定义在下方，
+    调用发生在测试运行时。
+    """
+    stored = _factor_record()
+    stored["factor"] = "ret_20d"
+    stored["factor_version"] = "v1"
+    cited = _strategy_record_for("600000.SH")
+    cited["factor_snapshot"][0]["factor_version"] = "v2"  # type: ignore[index]
+    candidate = _candidate_for_set("600000.SH")
+    candidate["strategy_results"] = [cited]
 
-
-def test_an_out_of_range_score_is_reported() -> None:
-    findings = validate_snapshot(
-        "STRATEGY", [_strategy_record(score=150.0)], as_of=AS_OF
+    return validate_snapshot_set(
+        factor_records=[stored],
+        strategy_records=[cited],
+        candidate_records=[candidate],
+        as_of=AS_OF,
     )
 
-    assert "score_range" in _checks(findings)
+
+# 「坏快照必须报出 finding」十五行：行序与原用例一致，label 即原测试名；
+# 原 docstring 逐字保留为行注释，没有 docstring 的成员不写。
+# 列 = label, run, expected_codes, observed_fragments：
+#   - `run` 是零参可调用，逐行保留原调用（入口、kind、payload 与关键字参数），
+#     第 10、15 行的就地构造由命名函数承载，其余行直接写在行里；
+#   - `expected_codes` 对应原 `assert "<code>" in _checks(findings)`；
+#   - `observed_fragments` 对应原 `any("<片段>" in finding.observed ...)`，
+#     空元组表示该成员原本没有这条断言。
+SNAPSHOT_FINDING_CASES = (
+    # test_a_missing_required_key_is_reported
+    (
+        "test_a_missing_required_key_is_reported",
+        lambda: validate_snapshot("FACTOR", [{"symbol": "600000.SH"}], as_of=AS_OF),
+        ("required_keys",),
+        (),
+    ),
+    # test_an_out_of_range_score_is_reported
+    (
+        "test_an_out_of_range_score_is_reported",
+        lambda: validate_snapshot(
+            "STRATEGY", [_strategy_record(score=150.0)], as_of=AS_OF
+        ),
+        ("score_range",),
+        (),
+    ),
+    # test_an_out_of_range_rank_percentile_is_reported
+    (
+        "test_an_out_of_range_rank_percentile_is_reported",
+        lambda: validate_snapshot(
+            "STRATEGY", [_strategy_record(rank_percentile=1.5)], as_of=AS_OF
+        ),
+        ("rank_percentile_range",),
+        (),
+    ),
+    # test_an_unknown_factor_name_is_reported
+    (
+        "test_an_unknown_factor_name_is_reported",
+        lambda: validate_snapshot(
+            "FACTOR",
+            [_factor_record(factor="made_up")],
+            as_of=AS_OF,
+            known_factor_names=KNOWN_FACTORS,
+        ),
+        ("unknown_factor",),
+        (),
+    ),
+    # test_an_unknown_strategy_id_is_reported
+    (
+        "test_an_unknown_strategy_id_is_reported",
+        lambda: validate_snapshot(
+            "STRATEGY",
+            [_strategy_record(strategy_id="moonshot")],
+            as_of=AS_OF,
+            known_strategy_ids={"momentum"},
+        ),
+        ("unknown_strategy",),
+        (),
+    ),
+    # test_an_empty_version_is_reported
+    (
+        "test_an_empty_version_is_reported",
+        lambda: validate_snapshot(
+            "FACTOR",
+            [_factor_record(lineage={"factor_version": ""})],
+            as_of=AS_OF,
+        ),
+        ("empty_version",),
+        (),
+    ),
+    # test_a_naive_timestamp_is_reported
+    (
+        "test_a_naive_timestamp_is_reported",
+        lambda: validate_snapshot(
+            "FACTOR",
+            [_factor_record(as_of="2026-09-04T15:00:00")],
+            as_of=AS_OF,
+        ),
+        ("timestamp",),
+        (),
+    ),
+    # test_a_timestamp_after_the_snapshot_is_reported
+    #   原用例先绑定 late = (AS_OF + timedelta(days=1)).isoformat()，此处按同一表达式内联。
+    (
+        "test_a_timestamp_after_the_snapshot_is_reported",
+        lambda: validate_snapshot(
+            "FACTOR",
+            [_factor_record(as_of=(AS_OF + timedelta(days=1)).isoformat())],
+            as_of=AS_OF,
+        ),
+        ("timestamp",),
+        (),
+    ),
+    # test_a_candidate_citing_a_mismatched_strategy_version_is_reported
+    (
+        "test_a_candidate_citing_a_mismatched_strategy_version_is_reported",
+        lambda: validate_snapshot(
+            "CANDIDATE",
+            [
+                _candidate_record(
+                    lineage={
+                        "strategy_version": "v2",
+                        "universe_snapshot": "2026-09-04:abc",
+                    }
+                )
+            ],
+            as_of=AS_OF,
+        ),
+        ("cited_strategy_version",),
+        (),
+    ),
+    # --- point-in-time evidence ---
+    # test_input_evidence_without_an_availability_time_is_a_finding
+    #   有报告期却没有可用时刻，快照就无法自证没有前视。
+    #   原用例就地 del ref["available_at"]，由 _input_ref_without_available_at 承载。
+    (
+        "test_input_evidence_without_an_availability_time_is_a_finding",
+        lambda: validate_snapshot(
+            "FACTOR",
+            [_factor_with_input(_input_ref_without_available_at())],
+            as_of=AS_OF,
+        ),
+        ("available_at",),
+        (),
+    ),
+    # test_a_future_available_at_is_a_finding
+    #   证据的可用时刻晚于计算时点，就是前视。
+    (
+        "test_a_future_available_at_is_a_finding",
+        lambda: validate_snapshot(
+            "FACTOR",
+            [_factor_with_input(_input_ref(available_at="2026-09-05T15:00:00+00:00"))],
+            as_of=AS_OF,
+        ),
+        ("available_at",),
+        (),
+    ),
+    # test_a_naive_available_at_is_a_finding
+    #   没有时区的时间戳无法与任何时点比较。
+    (
+        "test_a_naive_available_at_is_a_finding",
+        lambda: validate_snapshot(
+            "FACTOR",
+            [_factor_with_input(_input_ref(available_at="2026-08-15T15:00:00"))],
+            as_of=AS_OF,
+        ),
+        ("available_at",),
+        (),
+    ),
+    # --- cross-snapshot consistency ---
+    # test_a_candidate_citing_an_absent_strategy_is_a_finding
+    (
+        "test_a_candidate_citing_an_absent_strategy_is_a_finding",
+        lambda: validate_snapshot_set(
+            factor_records=[_factor_with_input(_input_ref())],
+            strategy_records=[],
+            candidate_records=[_candidate_for_set("600000.SH")],
+            as_of=AS_OF,
+        ),
+        ("cross_snapshot",),
+        ("momentum",),
+    ),
+    # test_a_candidate_citing_an_absent_factor_is_a_finding
+    (
+        "test_a_candidate_citing_an_absent_factor_is_a_finding",
+        lambda: validate_snapshot_set(
+            factor_records=[],
+            strategy_records=[_strategy_record_for("600000.SH")],
+            candidate_records=[_candidate_for_set("600000.SH")],
+            as_of=AS_OF,
+        ),
+        ("cross_snapshot",),
+        ("ret_20d",),
+    ),
+    # test_a_candidate_citing_a_factor_version_that_was_not_stored_is_a_finding
+    #   因子存的是 v1、被引的是 v2：原用例的就地构造由
+    #   _a_cited_factor_version_that_was_not_stored 逐字承载。
+    (
+        "test_a_candidate_citing_a_factor_version_that_was_not_stored_is_a_finding",
+        _a_cited_factor_version_that_was_not_stored,
+        ("cross_snapshot",),
+        (),
+    ),
+)
+
+
+def test_every_broken_snapshot_reports_its_finding() -> None:
+    """十五个坏快照各自报出自己的 finding：期望代码在，observed 点名关键对象。
+
+    原 15 条「X is reported / is a finding」用例逐条成行；循环只收集，
+    断言在表外一次完成，失败消息点名行 label（即原测试名）。
+    """
+    wrong = []
+    for label, run, expected_codes, observed_fragments in SNAPSHOT_FINDING_CASES:
+        findings = run()
+        codes = _checks(findings)
+        for code in expected_codes:
+            if code not in codes:
+                wrong.append(f"{label}: 期望 {code}，实际 {sorted(codes)}")
+        for fragment in observed_fragments:
+            if not any(fragment in finding.observed for finding in findings):
+                wrong.append(
+                    f"{label}: observed 未点名 {fragment!r}，"
+                    f"实际 {[finding.observed for finding in findings]}"
+                )
+    assert not wrong, "快照校验未报出预期 finding:\n" + "\n".join(wrong)
 
 
 def test_a_missing_score_is_not_a_range_finding() -> None:
@@ -131,80 +347,6 @@ def test_a_missing_score_is_not_a_range_finding() -> None:
 
     assert "score_range" not in _checks(findings)
     assert "rank_percentile_range" not in _checks(findings)
-
-
-def test_an_out_of_range_rank_percentile_is_reported() -> None:
-    findings = validate_snapshot(
-        "STRATEGY", [_strategy_record(rank_percentile=1.5)], as_of=AS_OF
-    )
-
-    assert "rank_percentile_range" in _checks(findings)
-
-
-def test_an_unknown_factor_name_is_reported() -> None:
-    findings = validate_snapshot(
-        "FACTOR",
-        [_factor_record(factor="made_up")],
-        as_of=AS_OF,
-        known_factor_names=KNOWN_FACTORS,
-    )
-
-    assert "unknown_factor" in _checks(findings)
-
-
-def test_an_unknown_strategy_id_is_reported() -> None:
-    findings = validate_snapshot(
-        "STRATEGY",
-        [_strategy_record(strategy_id="moonshot")],
-        as_of=AS_OF,
-        known_strategy_ids={"momentum"},
-    )
-
-    assert "unknown_strategy" in _checks(findings)
-
-
-def test_an_empty_version_is_reported() -> None:
-    findings = validate_snapshot(
-        "FACTOR",
-        [_factor_record(lineage={"factor_version": ""})],
-        as_of=AS_OF,
-    )
-
-    assert "empty_version" in _checks(findings)
-
-
-def test_a_naive_timestamp_is_reported() -> None:
-    findings = validate_snapshot(
-        "FACTOR",
-        [_factor_record(as_of="2026-09-04T15:00:00")],
-        as_of=AS_OF,
-    )
-
-    assert "timestamp" in _checks(findings)
-
-
-def test_a_timestamp_after_the_snapshot_is_reported() -> None:
-    late = (AS_OF + timedelta(days=1)).isoformat()
-    findings = validate_snapshot("FACTOR", [_factor_record(as_of=late)], as_of=AS_OF)
-
-    assert "timestamp" in _checks(findings)
-
-
-def test_a_candidate_citing_a_mismatched_strategy_version_is_reported() -> None:
-    findings = validate_snapshot(
-        "CANDIDATE",
-        [
-            _candidate_record(
-                lineage={
-                    "strategy_version": "v2",
-                    "universe_snapshot": "2026-09-04:abc",
-                }
-            )
-        ],
-        as_of=AS_OF,
-    )
-
-    assert "cited_strategy_version" in _checks(findings)
 
 
 def test_clean_records_produce_no_findings() -> None:
@@ -268,44 +410,23 @@ def _factor_with_input(ref: dict[str, object]) -> dict[str, object]:
     return _factor_record(inputs=[ref])
 
 
+def _input_ref_without_available_at() -> dict[str, object]:
+    """`SNAPSHOT_FINDING_CASES` 第 10 行的证据：整键缺 `available_at`。
+
+    原用例 `test_input_evidence_without_an_availability_time_is_a_finding`
+    就地 `del ref["available_at"]`，此处逐字保留。
+    """
+    ref = _input_ref()
+    del ref["available_at"]
+    return ref
+
+
 def test_a_cited_input_with_an_availability_time_is_clean() -> None:
     findings = validate_snapshot(
         "FACTOR", [_factor_with_input(_input_ref())], as_of=AS_OF
     )
 
     assert findings == ()
-
-
-def test_input_evidence_without_an_availability_time_is_a_finding() -> None:
-    """有报告期却没有可用时刻，快照就无法自证没有前视。"""
-    ref = _input_ref()
-    del ref["available_at"]
-
-    findings = validate_snapshot("FACTOR", [_factor_with_input(ref)], as_of=AS_OF)
-
-    assert "available_at" in _checks(findings)
-
-
-def test_a_future_available_at_is_a_finding() -> None:
-    """证据的可用时刻晚于计算时点，就是前视。"""
-    findings = validate_snapshot(
-        "FACTOR",
-        [_factor_with_input(_input_ref(available_at="2026-09-05T15:00:00+00:00"))],
-        as_of=AS_OF,
-    )
-
-    assert "available_at" in _checks(findings)
-
-
-def test_a_naive_available_at_is_a_finding() -> None:
-    """没有时区的时间戳无法与任何时点比较。"""
-    findings = validate_snapshot(
-        "FACTOR",
-        [_factor_with_input(_input_ref(available_at="2026-08-15T15:00:00"))],
-        as_of=AS_OF,
-    )
-
-    assert "available_at" in _checks(findings)
 
 
 def test_an_empty_reference_is_not_asked_for_an_availability_time() -> None:
@@ -363,49 +484,6 @@ def test_a_clean_snapshot_set_produces_no_findings() -> None:
     )
 
     assert findings == ()
-
-
-def test_a_candidate_citing_an_absent_strategy_is_a_finding() -> None:
-    findings = validate_snapshot_set(
-        factor_records=[_factor_with_input(_input_ref())],
-        strategy_records=[],
-        candidate_records=[_candidate_for_set("600000.SH")],
-        as_of=AS_OF,
-    )
-
-    assert "cross_snapshot" in _checks(findings)
-    assert any("momentum" in finding.observed for finding in findings)
-
-
-def test_a_candidate_citing_an_absent_factor_is_a_finding() -> None:
-    findings = validate_snapshot_set(
-        factor_records=[],
-        strategy_records=[_strategy_record_for("600000.SH")],
-        candidate_records=[_candidate_for_set("600000.SH")],
-        as_of=AS_OF,
-    )
-
-    assert "cross_snapshot" in _checks(findings)
-    assert any("ret_20d" in finding.observed for finding in findings)
-
-
-def test_a_candidate_citing_a_factor_version_that_was_not_stored_is_a_finding() -> None:
-    stored = _factor_record()
-    stored["factor"] = "ret_20d"
-    stored["factor_version"] = "v1"
-    cited = _strategy_record_for("600000.SH")
-    cited["factor_snapshot"][0]["factor_version"] = "v2"  # type: ignore[index]
-    candidate = _candidate_for_set("600000.SH")
-    candidate["strategy_results"] = [cited]
-
-    findings = validate_snapshot_set(
-        factor_records=[stored],
-        strategy_records=[cited],
-        candidate_records=[candidate],
-        as_of=AS_OF,
-    )
-
-    assert "cross_snapshot" in _checks(findings)
 
 
 def test_a_clean_snapshot_set_tolerates_an_empty_candidate_list() -> None:
