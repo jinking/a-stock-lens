@@ -13,7 +13,6 @@ AS_OF = datetime(2026, 9, 20, 15, 0, tzinfo=SHANGHAI)
 def test_normalized_dataset_supports_dividend_events() -> None:
     """NormalizedDataset 默认 dividend_events 为空元组，并支持载入 DividendEvent。"""
     ds_empty = NormalizedDataset(dataset="test", as_of=AS_OF)
-    assert hasattr(ds_empty, "dividend_events")
     assert ds_empty.dividend_events == ()
 
     event = DividendEvent(

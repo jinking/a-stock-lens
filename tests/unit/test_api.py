@@ -11,7 +11,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-import astock_lens.api.app as api_module
 from astock_lens.api.app import create_app
 from astock_lens.candidates.models import Candidate
 from astock_lens.data.snapshots.store import JsonSnapshotStore
@@ -280,24 +279,6 @@ def test_universe_route_404s_when_no_universe_was_built(local_tmp: Path) -> None
 
     assert response.status_code == 404
     assert DAY in response.json()["detail"]
-
-
-def test_api_never_imports_the_computation_engines() -> None:
-    """ARCHITECTURE.md §2: the API must not recompute factors or scanners."""
-    source = Path(api_module.__file__).read_text(encoding="utf-8")
-
-    assert "factors.builtin" not in source
-    assert "strategies.momentum" not in source
-    assert "AverageAmountFactor" not in source
-    assert "MomentumScanner" not in source
-    assert "astock_lens.pipelines" not in source
-    assert "build_scanner" not in source
-    assert "strategy_stage" not in source
-    assert "factor_stage" not in source
-    assert "run_analysis" not in source
-    assert "trade_gate.engine" not in source
-    assert "TradeGateEngine" not in source
-    assert "ThesisAuditAdapter" not in source
 
 
 def test_trade_gate_intent_route_is_read_only(tmp_path: Path) -> None:
@@ -1018,34 +999,6 @@ def test_qualification_results_invalid_config_fails_loudly(
     res = client.get("/qualifications/growth/results", params={"as_of": DAY})
     assert res.status_code >= 400
     assert res.status_code != 200
-
-
-def test_api_module_imports_strictly_bounded() -> None:
-    import ast
-
-    api_file = Path("src/astock_lens/api/app.py")
-    tree = ast.parse(api_file.read_text("utf-8"), filename=str(api_file))
-
-    forbidden = {
-        "astock_lens.pipelines",
-        "run_analysis",
-        "factor_stage",
-        "strategy_stage",
-    }
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                for f in forbidden:
-                    assert f not in alias.name, f"Forbidden import found: {alias.name}"
-        elif isinstance(node, ast.ImportFrom):
-            mod = node.module or ""
-            for f in forbidden:
-                assert f not in mod, f"Forbidden from-import module found: {mod}"
-            for alias in node.names:
-                for f in forbidden:
-                    assert f != alias.name, (
-                        f"Forbidden from-import name found: {alias.name}"
-                    )
 
 
 def test_today_api_returns_aggregated_overview(local_tmp: Path) -> None:

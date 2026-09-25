@@ -242,21 +242,70 @@ def test_every_mapped_metric_has_a_unique_source_column() -> None:
     assert set(METRIC_BY_COLUMN) == set(columns)
 
 
-def test_the_normalizer_never_reaches_for_a_provider() -> None:
-    """`ARCHITECTURE.md` §4.3: normalizing reads data, it never fetches it.
+# 「模块 × 禁用词」架构边界扫描表：四行分别承接原先四个源码扫描用例，
+# 词表按文件原样分列、不取并集；`required` 列承接正向断言。
+FORBIDDEN_IN_MODULE: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
+    # 原 `test_the_normalizer_never_reaches_for_a_provider`——
+    # `ARCHITECTURE.md` §4.3: normalizing reads data, it never fetches it.
+    # The module may borrow the source's code vocabulary, but it must not own a
+    # transport, a subprocess or a network call of its own.
+    (
+        "src/astock_lens/data/normalize/financials.py",
+        ("subprocess", "urlopen", "Runner", ".fetch(", "requests"),
+        (),
+    ),
+    # 原 `test_the_fundamental_factor_never_fetches_anything`——
+    # `ARCHITECTURE.md` §4.3: the normalized dataset is the only input.（该模块无 `Runner`）
+    (
+        "src/astock_lens/factors/fundamental.py",
+        ("subprocess", "urlopen", ".fetch(", "requests"),
+        (),
+    ),
+    # 原 `test_api_never_imports_the_computation_engines`——
+    # ARCHITECTURE.md §2: the API must not recompute factors or scanners.
+    (
+        "src/astock_lens/api/app.py",
+        (
+            "factors.builtin",
+            "strategies.momentum",
+            "AverageAmountFactor",
+            "MomentumScanner",
+            "astock_lens.pipelines",
+            "build_scanner",
+            "strategy_stage",
+            "factor_stage",
+            "run_analysis",
+            "trade_gate.engine",
+            "TradeGateEngine",
+            "ThesisAuditAdapter",
+        ),
+        (),
+    ),
+    # 原 `test_the_watcher_script_no_longer_writes_down_the_market_size`——
+    (
+        "scripts/watch-bootstrap.sh",
+        (
+            "5301",  # watcher 不得写死标的数
+            "REQUIRED=",  # watcher 不得写死所需 bar 数
+            "2026-09-17",  # watcher 不得写死日期
+        ),
+        ("manifest",),  # watcher 的进度必须从本次运行的清单推导
+    ),
+)
 
-    The module may borrow the source's code vocabulary, but it must not own a
-    transport, a subprocess or a network call of its own.
-    """
-    source = Path("src/astock_lens/data/normalize/financials.py").read_text(
-        encoding="utf-8"
-    )
 
-    assert "subprocess" not in source
-    assert "urlopen" not in source
-    assert "Runner" not in source
-    assert ".fetch(" not in source
-    assert "requests" not in source
+def test_architecture_boundaries_hold_for_modules_and_the_watcher_script() -> None:
+    """四个扫描点合并为一张表：越界或约束丢失时点名路径与词。"""
+    violations: list[str] = []
+    for path, forbidden, required in FORBIDDEN_IN_MODULE:
+        source = (ROOT / path).read_text(encoding="utf-8")
+        for word in forbidden:
+            if word in source:
+                violations.append(f"{path}: 含禁用词 {word!r}")
+        for word in required:
+            if word not in source:
+                violations.append(f"{path}: 缺必须词 {word!r}")
+    assert not violations, "架构边界被突破或约束丢失:\n" + "\n".join(violations)
 
 
 def test_the_recorded_shape_is_not_mutated_by_normalizing() -> None:

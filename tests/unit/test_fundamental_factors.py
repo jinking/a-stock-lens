@@ -401,15 +401,3 @@ def test_every_configured_fundamental_factor_has_an_implementation() -> None:
             RATIO_DEFINITIONS[name].numerator,
             RATIO_DEFINITIONS[name].denominator,
         )
-
-
-def test_the_fundamental_factor_never_fetches_anything() -> None:
-    """`ARCHITECTURE.md` §4.3: the normalized dataset is the only input."""
-    source = (ROOT / "src/astock_lens/factors/fundamental.py").read_text(
-        encoding="utf-8"
-    )
-
-    assert "subprocess" not in source
-    assert "urlopen" not in source
-    assert ".fetch(" not in source
-    assert "requests" not in source

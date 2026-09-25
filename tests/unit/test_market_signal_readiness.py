@@ -193,7 +193,6 @@ def test_representative_sampling_deterministic_with_tie_breaking() -> None:
     )
 
     strat = next(s for s in report.strategies if s.strategy_id == strategy_id)
-    assert hasattr(strat, "samples")
 
     highest_sample = next(
         s for s in strat.samples if s.metric == "ret_20d" and s.sample_kind == "highest"

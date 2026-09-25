@@ -320,12 +320,3 @@ def test_throughput_needs_a_measured_window() -> None:
     clock.advance(2.0)
 
     assert tracker.snapshot().throughput_per_second == 2.5
-
-
-def test_the_watcher_script_no_longer_writes_down_the_market_size() -> None:
-    script = (ROOT / "scripts" / "watch-bootstrap.sh").read_text(encoding="utf-8")
-
-    assert "5301" not in script, "watcher 不得写死标的数"
-    assert "REQUIRED=" not in script, "watcher 不得写死所需 bar 数"
-    assert "2026-09-17" not in script, "watcher 不得写死日期"
-    assert "manifest" in script, "watcher 的进度必须从本次运行的清单推导"

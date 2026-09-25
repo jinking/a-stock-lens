@@ -255,7 +255,6 @@ def test_bulk_provider_logs_download_progress_to_the_console(
 
     runtime._bulk_provider()
     progress_callback = options["progress_callback"]
-    assert callable(progress_callback)
     progress_callback(100, 5568, 97)
 
     output = capsys.readouterr().err
