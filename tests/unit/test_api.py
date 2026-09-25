@@ -168,13 +168,63 @@ def test_factor_route_is_empty_for_an_unknown_symbol(local_tmp: Path) -> None:
     assert response.json()["records"] == []
 
 
+MISSING_SNAPSHOT_CASES = (
+    # label, route, params, expected detail 片段
+    (
+        "test_missing_snapshot_is_a_404",
+        "/factors",
+        {"symbol": "600000.SH", "as_of": DAY},
+        DAY,
+    ),
+    (
+        "test_strategies_route_404s_when_no_snapshot",
+        "/strategies",
+        {"as_of": DAY},
+        DAY,
+    ),
+    (
+        "test_strategy_results_missing_snapshot_returns_404",
+        "/strategies/growth/results",
+        {"as_of": DAY},
+        DAY,
+    ),
+    (
+        "test_stock_profile_missing_universe_snapshot_returns_404",
+        "/stocks/600000.SH",
+        {"as_of": DAY},
+        DAY,
+    ),
+    (
+        "test_qualification_results_missing_snapshot_returns_404",
+        "/qualifications/growth/results",
+        {"as_of": DAY},
+        DAY,
+    ),
+    # test_today_api_missing_candidate_snapshot_returns_404:
+    #   Task 5: CANDIDATE 快照不存在时 /today 返回 404。
+    (
+        "test_today_api_missing_candidate_snapshot_returns_404",
+        "/today",
+        {"as_of": DAY},
+        f"no CANDIDATE snapshot for {DAY}",
+    ),
+)
+
+
 def test_missing_snapshot_is_a_404(local_tmp: Path) -> None:
+    """测试 6 条快照路由各自在无快照时返回点名原因的 404（原 6 条缺快照用例收表）。"""
     client = TestClient(create_app(snapshot_root=local_tmp))
-
-    response = client.get("/factors", params={"symbol": "600000.SH", "as_of": DAY})
-
-    assert response.status_code == 404
-    assert DAY in response.json()["detail"]
+    wrong = []
+    for label, route, params, expected_detail in MISSING_SNAPSHOT_CASES:
+        response = client.get(route, params=params)
+        if response.status_code != 404:
+            wrong.append(f"{label}: {route} 得到 {response.status_code}，期望 404")
+        elif expected_detail not in response.json()["detail"]:
+            wrong.append(
+                f"{label}: {route} detail 缺少 {expected_detail!r}，"
+                f"实际 {response.json()['detail']!r}"
+            )
+    assert not wrong, "缺快照路由应返回点名原因的 404:\n" + "\n".join(wrong)
 
 
 def test_candidate_route_reads_the_stored_snapshot(local_tmp: Path) -> None:
@@ -322,15 +372,6 @@ def test_strategies_route_reads_summaries(local_tmp: Path) -> None:
     assert payload[1]["ranked_count"] == 2
 
 
-def test_strategies_route_404s_when_no_snapshot(local_tmp: Path) -> None:
-    client = TestClient(create_app(snapshot_root=local_tmp))
-
-    response = client.get("/strategies", params={"as_of": DAY})
-
-    assert response.status_code == 404
-    assert DAY in response.json()["detail"]
-
-
 def test_strategy_results_default_query(local_tmp: Path) -> None:
     _seed(local_tmp)
     client = TestClient(create_app(snapshot_root=local_tmp))
@@ -445,18 +486,6 @@ def test_strategy_results_unknown_strategy_returns_404(local_tmp: Path) -> None:
         response.json()["detail"]
         == f"strategy 'unknown_strat' has no stored results for {DAY}"
     )
-
-
-def test_strategy_results_missing_snapshot_returns_404(local_tmp: Path) -> None:
-    client = TestClient(create_app(snapshot_root=local_tmp))
-
-    response = client.get(
-        "/strategies/growth/results",
-        params={"as_of": DAY},
-    )
-
-    assert response.status_code == 404
-    assert DAY in response.json()["detail"]
 
 
 def _seed_profile_base(root: Path) -> None:
@@ -737,17 +766,6 @@ def test_stock_profile_factors_and_strategies_deterministic_sorting(
     ]
 
 
-def test_stock_profile_missing_universe_snapshot_returns_404(
-    local_tmp: Path,
-) -> None:
-    client = TestClient(create_app(snapshot_root=local_tmp))
-
-    response = client.get("/stocks/600000.SH", params={"as_of": DAY})
-
-    assert response.status_code == 404
-    assert DAY in response.json()["detail"]
-
-
 def test_stock_profile_invalid_as_of_returns_422(local_tmp: Path) -> None:
     client = TestClient(create_app(snapshot_root=local_tmp))
 
@@ -1002,15 +1020,6 @@ def test_qualification_results_invalid_config_fails_loudly(
     assert res.status_code != 200
 
 
-def test_qualification_results_missing_snapshot_returns_404(
-    local_tmp: Path,
-) -> None:
-    client = TestClient(create_app(snapshot_root=local_tmp))
-    res = client.get("/qualifications/growth/results", params={"as_of": DAY})
-    assert res.status_code == 404
-    assert DAY in res.json()["detail"]
-
-
 def test_api_module_imports_strictly_bounded() -> None:
     import ast
 
@@ -1037,14 +1046,6 @@ def test_api_module_imports_strictly_bounded() -> None:
                     assert f != alias.name, (
                         f"Forbidden from-import name found: {alias.name}"
                     )
-
-
-def test_today_api_missing_candidate_snapshot_returns_404(local_tmp: Path) -> None:
-    """Task 5: CANDIDATE 快照不存在时 /today 返回 404。"""
-    client = TestClient(create_app(snapshot_root=local_tmp))
-    res = client.get("/today", params={"as_of": DAY})
-    assert res.status_code == 404
-    assert f"no CANDIDATE snapshot for {DAY}" in res.json()["detail"]
 
 
 def test_today_api_returns_aggregated_overview(local_tmp: Path) -> None:

@@ -104,36 +104,50 @@ def test_listing_date_and_suspension_count_are_typed() -> None:
     assert profiles["600000.SH"].suspended_trading_days == 0
 
 
-def test_an_unreadable_listing_date_rejects_the_row() -> None:
-    """A profile without an identity date cannot be aged, so it is not emitted."""
-    normalized = _normalize([_row(list_date="not-a-date")])
+REJECTED_ROW_CASES = (
+    # test_an_unreadable_listing_date_rejects_the_row:
+    #   A profile without an identity date cannot be aged, so it is not emitted.
+    (
+        "test_an_unreadable_listing_date_rejects_the_row",
+        {"list_date": "not-a-date"},
+        "list_date",
+    ),
+    # test_an_unreadable_flag_rejects_the_row:
+    #   `is_st` absent means status unknown; that is not the same as "not ST".
+    (
+        "test_an_unreadable_flag_rejects_the_row",
+        {"is_st": ""},
+        "is_st",
+    ),
+    # test_a_missing_exchange_rejects_the_row
+    (
+        "test_a_missing_exchange_rejects_the_row",
+        {"exchange": ""},
+        "exchange",
+    ),
+    # test_an_unreadable_suspension_count_rejects_the_row
+    (
+        "test_an_unreadable_suspension_count_rejects_the_row",
+        {"suspended_trading_days": "long ago"},
+        "suspended_trading_days",
+    ),
+)
 
-    assert normalized.securities == ()
-    assert [failure.column for failure in normalized.parse_failures] == ["list_date"]
 
-
-def test_an_unreadable_flag_rejects_the_row() -> None:
-    """`is_st` absent means status unknown; that is not the same as "not ST"."""
-    normalized = _normalize([_row(is_st="")])
-
-    assert normalized.securities == ()
-    assert [failure.column for failure in normalized.parse_failures] == ["is_st"]
-
-
-def test_a_missing_exchange_rejects_the_row() -> None:
-    normalized = _normalize([_row(exchange="")])
-
-    assert normalized.securities == ()
-    assert [failure.column for failure in normalized.parse_failures] == ["exchange"]
-
-
-def test_an_unreadable_suspension_count_rejects_the_row() -> None:
-    normalized = _normalize([_row(suspended_trading_days="long ago")])
-
-    assert normalized.securities == ()
-    assert [failure.column for failure in normalized.parse_failures] == [
-        "suspended_trading_days"
-    ]
+def test_unreadable_identity_cells_reject_the_row() -> None:
+    """测试 4 类不可读身份字段各自整行被拒且点名列（原 4 条拒绝用例收表）。"""
+    wrong = []
+    for label, overrides, expected_column in REJECTED_ROW_CASES:
+        normalized = _normalize([_row(**overrides)])
+        if normalized.securities != ():
+            wrong.append(f"{label}: 期望不产出 profile，实际 {normalized.securities!r}")
+        columns = [failure.column for failure in normalized.parse_failures]
+        if columns != [expected_column]:
+            wrong.append(
+                f"{label}: parse_failures 列得到 {columns!r}，"
+                f"期望 [{expected_column!r}]"
+            )
+    assert not wrong, "不可读身份字段未按预期拒行:\n" + "\n".join(wrong)
 
 
 def test_an_absent_suspension_count_is_missing_not_rejected() -> None:
