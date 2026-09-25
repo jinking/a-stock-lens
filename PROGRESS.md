@@ -1,5 +1,23 @@
 # PROGRESS
 
+## 测试用例精简切片（2026-09-25）
+
+- **目标**：测试用例数量精简（规格 §7.1 验收线 ≤1040 例）；只动 `tests/`，`src/**` 与 `configs/**` 零改动，冻结 5 个未提交测试文件一行不改。
+- **手法**：三条合并规则（遍历全部成员 / 先收集再断言 / 失败消息点名参数）+ 按域合并长尾文件；已固化进 `docs/ARCHITECTURE.md` §20.5（「表驱动优先」与「数量上限」）。
+- **实测（collected）**：**1298 → 1063**（−235）；含用例文件 **136 → 66**，`tests/**/*.py` **141 → 71**（`a9ec8f7` 合并落点 70；修复轮 R1 还原 `test_qualification_config.py` 后 71）。
+- **覆盖率**：基线 92%（`TOTAL 8703 734`，`--cov=astock_lens --cov-report=term`）；收口重测 **TOTAL 8703 734 92%（1063 passed）**（命令与原始输出见 `var/test-consolidation/coverage-after-1.txt`）。
+- **批次与 commit**：
+  | 批次 | 任务 | commit | collected |
+  | --- | --- | --- | --- |
+  | 0 基线 | Task 0 | `872e99b` + `59119d2` | 1298 |
+  | 1 参数化收敛 | Task 1–4 | `b466794` `95032f7` `50a8ca9` `c3957b3` | 1298 → 1184 |
+  | 2 近邻家族 | Task 5–9 | `ae5bb62` `bd285ba` `889c652` `0c6426b` `8b5cb8c` | 1184 → 1077 |
+  | 3–4 去重与清理 | Task 10–11 | `55398f3` `20baf65` | 1077 → 1063 |
+  | 5 文件合并 | Task 12 | `a9ec8f7`（修复轮 `48d5e1e` `9c1a39c`） | 1063 → 1063 |
+  | 6 文档治理 | Task 13 | 本提交 | 1063 |
+  | 待执行 | Task 14 / Task 15 | — | ≤1040（缺口 23） |
+- **遗留**：Task 14 全量验收与远端 CI；Task 15 备用池收口（缺口 23，未达标不得凑数）。目录级 `ruff format --check tests/` 唯一红项 `tests/unit/test_akshare_provider.py:356` 为冻结文件的既有漂移（`20baf65` 上同样红），转 Task 14 处置披露。
+
 ## 复杂度收敛切片（2026-09-23）
 
 - **Trade Gate 状态**：模型、Trade Profile、审计 Adapter、规则/裁决、独立 Ledger、服务层、只读 API 与 CLI 基础已落地；它消费研究事实，不重算因子/策略，不进入 `astock daily`。完整 Evaluation / Execution / Review 用户流程尚未以代码证据交付，不能标记为完成。

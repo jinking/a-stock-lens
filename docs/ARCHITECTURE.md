@@ -562,6 +562,8 @@ astock daily
 
 每个行为只由离它最近、最能解释失败原因的一层负责证明：领域不变量由 Unit 负责，Provider 字段与状态契约由 Contract 负责，跨模块接线由 Integration 负责，快照和 Candidate 产物由 Artifact Validator 负责。Trade Gate 的模型、Profile 和审计 Adapter 测试保持各自边界，不在高层重复证明。
 
+归属表见 `docs/superpowers/reviews/2026-09-22-test-ownership-audit.md`；文件被合并或改名后，归属表必须在一个切片内改指新文件（2026-09-25 测试精简的映射见 `docs/superpowers/reviews/2026-09-25-test-consolidation-audit.md` §9）。
+
 #### Pure Refactor Rule
 
 纯重构必须保持公开命令、输出、异常、数据产物和快照哈希不变。没有行为变更时，默认不新增测试；应优先复用既有测试，并用帮助输出、产物指纹或等价回归证明行为未漂移。
@@ -578,6 +580,16 @@ astock daily
 2. 修复此前未被测试锁定的缺陷；
 3. 新增外部 Provider 的特有字段、错误或选择语义；
 4. 补齐产物、架构边界或安全不变量的独立验证。
+
+#### 表驱动优先
+
+同族枚举断言必须写成单条表驱动用例：遍历全部成员、先收集再断言、失败消息点名参数。
+不得为每个参数新增 case，也不得在循环里直接 `assert` 后中断（那只会报第一个失败者）。
+
+#### 数量上限
+
+自 2026-09-25 起，collected case 数不得净增长。新增行为需按「四个合法理由」申报，
+并同时说明是否有可合并的同族旧 case（Test Delta Budget 的常设形式）。
 
 ## 21. 性能目标
 
