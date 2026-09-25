@@ -484,4 +484,5 @@ Task 11 的两条 API 边界检查里：
 | Task 1 | `b466794` | −72 | 1226 | 1298−72=1226 ✓ | 实测与预期一致：两文件 93→21（63→15、30→6）；全量 1226 全绿 |
 | Task 2 | `95032f7` | −17 | 1209 | 1226−17=1209 ✓ | 三文件 52→35（21→16、19→11、12→8），逐条断言零丢失；全量 1209 全绿 |
 | Task 3 | `50a8ca9` | −11 | 1198 | 1209−11=1198 ✓ | 三文件 57→46（13→9、13→10、31→27），4 处合并逐条断言零丢失；全量 1198 全绿 |
-| Task 4 | 本提交 | −14 | 1184 | 1198−14=1184 ✓ | 三文件 62→48（api 47→43、contract 8→3、parity 7→2），三处合并逐条断言零丢失；全量 1184 全绿。**批次 1 收口 = 1184**（1298−114），与 §7.2 检查点数字一致 |
+| Task 4 | `c3957b3` | −14 | 1184 | 1198−14=1184 ✓ | 三文件 62→48（api 47→43、contract 8→3、parity 7→2），三处合并逐条断言零丢失；全量 1184 全绿。**批次 1 收口 = 1184**（1298−114），与 §7.2 检查点数字一致 |
+| Task 5 | 本提交 | −14 | 1170 | 1184−14=1170 ✓ | 单文件 18→4：15 条「非法 YAML 必须被拒」用例合并为表驱动 `test_invalid_rules_are_refused`；15 行的 YAML 文本、文件名与 match 片段逐字保存在文件内 `INVALID_RULE_CASES` 表（含 `growth.yaml` 身份不符行、`expected_strategy_id` / `known_factor_names` 两条带参行、一条无 match 的缺 `strategy_id` 行；原 `maximum` / `descripton` / `version:` 空值 / `version: 1` 强转 / `weight` 多余根键的 docstring 理由折进 label）；`test_missing_file_keeps_not_configured_semantics`、`test_valid_rule_loads_with_expected_fields`、`test_allowed_root_keys_still_load` 三条成功/缺文件语义用例保持独立、逐字节未改；全量 1170 全绿，Task 5 单表裁决达成（§7.2 批次 2 按单表口径计） |
