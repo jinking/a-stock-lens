@@ -408,28 +408,27 @@ def test_strategy_results_min_percentile(local_tmp: Path) -> None:
     assert payload["items"][0]["rank_percentile"] == 0.98
 
 
-@pytest.mark.parametrize(
-    ("param", "value"),
-    [
-        ("limit", 0),
-        ("limit", -1),
-        ("limit", 501),
-        ("min_percentile", -0.1),
-        ("min_percentile", 1.1),
-    ],
+INVALID_QUERY_VALUES = (
+    ("limit", 0),
+    ("limit", -1),
+    ("limit", 501),
+    ("min_percentile", -0.1),
+    ("min_percentile", 1.1),
 )
-def test_strategy_results_invalid_query_returns_422(
-    local_tmp: Path, param: str, value: object
-) -> None:
+
+
+def test_strategy_results_invalid_query_returns_422(local_tmp: Path) -> None:
     _seed(local_tmp)
     client = TestClient(create_app(snapshot_root=local_tmp))
 
-    response = client.get(
-        "/strategies/growth/results",
-        params={"as_of": DAY, param: value},
-    )
-
-    assert response.status_code == 422
+    wrong = []
+    for param, value in INVALID_QUERY_VALUES:
+        response = client.get(
+            "/strategies/growth/results", params={"as_of": DAY, param: value}
+        )
+        if response.status_code != 422:
+            wrong.append(f"{param}={value!r}: {response.status_code}")
+    assert not wrong, "非法查询参数应返回 422:\n" + "\n".join(wrong)
 
 
 def test_strategy_results_unknown_strategy_returns_404(local_tmp: Path) -> None:

@@ -17,8 +17,6 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-import pytest
-
 from astock_lens.domain.enums import DataStatus
 from astock_lens.domain.models import SnapshotLineage
 from astock_lens.factors.contracts import FactorResult
@@ -89,17 +87,25 @@ def _observed(result: StrategyResult) -> dict[str, object]:
     }
 
 
-@pytest.mark.parametrize("strategy_id", sorted(PARITY["strategies"]))
-def test_the_refactored_scanner_reproduces_the_recorded_output(
-    strategy_id: str,
-) -> None:
-    scanner = build_scanner(load_strategy_config(CONFIGS / f"{strategy_id}.yaml"))
-
-    observed = [
-        _observed(result) for result in scanner.score_cross_section(_contexts())
-    ]
-
-    assert observed == PARITY["strategies"][strategy_id]["results"]
+def test_the_refactored_scanner_reproduces_the_recorded_output() -> None:
+    wrong = []
+    for strategy_id in sorted(PARITY["strategies"]):
+        scanner = build_scanner(load_strategy_config(CONFIGS / f"{strategy_id}.yaml"))
+        observed = [
+            _observed(result) for result in scanner.score_cross_section(_contexts())
+        ]
+        expected = PARITY["strategies"][strategy_id]["results"]
+        if observed != expected:
+            first = next(
+                (
+                    i
+                    for i, (a, b) in enumerate(zip(observed, expected, strict=False))
+                    if a != b
+                ),
+                None,
+            )
+            wrong.append(f"{strategy_id}: 第 {first} 条起不一致")
+    assert not wrong, "重构后的扫描器未复现录制输出:\n" + "\n".join(wrong)
 
 
 def test_the_fixture_was_recorded_before_this_refactor() -> None:
