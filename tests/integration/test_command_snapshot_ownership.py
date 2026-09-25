@@ -111,27 +111,55 @@ def test_factors_compute_does_not_touch_the_formal_candidate_snapshot(
     assert _candidate_text(root) == sentinel
 
 
-def test_factors_compute_writes_no_formal_snapshot_at_all(local_tmp: Path) -> None:
-    """目标状态：`factors compute` 只计算，不落任何正式 Snapshot。"""
-    root = _snapshot_root(local_tmp)
-
-    result = _invoke(root, "factors", "compute", "--as-of", DAY)
-
-    assert result.exit_code == 0, result.output
-    assert _written_snapshots(root) == ()
-
-
 # --- strategy run ------------------------------------------------------------
 
+# 「不写正式快照的命令」三行：行序与原用例一致，label 即原测试名，
+# 原 docstring 逐字保留为行注释。族横跨三个命令小节，落在中间的
+# `# --- strategy run ---` 小节里，三个小节标题就都还有内容。
+# 列 = label, args：
+#   - `args` 逐行保留原 `_invoke(root, ...)` 的命令行参数；
+#   - 每行各用 `local_tmp/<label>` 作快照根（原用例各自拿一份新的 `local_tmp`），
+#     行与行不共享现场，一行落下快照不会误伤邻行。
+NON_PERSISTENT_COMMAND_CASES = (
+    # test_factors_compute_writes_no_formal_snapshot_at_all:
+    #   目标状态：`factors compute` 只计算，不落任何正式 Snapshot。
+    (
+        "test_factors_compute_writes_no_formal_snapshot_at_all",
+        ("factors", "compute", "--as-of", DAY),
+    ),
+    # test_strategy_run_writes_no_formal_snapshot:
+    #   跑一个 Scanner 是纯计算：它没有资格写当天的 STRATEGY/CANDIDATE。
+    (
+        "test_strategy_run_writes_no_formal_snapshot",
+        ("strategy", "run", "momentum", "--as-of", DAY),
+    ),
+    # test_scan_writes_no_formal_snapshot_at_all:
+    #   目标状态：`scan` 是 non-persistent preview。
+    (
+        "test_scan_writes_no_formal_snapshot_at_all",
+        ("scan", "--as-of", DAY),
+    ),
+)
 
-def test_strategy_run_writes_no_formal_snapshot(local_tmp: Path) -> None:
-    """跑一个 Scanner 是纯计算：它没有资格写当天的 STRATEGY/CANDIDATE。"""
-    root = _snapshot_root(local_tmp)
 
-    result = _invoke(root, "strategy", "run", "momentum", "--as-of", DAY)
+def test_read_only_commands_write_no_formal_snapshot(local_tmp: Path) -> None:
+    """factors compute / strategy run / scan 都不落任何正式 Snapshot。
 
-    assert result.exit_code == 0, result.output
-    assert _written_snapshots(root) == ()
+    原 3 条「writes_no_formal_snapshot」用例逐条成行；循环只收集，
+    断言在表外一次完成，失败消息点名行 label（即原测试名）。
+    """
+    wrong = []
+    for label, args in NON_PERSISTENT_COMMAND_CASES:
+        root = _snapshot_root(local_tmp / label)
+        result = _invoke(root, *args)
+        if result.exit_code != 0:
+            wrong.append(
+                f"{label}: exit_code 为 {result.exit_code}，输出 {result.output!r}"
+            )
+        written = _written_snapshots(root)
+        if written != ():
+            wrong.append(f"{label}: 落下了正式快照 {written!r}")
+    assert not wrong, "只读命令不得写正式快照:\n" + "\n".join(wrong)
 
 
 # --- scan --------------------------------------------------------------------
@@ -165,13 +193,3 @@ def test_scan_does_not_replace_a_formal_candidate_snapshot(local_tmp: Path) -> N
 
     assert result.exit_code == 0, result.output
     assert _candidate_text(root) == sentinel
-
-
-def test_scan_writes_no_formal_snapshot_at_all(local_tmp: Path) -> None:
-    """目标状态：`scan` 是 non-persistent preview。"""
-    root = _snapshot_root(local_tmp)
-
-    result = _invoke(root, "scan", "--as-of", DAY)
-
-    assert result.exit_code == 0, result.output
-    assert _written_snapshots(root) == ()

@@ -163,27 +163,52 @@ def test_relative_strength_60d_exact_calculation() -> None:
     assert evidence.relative_strength_60d == pytest.approx(0.15)
 
 
-def test_missing_benchmark_ret_60d_results_in_none() -> None:
-    factors = (_factor_result("ret_60d", 0.25),)
+# 「相对强弱的输入缺失」两行：行序与原用例一致，label 即原测试名。
+# 列 = label, payload, expected：
+#   - `payload` 逐行保留原 `build_stock_market_evidence(...)` 的关键字参数
+#     （第 1 行的 `factors = (...)` 绑定按同一表达式内联）；
+#   - `expected` 是该行断言的 `relative_strength_60d` 期望值（原断言为 `is None`），
+#     比对方式同为 `is`。
+MARKET_EVIDENCE_MISSING_INPUT_CASES = (
+    # test_missing_benchmark_ret_60d_results_in_none
+    (
+        "test_missing_benchmark_ret_60d_results_in_none",
+        {
+            "symbol": "600519.SH",
+            "factors": (_factor_result("ret_60d", 0.25),),
+            "bars": (),
+            "as_of": AS_OF,
+            "benchmark_ret_60d": None,
+        },
+        None,
+    ),
+    # test_missing_stock_ret_60d_results_in_none
+    (
+        "test_missing_stock_ret_60d_results_in_none",
+        {
+            "symbol": "600519.SH",
+            "factors": (),
+            "bars": (),
+            "as_of": AS_OF,
+            "benchmark_ret_60d": 0.10,
+        },
+        None,
+    ),
+)
 
-    evidence = build_stock_market_evidence(
-        symbol="600519.SH",
-        factors=factors,
-        bars=(),
-        as_of=AS_OF,
-        benchmark_ret_60d=None,
-    )
 
-    assert evidence.relative_strength_60d is None
+def test_missing_relative_strength_inputs_result_in_none() -> None:
+    """缺基准或个股 ret_60d 时相对强弱必须是 None，绝不静默兜底。
 
-
-def test_missing_stock_ret_60d_results_in_none() -> None:
-    evidence = build_stock_market_evidence(
-        symbol="600519.SH",
-        factors=(),
-        bars=(),
-        as_of=AS_OF,
-        benchmark_ret_60d=0.10,
-    )
-
-    assert evidence.relative_strength_60d is None
+    原 2 条「results_in_none」用例逐条成行；循环只收集，断言在表外一次完成，
+    失败消息点名行 label（即原测试名）。
+    """
+    wrong = []
+    for label, payload, expected in MARKET_EVIDENCE_MISSING_INPUT_CASES:
+        evidence = build_stock_market_evidence(**payload)
+        if evidence.relative_strength_60d is not expected:
+            wrong.append(
+                f"{label}: relative_strength_60d 为 {evidence.relative_strength_60d!r}，"
+                f"期望 {expected!r}"
+            )
+    assert not wrong, "相对强弱未对缺失输入返回 None:\n" + "\n".join(wrong)

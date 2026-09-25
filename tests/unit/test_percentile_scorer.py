@@ -12,6 +12,7 @@
 组件只负责排名——否则"资格规则"就会重新变成配置推断出来的东西。
 """
 
+import re
 from datetime import UTC, datetime
 
 import pytest
@@ -180,17 +181,50 @@ def test_the_explanation_shows_each_factor_and_its_weight() -> None:
     assert any("weight -1.0" in item.note for item in explanation.factors)
 
 
-def test_weights_must_cover_the_required_factors_exactly() -> None:
-    with pytest.raises(ValueError, match="must cover required_factors exactly"):
-        validated_weights(_config(weights={"roe_ttm": 1.0}))
+# 「权重集合必须被校验」三行：行序与原用例一致，label 即原测试名，
+# 第 2 行的原 docstring 逐字保留为行注释。
+# 列 = label, weights, expected：
+#   - `weights` 逐行保留原 `_config(weights=...)` 的字面量；
+#   - `expected` 逐字取自原 `pytest.raises(..., match=...)` 的片段，
+#     比对方式与原断言同为 `re.search`。
+WEIGHTS_VALIDATION_CASES = (
+    # test_weights_must_cover_the_required_factors_exactly
+    (
+        "test_weights_must_cover_the_required_factors_exactly",
+        {"roe_ttm": 1.0},
+        "must cover required_factors exactly",
+    ),
+    # test_a_zero_weight_is_refused:
+    #   A factor with no weight does not belong in the strategy's requirements.
+    (
+        "test_a_zero_weight_is_refused",
+        {"roe_ttm": 1.0, "debt_to_asset": 0.0},
+        "does not belong",
+    ),
+    # test_a_strategy_without_weights_has_nothing_to_score
+    (
+        "test_a_strategy_without_weights_has_nothing_to_score",
+        {},
+        "declares no weights",
+    ),
+)
 
 
-def test_a_zero_weight_is_refused() -> None:
-    """A factor with no weight does not belong in the strategy's requirements."""
-    with pytest.raises(ValueError, match="does not belong"):
-        validated_weights(_config(weights={"roe_ttm": 1.0, "debt_to_asset": 0.0}))
+def test_invalid_weight_sets_are_refused() -> None:
+    """三种非法权重集合各自以 ValueError 拒绝，消息须匹配原 `match=` 片段。
 
-
-def test_a_strategy_without_weights_has_nothing_to_score() -> None:
-    with pytest.raises(ValueError, match="declares no weights"):
-        validated_weights(_config(weights={}))
+    原 3 条「must cover / is refused / has nothing」用例逐条成行；循环只收集，
+    断言在表外一次完成，失败消息点名行 label（即原测试名）。
+    """
+    wrong = []
+    for label, weights, expected in WEIGHTS_VALIDATION_CASES:
+        try:
+            validated_weights(_config(weights=weights))
+        except ValueError as exc:
+            if re.search(expected, str(exc)) is None:
+                wrong.append(
+                    f"{label}: 错误消息中找不到 {expected!r}，实际 {str(exc)!r}"
+                )
+        else:
+            wrong.append(f"{label}: 未抛出 ValueError")
+    assert not wrong, "非法权重集合未被拒绝:\n" + "\n".join(wrong)

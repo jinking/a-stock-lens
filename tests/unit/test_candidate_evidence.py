@@ -1,5 +1,6 @@
 """CandidateEvidence 与 CandidateSelection 领域模型测试。"""
 
+import re
 from datetime import UTC, datetime
 
 import pytest
@@ -68,37 +69,69 @@ def test_candidate_evidence_valid_construction() -> None:
     assert ev.signal == Signal.NO_SIGNAL
 
 
-def test_candidate_evidence_rejects_mismatched_result_symbol() -> None:
-    with pytest.raises(ValueError, match="symbol"):
-        CandidateEvidence(
-            symbol="600000.SH",
-            strategy_results=(_result("600001.SH"),),
-            strategy_qualifications=(_qualification("600000.SH"),),
-            market_validation=MarketValidation.CONFIRMED,
-            signal=Signal.NO_SIGNAL,
-        )
+# 「非法构造必须被拒」三行：行序与原用例一致，label 即原测试名；
+# 列 = label, payload, expected：
+#   - `payload` 逐行保留原 `CandidateEvidence(...)` 的关键字参数；
+#   - `expected` 逐字取自原 `pytest.raises(..., match=...)` 的消息片段，
+#     比对方式与原断言同为 `re.search`。
+CANDIDATE_EVIDENCE_REJECTION_CASES = (
+    # test_candidate_evidence_rejects_mismatched_result_symbol
+    (
+        "test_candidate_evidence_rejects_mismatched_result_symbol",
+        {
+            "symbol": "600000.SH",
+            "strategy_results": (_result("600001.SH"),),
+            "strategy_qualifications": (_qualification("600000.SH"),),
+            "market_validation": MarketValidation.CONFIRMED,
+            "signal": Signal.NO_SIGNAL,
+        },
+        "symbol",
+    ),
+    # test_candidate_evidence_rejects_mismatched_qualification_symbol
+    (
+        "test_candidate_evidence_rejects_mismatched_qualification_symbol",
+        {
+            "symbol": "600000.SH",
+            "strategy_results": (_result("600000.SH"),),
+            "strategy_qualifications": (_qualification("600001.SH"),),
+            "market_validation": MarketValidation.CONFIRMED,
+            "signal": Signal.NO_SIGNAL,
+        },
+        "symbol",
+    ),
+    # test_candidate_evidence_requires_at_least_one_qualified_qualification
+    (
+        "test_candidate_evidence_requires_at_least_one_qualified_qualification",
+        {
+            "symbol": "600000.SH",
+            "strategy_results": (_result("600000.SH"),),
+            "strategy_qualifications": (_qualification("600000.SH", qualified=False),),
+            "market_validation": MarketValidation.CONFIRMED,
+            "signal": Signal.NO_SIGNAL,
+        },
+        "qualified",
+    ),
+)
 
 
-def test_candidate_evidence_rejects_mismatched_qualification_symbol() -> None:
-    with pytest.raises(ValueError, match="symbol"):
-        CandidateEvidence(
-            symbol="600000.SH",
-            strategy_results=(_result("600000.SH"),),
-            strategy_qualifications=(_qualification("600001.SH"),),
-            market_validation=MarketValidation.CONFIRMED,
-            signal=Signal.NO_SIGNAL,
-        )
+def test_candidate_evidence_rejects_invalid_constructions() -> None:
+    """三种非法构造各自以 ValueError 拒绝，消息须匹配原 `match=` 片段。
 
-
-def test_candidate_evidence_requires_at_least_one_qualified_qualification() -> None:
-    with pytest.raises(ValueError, match="qualified"):
-        CandidateEvidence(
-            symbol="600000.SH",
-            strategy_results=(_result("600000.SH"),),
-            strategy_qualifications=(_qualification("600000.SH", qualified=False),),
-            market_validation=MarketValidation.CONFIRMED,
-            signal=Signal.NO_SIGNAL,
-        )
+    原 3 条「rejects / requires」用例逐条成行；循环只收集，断言在表外一次完成，
+    失败消息点名行 label（即原测试名）。
+    """
+    wrong = []
+    for label, payload, expected in CANDIDATE_EVIDENCE_REJECTION_CASES:
+        try:
+            CandidateEvidence(**payload)
+        except ValueError as exc:
+            if re.search(expected, str(exc)) is None:
+                wrong.append(
+                    f"{label}: 错误消息中找不到 {expected!r}，实际 {str(exc)!r}"
+                )
+        else:
+            wrong.append(f"{label}: 未抛出 ValueError")
+    assert not wrong, "CandidateEvidence 未拒绝非法构造:\n" + "\n".join(wrong)
 
 
 def test_candidate_evidence_allows_none_for_market_and_signal_representation() -> None:

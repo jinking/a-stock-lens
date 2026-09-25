@@ -6,6 +6,7 @@ are read from configuration and are deliberately not hard-coded, because
 `docs/ARCHITECTURE.md` §8.3 keeps them out of the engine.
 """
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -232,31 +233,62 @@ def test_confidence_stays_absent() -> None:
     assert all(result.confidence is None for result in scored.values())
 
 
-def test_weights_must_cover_the_required_factors() -> None:
-    with pytest.raises(ValueError, match="weights"):
-        _scanner({"ret_20d": 1.0})
+# 「非法权重配置必须被拒」四行：行序与原用例一致，label 即原测试名。
+# 列 = label, weights, expected：
+#   - `weights` 逐行保留原 `_scanner({...})` 的字面量；
+#   - `expected` 逐字取自原 `pytest.raises(..., match=...)` 的片段，
+#     比对方式与原断言同为 `re.search`。
+MOMENTUM_WEIGHT_GUARD_CASES = (
+    # test_weights_must_cover_the_required_factors
+    (
+        "test_weights_must_cover_the_required_factors",
+        {"ret_20d": 1.0},
+        "weights",
+    ),
+    # test_a_weight_for_an_unrequired_factor_is_rejected
+    (
+        "test_a_weight_for_an_unrequired_factor_is_rejected",
+        {
+            "ret_20d": 1.0,
+            "ret_60d": 1.0,
+            "proximity_52w_high": 1.0,
+            "avg_amount_20d": 1.0,
+        },
+        "weights",
+    ),
+    # test_negative_weights_are_rejected
+    (
+        "test_negative_weights_are_rejected",
+        {"ret_20d": -1.0, "ret_60d": 1.0, "proximity_52w_high": 1.0},
+        "negative",
+    ),
+    # test_weights_summing_to_zero_are_rejected
+    (
+        "test_weights_summing_to_zero_are_rejected",
+        {"ret_20d": 0.0, "ret_60d": 0.0, "proximity_52w_high": 0.0},
+        "zero",
+    ),
+)
 
 
-def test_a_weight_for_an_unrequired_factor_is_rejected() -> None:
-    with pytest.raises(ValueError, match="weights"):
-        _scanner(
-            {
-                "ret_20d": 1.0,
-                "ret_60d": 1.0,
-                "proximity_52w_high": 1.0,
-                "avg_amount_20d": 1.0,
-            }
-        )
+def test_invalid_weight_configurations_are_refused() -> None:
+    """四种非法权重配置各自以 ValueError 拒绝，消息须匹配原 `match=` 片段。
 
-
-def test_negative_weights_are_rejected() -> None:
-    with pytest.raises(ValueError, match="negative"):
-        _scanner({"ret_20d": -1.0, "ret_60d": 1.0, "proximity_52w_high": 1.0})
-
-
-def test_weights_summing_to_zero_are_rejected() -> None:
-    with pytest.raises(ValueError, match="zero"):
-        _scanner({"ret_20d": 0.0, "ret_60d": 0.0, "proximity_52w_high": 0.0})
+    原 4 条「must cover / is rejected」用例逐条成行；循环只收集，
+    断言在表外一次完成，失败消息点名行 label（即原测试名）。
+    """
+    wrong = []
+    for label, weights, expected in MOMENTUM_WEIGHT_GUARD_CASES:
+        try:
+            _scanner(weights)
+        except ValueError as exc:
+            if re.search(expected, str(exc)) is None:
+                wrong.append(
+                    f"{label}: 错误消息中找不到 {expected!r}，实际 {str(exc)!r}"
+                )
+        else:
+            wrong.append(f"{label}: 未抛出 ValueError")
+    assert not wrong, "非法权重配置未被拒绝:\n" + "\n".join(wrong)
 
 
 # --- explanation -------------------------------------------------------------
