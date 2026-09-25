@@ -491,4 +491,701 @@ Task 11 的两条 API 边界检查里：
 | Task 8 | `0c6426b` | −22 | 1094 | 1116−22=1094 ✓ | 两文件 36→14（snapshot 25→11 −14、job_manifest 11→3 −8），逐行谓词零丢失，全量 1094 全绿。**族口径修正**：计划按 −23 预算（snapshot 25→10、即省 15），实测并复核本族实为 **15** 名成员（`:112/:118/:136/:144/:155/:166/:176/:186/:193` 9 条 + `:279/:289/:300` 3 条 + `:368/:380/:392` 3 条），15→1 因此只省 −14，snapshot 收在 25→11；job_manifest 族 9 名（`:86/:90/:99/:105/:113/:119/:125/:138/:146`）→ 1 张表，11→3（−8）。两张表共 24 行，输入与期望逐字保留（第 10 行的 `del ref["available_at"]` 与第 15 行的 v1/v2 就地构造由命名函数承载，函数体即原语句）；**负控证据**：逐行「抹掉该 finding 代码」变异 15/15 被检出且失败消息点名行 label，另 observed 擦除变异 2/2（snapshot 10/10+1、job_manifest 5/5+1；24 行 payload 各自驱动出不同 observed，详见 task-8-report.md）。负例 6 条（snapshot `:126`/`:210`/`:271`/`:311`/`:357`/`:411`，其中 `:210` 是审计漏列的负例）、定位断言 `:242`、真实数据三例 `:431/:471/:511`，以及 job_manifest 的 `:82`/`:154` 均未动：全部非族函数 AST 逐字节相同，15+9 个被删成员与族清单完全吻合 |
 | Task 9 | `8b5cb8c` | −17 | 1077 | 1094−17=1077 ✓ | 八文件 71→54（candidate_evidence 8→6、industry_market_evidence 5→2、percentile_scorer 10→8、strategy_scoring 23→20、universe_config 7→5、market_evidence 7→6、candidate_primary_strategy 5→3、command_snapshot_ownership 6→4），八族 25 名成员→8 张表各 1 条合并用例（candidate_evidence `:71/:82/:93`、industry_market_evidence `:37/:89/:105/:120`、percentile_scorer `:183/:188/:194`、strategy_scoring `:235/:240/:252/:257`、universe_config `:49/:58/:66`、market_evidence `:166/:180`、candidate_primary_strategy `:38/:47/:57`、command_snapshot_ownership `:114/:127/:170`），与任务书的 25→8 完全吻合、**无偏差**（实测 −17 = 计划 −17；收口 1077 = §7.2 修正口径 1298−114−107，Task 5 单表已回补）。**逐条谓词零丢失**：25 名成员的断言逐行落为表内期望列——`re.search` 四族（candidate_evidence / percentile_scorer / strategy_scoring / universe_config）逐字取原 `match=` 片段，industry_market_evidence 保字面 `in`，market_evidence 保 `is None`，candidate_primary_strategy 保 `==`，command_snapshot_ownership 保 `exit_code == 0` 与 `_written_snapshots(root) == ()`；99 个字面量按值/按文本全部保留，9 处 docstring（percentile ×1、universe ×2、primary_strategy ×3、command_ownership ×3）与 industry 1 处行内注释逐字折为行上注释；非族顶层函数 71 个源码段逐字节相同、基线顶层非 def 行全部仍在（`task-9-preservation-check.txt`）。command_snapshot_ownership 三行各用 `local_tmp/<label>` 子目录作快照根（原用例各拿一份新 `local_tmp`），行间不共享现场。**负控证据**：8 张表 25 行逐行单独变异期望/输入，25/25 被检出且失败消息只点名对应行 label（各文件基线自检先 PASS），另 25 行原始输入逐行 dump 出互不相同的真实信号（详见 task-9-report.md） |
 | Task 10 | `55398f3` | −8 | 1069 | 1077−8=1069 ✓ | 五文件 5 处改动 = 4 条纯 DELETE + 2 组两行表驱动合并（−8），全量 1069 全绿。**6 条 DELETE 的权威替代**（`文件::测试名`，逐条断言对照见 task-10-report.md）：`tests/unit/test_snapshot_store.py::test_unwritten_date_reads_empty` → `tests/unit/test_duckdb_snapshot_store.py::test_an_absent_snapshot_reads_as_empty`；`test_snapshot_store.py::test_kinds_do_not_collide` → `test_duckdb_snapshot_store.py::test_kinds_are_kept_apart` + `::test_candidate_snapshot_conflict_refused_across_both_stores` + `::test_a_written_snapshot_reads_back`（后两条承接「恰好一条记录」的列表等值断言）；`test_snapshot_store.py::test_different_payload_for_the_same_kind_and_date_is_rejected` → `test_duckdb_snapshot_store.py::test_rewriting_the_same_key_with_different_content_is_refused`；`test_snapshot_store.py::test_candidate_snapshot_conflict_cannot_be_overwritten_or_bypassed` → 组合 `test_duckdb_snapshot_store.py::test_candidate_snapshot_conflict_refused_across_both_stores` + 同文件 `test_snapshot_store.py::test_a_conflict_names_the_kind_and_the_date`（后者按台账约束未随族改写；该文件本轮只删 4 个函数、其余 7 例逐字节未动）；`tests/unit/test_qualification_context.py::test_missing_approved_qualification_factor_fails_closed` → `tests/integration/test_qualification_pipeline.py::test_growth_qualification_fails_closed_when_roe_evidence_is_missing`（`:118`/`:120` 逐条承接，另多一条 `qualified is False`）；`tests/integration/test_candidate_qualification_pipeline.py::test_no_approved_absolute_rules_blocks_build_candidates` → `tests/integration/test_daily_pipeline.py::test_the_candidate_stage_is_blocked_while_its_layers_are_missing`（T4 合并后 `qualifiers=None` 行的 `run.error` 断言逐字含 `"strategy qualification rules are not configured"`）。**2 组合并（两行表驱动，断言行逐行保留）**：T4 `tests/integration/test_daily_pipeline.py` 的 `test_the_blocked_candidate_stage_names_the_deferred_policy` 并入 `test_the_candidate_stage_is_blocked_while_its_layers_are_missing`——`layers-missing`（两层齐缺：两条 error 文案 + `candidates == ()`）与 `policy-deferred`（生产资格规则已装配、仅候选政策 Deferred；该行原本只断言阻断 + 文案，故不额外加强 `candidates`）两行各用 `local_tmp/<label>` 作运行根、行间不共享现场；T12 `tests/integration/test_daily_production_evidence.py` 的 step5（有效量不足）并入 step4（缺失行业证据）——同一 fail-closed 规则的两个缺失维度，两行 setUp 语句由具名准备函数 `_missing_industry_evidence_case` / `_insufficient_volume_bars_case` 逐字承载，公共 `run_daily` 参数与逐条断言（DETECT_REGIME SUCCEEDED、MARKET_VALIDATE FAILED、具体文案、下游 BUILD_CANDIDATES 未跑、`candidates == 0`、无候选快照）按行保留。**KEEP 的 8 项未被碰**：T1 余 7 例、T2b、T3、T6、T7、T8、T9、T10、T11（`tests/unit/test_bootstrap_batch_fallback.py` 本轮零改动，任务书关于冻结文件的注意不适用）；5 个被改文件里未登记的顶层函数 45/45 源码段 AST 逐字节相同，未列入改动集的文件全部零 diff（`task-10-preservation-check.txt`）。**负控**：两张表 11 项变异（逐行文案改写 + 6 个谓词取反）11/11 被检出且失败消息只点名被变异那一行的 label（`task-10-negative-control.txt`）。**偏差**：计划 −20 → 实测 −8（= §5.2 小计），缺口 **−12** 记入 Task 15；差异原因见 §5.4（T3/T8/T9/T10/T11/T2b 改判 KEEP、T1 只删 4 而非 6、T4/T12 由 DELETE 改 MERGE 且减量不变） |
-| Task 11 | 本提交 | −6 | 1063 | 1069−6=1063 ✓ | 四行扫描表化 + 边界检查方向反转 + docs 3→1 + 三处恒真断言，全量 1063 全绿。**①「模块 × 禁用词」总表**落在 `tests/unit/test_financial_normalizer.py`（原 `test_the_normalizer_never_reaches_for_a_provider` 改名 `test_architecture_boundaries_hold_for_modules_and_the_watcher_script`），路径一律 `ROOT` 锚定、词表**按文件原样分列、未取并集**：`src/astock_lens/data/normalize/financials.py` 5 词（subprocess/urlopen/Runner/.fetch(/requests）、`src/astock_lens/factors/fundamental.py` 4 词（同上但无 `Runner`）、`src/astock_lens/api/app.py` 12 词（factors.builtin/strategies.momentum/AverageAmountFactor/MomentumScanner/astock_lens.pipelines/build_scanner/strategy_stage/factor_stage/run_analysis/trade_gate.engine/TradeGateEngine/ThesisAuditAdapter）、`scripts/watch-bootstrap.sh` 3 个禁用词（5301/REQUIRED=/2026-09-17）；`required` 列由第 4 行携带 1 个必须词 `manifest`（正向断言「watcher 的进度必须从本次运行的清单推导」保留）。循环遍历所有行、循环体内无 `assert`，先收集后一次性断言，失败消息点名路径与词；原四条用例的 docstring（`ARCHITECTURE.md` §4.3 两处、§2 一处）与逐行中文说明逐字折为行上注释。**②API 边界检查保留方向反转**（§5.4 第 3 条）：保留并表化 12 词文本扫描 `test_api_never_imports_the_computation_engines`，删除 4 词 AST `test_api_module_imports_strictly_bounded`（−1）。逐词核对 **4 ⊆ 12**：`astock_lens.pipelines`/`run_analysis`/`factor_stage`/`strategy_stage` 全部在 12 词内；两侧解析方式下「import 命中 ⟹ 源文本命中」成立（AST 侧取 `ast.Import.alias.name` 与 `ast.ImportFrom.module`/`alias.name`，都是源码中逐字出现的标识符文本，文本扫描是严格超集，反向不成立——注释与字符串也会命中文本扫描）→ 检测集 4 ⊊ 12，反转避免丢 8 词。另核对 `Path(api_module.__file__)` 与 `ROOT/src/astock_lens/api/app.py`：前者经共享 venv 的 editable 安装解析到主仓 `/Users/huangjinjin/Documents/ChatGPT/a-stock-lens/src/astock_lens/api/app.py`（绝对路径不同），两者 sha256 同为 `735d1b3f1edabba44e3c09bf3ab124d1bf86988cd614a4934036871fa41ff58a`、逐字节相同，换 `ROOT` 锚定后检测内容不变；`api_module` 随之成为未用导入，为过 `ruff check` 一并删除（test_api.py 中唯一超出删除函数范围的一行）。**③docs 3→1**：`tests/unit/test_docs_consistency.py` 三条用例合并为 `test_documentation_does_not_claim_stale_status`（−2），11 条过期文案逐字进表（README 4 + `docs/ROADMAP.md` 3 + `docs/REMAINING_PRODUCT_BLOCKERS.md` 4），失败消息点名 `path` 与 `phrase`，文件头中文注释与 `_repo_root()` 保留。**④三处恒真断言删除**（A18：删断言行、用例保留、±0）：`tests/unit/test_normalized_dataset_dividends.py:16`（被下一行 `ds_empty.dividend_events == ()` 蕴含）、`tests/unit/test_market_signal_readiness.py:196`（被其下 `strat.samples` 迭代蕴含）、`tests/unit/test_westock_bars.py:258`（被其下 `progress_callback(100, 5568, 97)` 调用蕴含）——逐处打开核实蕴含者仍在、用例与其余断言一字未动。**⑤批次 1–4 收口**：1298 → **1063 collected**（实测 −235），距验收线 ≤1040 尚差 **23**；收口数字与 §7.2 四批细目（−114/−107/−20/−6 = −247）相距 −12，加上验收所需 −258 的差 11，共 23，须由 Task 15 备用池补足（不自凑数、不删未登记断言）。**证据**：8 个改动文件 96 collected / 96 passed（基线 102）；四行表 24 个禁用词 + 1 个必须词逐词变异 25/25 被检出、docs 11 条文案逐条变异 11/11 被检出；`ruff check tests/` 通过、8 文件 `ruff format --check` 通过、`mypy` 167 源码文件零问题；未列入改动集的文件零 diff，`tests/unit/test_bootstrap_progress.py` 的 `ROOT` 常量按「其余用例零改动」保留（该文件因此不再引用它，无 lint 影响） |
+| Task 11 | `20baf65` | −6 | 1063 | 1069−6=1063 ✓ | 四行扫描表化 + 边界检查方向反转 + docs 3→1 + 三处恒真断言，全量 1063 全绿。**①「模块 × 禁用词」总表**落在 `tests/unit/test_financial_normalizer.py`（原 `test_the_normalizer_never_reaches_for_a_provider` 改名 `test_architecture_boundaries_hold_for_modules_and_the_watcher_script`），路径一律 `ROOT` 锚定、词表**按文件原样分列、未取并集**：`src/astock_lens/data/normalize/financials.py` 5 词（subprocess/urlopen/Runner/.fetch(/requests）、`src/astock_lens/factors/fundamental.py` 4 词（同上但无 `Runner`）、`src/astock_lens/api/app.py` 12 词（factors.builtin/strategies.momentum/AverageAmountFactor/MomentumScanner/astock_lens.pipelines/build_scanner/strategy_stage/factor_stage/run_analysis/trade_gate.engine/TradeGateEngine/ThesisAuditAdapter）、`scripts/watch-bootstrap.sh` 3 个禁用词（5301/REQUIRED=/2026-09-17）；`required` 列由第 4 行携带 1 个必须词 `manifest`（正向断言「watcher 的进度必须从本次运行的清单推导」保留）。循环遍历所有行、循环体内无 `assert`，先收集后一次性断言，失败消息点名路径与词；原四条用例的 docstring（`ARCHITECTURE.md` §4.3 两处、§2 一处）与逐行中文说明逐字折为行上注释。**②API 边界检查保留方向反转**（§5.4 第 3 条）：保留并表化 12 词文本扫描 `test_api_never_imports_the_computation_engines`，删除 4 词 AST `test_api_module_imports_strictly_bounded`（−1）。逐词核对 **4 ⊆ 12**：`astock_lens.pipelines`/`run_analysis`/`factor_stage`/`strategy_stage` 全部在 12 词内；两侧解析方式下「import 命中 ⟹ 源文本命中」成立（AST 侧取 `ast.Import.alias.name` 与 `ast.ImportFrom.module`/`alias.name`，都是源码中逐字出现的标识符文本，文本扫描是严格超集，反向不成立——注释与字符串也会命中文本扫描）→ 检测集 4 ⊊ 12，反转避免丢 8 词。另核对 `Path(api_module.__file__)` 与 `ROOT/src/astock_lens/api/app.py`：前者经共享 venv 的 editable 安装解析到主仓 `/Users/huangjinjin/Documents/ChatGPT/a-stock-lens/src/astock_lens/api/app.py`（绝对路径不同），两者 sha256 同为 `735d1b3f1edabba44e3c09bf3ab124d1bf86988cd614a4934036871fa41ff58a`、逐字节相同，换 `ROOT` 锚定后检测内容不变；`api_module` 随之成为未用导入，为过 `ruff check` 一并删除（test_api.py 中唯一超出删除函数范围的一行）。**③docs 3→1**：`tests/unit/test_docs_consistency.py` 三条用例合并为 `test_documentation_does_not_claim_stale_status`（−2），11 条过期文案逐字进表（README 4 + `docs/ROADMAP.md` 3 + `docs/REMAINING_PRODUCT_BLOCKERS.md` 4），失败消息点名 `path` 与 `phrase`，文件头中文注释与 `_repo_root()` 保留。**④三处恒真断言删除**（A18：删断言行、用例保留、±0）：`tests/unit/test_normalized_dataset_dividends.py:16`（被下一行 `ds_empty.dividend_events == ()` 蕴含）、`tests/unit/test_market_signal_readiness.py:196`（被其下 `strat.samples` 迭代蕴含）、`tests/unit/test_westock_bars.py:258`（被其下 `progress_callback(100, 5568, 97)` 调用蕴含）——逐处打开核实蕴含者仍在、用例与其余断言一字未动。**⑤批次 1–4 收口**：1298 → **1063 collected**（实测 −235），距验收线 ≤1040 尚差 **23**；收口数字与 §7.2 四批细目（−114/−107/−20/−6 = −247）相距 −12，加上验收所需 −258 的差 11，共 23，须由 Task 15 备用池补足（不自凑数、不删未登记断言）。**证据**：8 个改动文件 96 collected / 96 passed（基线 102）；四行表 24 个禁用词 + 1 个必须词逐词变异 25/25 被检出、docs 11 条文案逐条变异 11/11 被检出；`ruff check tests/` 通过、8 文件 `ruff format --check` 通过、`mypy` 167 源码文件零问题；未列入改动集的文件零 diff，`tests/unit/test_bootstrap_progress.py` 的 `ROOT` 常量按「其余用例零改动」保留（该文件因此不再引用它，无 lint 影响） |
+| Task 12 | 本提交 | 0 | 1063 | 1063−0=1063 ✓ | 文件合并（净 0）：136 → 65 个含用例文件。91 个 ≤9 例源文件（在 `20baf65` 上各 ≤9 例、合计 433 个 `def test_*`）整体搬入 20 个域文件 = 计划 14 桶 + 6 个同域长尾桶（`test_factor / strategy / qualification / market / data / platform_long_tail.py`，来源与归属理由见 §9）。**零丢失证据**：433/433 用例体逐字节一致、433/433 词法一致、非测试顶层定义 0 未落点、0 问题（`task-12-verify.py`，可用 `git archive 20baf65` 基线复跑，复跑结果一致）；case 数零变化（1063 → 1063）；全量 1063 passed 全绿；`ruff check tests/` 与 20 个新文件 `ruff format --check` 通过；`mypy` 通过。同名 helper / 常量按域前缀重命名并同步引用点（`task-12-rename-manifest.json`），未删除任何 helper；冻结 5 文件、`tests/artifacts/*`、`tests/contract/*`、`tests/stress/*`、`test_signal_detector.py`、`conftest.py`、`support.py` 零改动。**与任务书偏差**：删除 91 个（任务书字面 84 个）、目标文件 20 个（计划 14 桶 + 授权长尾 6 桶）——14 桶表为推荐值，任务书明示「未能归入上表的按同域就近归并」；最终 65 个文件与任务书「约 65」精确一致。**执行说明**：合并由被轮次上限中断的执行代理完成，由后续会话独立复核全部证据后落账提交 |
+
+---
+
+## 9. Task 12 文件合并映射表
+
+**范围**：136 → 65 个含用例文件；91 个 ≤9 例源文件（合计 433 个 `def test_*`）整体搬入 20 个域文件。
+搬移后 case 数零变化（1063 → 1063）；每个源文件的每个测试函数与每个非测试顶层定义均有唯一落点
+（`task-12-verify.py` 复核：433/433 逐字节一致、0 未落点）。
+
+### 9.1 归属摘要表
+
+| 目标文件 | 来源数 | 例数 | 归属理由 |
+| --- | --- | --- | --- |
+| `tests/unit/test_candidate_stage.py` | 8 | 41 | Candidate 阶段：构建 / 校准 / 发现 / 证据 / 政策 / 主策略 / 路由 / v2 影响 |
+| `tests/unit/test_bootstrap_stage.py` | 2 | 8 | Bootstrap 阶段：扫描成本 / 调度器 |
+| `tests/unit/test_quality_gates.py` | 2 | 14 | 数据质量门：日线 / 财务 |
+| `tests/unit/test_dividends.py` | 4 | 11 | 分红域：覆盖 / 事件规范化 / 收益率因子 / 规范化数据集 |
+| `tests/unit/test_market_stage.py` | 4 | 17 | 市场阶段：市场证据 / 行业证据 / 信号就绪 / 基准证据 |
+| `tests/unit/test_cli_surface.py` | 3 | 25 | CLI 表面：cli / 行业加载 / 研究适配 |
+| `tests/unit/test_valuation_stage.py` | 2 | 16 | 估值阶段：覆盖 / 规范化 |
+| `tests/unit/test_calibration_stage.py` | 2 | 12 | 校准阶段：因子分布 / 资格影响 |
+| `tests/unit/test_platform_basics.py` | 4 | 9 | 平台基础：settings / import / 交易日历 / 文档一致性 |
+| `tests/unit/test_universe_stage.py` | 3 | 19 | Universe 阶段：配置 / 合格发现 / 发现服务 |
+| `tests/unit/test_trade_gate_contracts.py` | 3 | 8 | Trade Gate 契约域唯一权威（模型 / Profile / 审计 Adapter）——任务书指定例外 |
+| `tests/unit/test_trade_gate_evaluation.py` | 9 | 18 | Trade Gate 评估：context / engine / scoring / veto / store / duckdb_store / metrics / replay / service |
+| `tests/unit/test_factor_long_tail.py` | 4 | 27 | 因子域长尾（均额 / 距高点 / 估值因子 / 注册表）——同域就近归并 |
+| `tests/unit/test_strategy_long_tail.py` | 5 | 29 | 策略域长尾（动量扫描 / 扫描器 / 因子索引 / 平价 / 百分位）——同域就近归并 |
+| `tests/unit/test_qualification_long_tail.py` | 3 | 16 | 资格域长尾（配置 / 上下文 / 资格扫描）——同域就近归并 |
+| `tests/unit/test_market_long_tail.py` | 2 | 13 | 市场域长尾（regime / validator）——同域就近归并 |
+| `tests/unit/test_data_long_tail.py` | 2 | 15 | 数据域长尾（CSV 安全规范化 / 快照存储）——同域就近归并 |
+| `tests/unit/test_platform_long_tail.py` | 2 | 10 | 平台 / 工具域长尾（领域模型 / Jev 分诊）——同域就近归并 |
+| `tests/integration/test_cli_entry_flows.py` | 12 | 61 | 集成层 CLI 入口流程 |
+| `tests/integration/test_pipeline_flows.py` | 15 | 64 | 集成层 pipeline / workflow 流程 |
+
+合计 91 个来源、433 例；其中 6 个长尾桶为任务书授权的「同域就近归并」落点。
+
+### 9.2 逐源映射（源文件 → 目标文件 → 用例名；RENAME 行为同名 helper / 常量 / 夹具的域前缀改名）
+
+```text
+# 源文件 -> 目标文件（Task 12）
+
+tests/unit/test_candidate_builder.py -> tests/unit/test_candidate_stage.py  (8)
+    test_next_action_defaults_to_the_inert_choice
+    test_signal_and_market_validation_stay_unset
+    test_lineage_mismatch_is_refused
+    test_reasons_and_risks_are_aggregated_from_evidence
+    test_candidate_is_a_research_object_not_a_recommendation
+    test_candidate_lineage_carries_complete_stage_versions
+    test_candidate_builder_trend_weaken_under_approved_decision_e1
+    test_candidate_builder_no_signal_under_approved_decision_f1
+    RENAME LINEAGE -> BLD_LINEAGE
+tests/unit/test_candidate_calibration.py -> tests/unit/test_candidate_stage.py  (5)
+    test_empty_industry_map_raises_value_error
+    test_calibration_report_statistics_and_warning
+    test_deterministic_rendering_byte_for_byte
+    test_the_report_still_builds_without_the_new_evidence_fields
+    test_the_denominator_is_the_scored_population_not_the_industry_map
+    RENAME AS_OF -> CALIBRATION_AS_OF
+    RENAME LINEAGE -> CALIBRATION_LINEAGE
+tests/unit/test_candidate_discovery.py -> tests/unit/test_candidate_stage.py  (5)
+    test_screen_candidates_preserves_stored_authoritative_order
+    test_screen_candidates_extracts_primary_and_all_qualified_strategies
+    test_screen_candidates_keeps_signal_risks_visible
+    test_screen_candidates_respects_limit_and_tracks_total_count
+    test_screen_candidates_empty_records
+    RENAME AS_OF -> DISCOVERY_AS_OF
+tests/unit/test_candidate_evidence.py -> tests/unit/test_candidate_stage.py  (6)
+    test_candidate_evidence_valid_construction
+    test_candidate_evidence_rejects_invalid_constructions
+    test_candidate_evidence_allows_none_for_market_and_signal_representation
+    test_candidate_selection_immutability_and_fields
+    test_candidate_builder_assembles_from_selection_and_evidence
+    test_candidate_builder_rejects_symbol_mismatch
+    RENAME AS_OF -> EVIDENCE_AS_OF
+tests/unit/test_candidate_policy.py -> tests/unit/test_candidate_stage.py  (6)
+    test_cross_sectional_policy_protocol_conformance
+    test_no_reviewed_policy_is_an_error_not_an_empty_scan
+    test_the_policy_is_what_makes_a_candidate
+    test_score_does_not_override_a_rejecting_policy
+    test_the_builder_does_not_derive_next_action_from_a_score
+    test_a_policy_verdict_is_ineligible_without_eligible_evidence
+    RENAME AS_OF -> POLICY_AS_OF
+    RENAME _qualification -> _policy_qualification
+    RENAME _result -> _policy_result
+tests/unit/test_candidate_primary_strategy.py -> tests/unit/test_candidate_stage.py  (3)
+    test_primary_qualified_strategy_selection_rules
+    test_no_qualified_strategy_raises_explicit_value_error
+    test_candidate_model_carries_primary_strategy_id
+    RENAME AS_OF -> PRIMARY_STRATEGY_AS_OF
+tests/unit/test_candidate_routing.py -> tests/unit/test_candidate_stage.py  (5)
+    test_a_qualified_verdict_routes_to_watch
+    test_an_unqualified_verdict_routes_to_ignore
+    test_only_two_of_the_four_actions_are_reachable
+    test_the_routed_action_reaches_a_candidate
+    test_score_routing_api_is_absent
+    RENAME AS_OF -> ROUTING_AS_OF
+    RENAME _result -> _routing_result
+tests/unit/test_candidate_v2_impact.py -> tests/unit/test_candidate_stage.py  (3)
+    test_compute_candidate_v2_impact_explicit_counts
+    test_candidate_v2_impact_markdown_render
+    test_candidate_v2_impact_cli_execution_and_read_only
+    RENAME AS_OF -> V2_IMPACT_AS_OF
+    RENAME _factor -> _v2_impact_factor
+    RENAME _qual -> _v2_impact_qual
+tests/unit/test_bootstrap_scan_cost.py -> tests/unit/test_bootstrap_stage.py  (4)
+    test_the_flow_reads_the_landed_file_a_constant_number_of_times
+    test_the_first_window_is_wide_enough_to_finish_in_one_round
+    test_one_hung_symbol_must_not_block_the_whole_chunk
+    test_a_symbol_that_already_has_enough_bars_is_not_fetched_again
+    RENAME END_DATE -> SCAN_COST_END_DATE
+tests/unit/test_bootstrap_scheduler.py -> tests/unit/test_bootstrap_stage.py  (4)
+    test_fast_later_symbol_is_checkpointed_before_slow_first_symbol
+    test_max_inflight_is_bounded_for_5300_fake_symbols
+    test_all_hanging_akshare_workers_are_terminated_without_serial_timeouts
+    test_all_success_requests_do_not_exceed_symbol_count
+    RENAME AS_OF -> SCHEDULER_AS_OF
+    RENAME BAR_COLUMNS -> SCHEDULER_BAR_COLUMNS
+tests/unit/test_daily_bar_quality_gate.py -> tests/unit/test_quality_gates.py  (6)
+    test_clean_dataset_passes_with_no_issues
+    test_each_documented_rule_fires_on_the_dirty_fixture
+    test_invalid_findings_are_p2_and_do_not_block_a_scan
+    test_empty_dataset_is_a_blocking_p1
+    test_valid_bars_excludes_only_the_flagged_ones
+    test_gate_does_not_mutate_its_input
+tests/unit/test_financial_quality_gate.py -> tests/unit/test_quality_gates.py  (8)
+    test_a_clean_observation_produces_no_findings
+    test_a_missing_value_is_null_not_a_defect
+    test_an_unreadable_cell_makes_the_key_invalid
+    test_a_duplicated_key_is_invalid_and_dropped_together
+    test_different_periods_are_not_duplicates
+    test_an_empty_statement_is_a_blocking_p1_finding
+    test_a_single_bad_measurement_does_not_block_a_whole_market_scan
+    test_findings_carry_the_key_a_reader_needs
+    RENAME AS_OF -> FIN_AS_OF
+tests/unit/test_dividend_coverage.py -> tests/unit/test_dividends.py  (4)
+    test_explicit_universe_denominator_required
+    test_status_split_and_coverage_metrics
+    test_deterministic_report_rendering
+    test_dividend_coverage_cli_read_only
+    RENAME SHANGHAI -> COVERAGE_SHANGHAI
+    RENAME AS_OF -> COV_AS_OF
+tests/unit/test_dividend_event_normalizer.py -> tests/unit/test_dividends.py  (4)
+    test_parse_implemented_dividend_event
+    test_parse_proposal_event_preserves_source_status
+    test_missing_dates_remain_none
+    test_source_evidence_preservation
+tests/unit/test_dividend_yield_factor.py -> tests/unit/test_dividends.py  (2)
+    test_dividend_yield_ttm_value_cases
+    test_dividend_yield_ttm_status_boundaries
+    RENAME SHANGHAI -> YIELD_FACTOR_SHANGHAI
+    RENAME AS_OF -> YIELD_FACTOR_AS_OF
+tests/unit/test_normalized_dataset_dividends.py -> tests/unit/test_dividends.py  (1)
+    test_normalized_dataset_supports_dividend_events
+    RENAME SHANGHAI -> ND_SHANGHAI
+    RENAME AS_OF -> NORMALIZED_DATASET_AS_OF
+tests/unit/test_market_evidence.py -> tests/unit/test_market_stage.py  (6)
+    test_build_stock_market_evidence_computes_exact_volume_ratio
+    test_fewer_than_20_bars_returns_none_volume_ratio
+    test_future_bars_are_strictly_excluded
+    test_missing_or_error_factors_become_none
+    test_relative_strength_60d_exact_calculation
+    test_missing_relative_strength_inputs_result_in_none
+    RENAME AS_OF -> MARKET_EVIDENCE_AS_OF
+tests/unit/test_industry_market_evidence.py -> tests/unit/test_market_stage.py  (2)
+    test_industry_evidence_unavailable_rejections
+    test_exact_industry_excess_calculation
+    RENAME AS_OF -> INDUSTRY_EVIDENCE_AS_OF
+tests/unit/test_market_signal_readiness.py -> tests/unit/test_market_stage.py  (5)
+    test_deterministic_quantiles_under_different_input_orders
+    test_missing_values_never_become_zero
+    test_scope_strictly_restricted_to_qualified_stocks
+    test_representative_sampling_deterministic_with_tie_breaking
+    test_assert_vocabulary_boundary_no_verdict_fields
+    RENAME AS_OF -> SIGNAL_READINESS_AS_OF
+tests/unit/test_benchmark_evidence.py -> tests/unit/test_market_stage.py  (4)
+    test_compute_benchmark_evidence_exact_calculation
+    test_insufficient_bars_raises_benchmark_evidence_unavailable
+    test_empty_bars_raises_benchmark_evidence_unavailable
+    test_future_bars_strictly_excluded
+tests/unit/test_cli.py -> tests/unit/test_cli_surface.py  (9)
+    test_cli_help
+    test_doctor_reports_the_factor_set_and_its_weights
+    test_factors_compute_prints_one_document_per_symbol_and_factor
+    test_scan_reports_a_ranking_and_writes_no_snapshot
+    test_scan_reports_every_candidate_with_a_score
+    test_universe_build_reports_the_verdicts_without_writing
+    test_scan_rejects_a_malformed_date
+    test_calendar_commands_report_trading_status
+    test_sync_research_on_non_trading_day_skips_market_sync
+tests/unit/test_cli_industry_loader.py -> tests/unit/test_cli_surface.py  (7)
+    test_step1_exact_date
+    test_step2_latest_prior_date
+    test_step3_future_date_exclusion
+    test_step4_no_data_raises_file_not_found
+    test_ambiguous_membership_fails_closed
+    test_ignores_non_iso_date_csv
+    test_includes_supplemental_industry_memberships
+tests/unit/test_cli_research_adapter.py -> tests/unit/test_cli_surface.py  (9)
+    test_submit_returns_the_job_the_command_reported
+    test_the_request_travels_to_the_command_unchanged
+    test_status_passes_the_state_through_unchanged
+    test_result_returns_the_summary_and_the_artifact_reference
+    test_an_unconfigured_command_is_refused_by_name
+    test_the_command_is_read_from_the_environment
+    test_a_failing_command_reports_the_failure_instead_of_a_result
+    test_unreadable_output_is_refused_instead_of_guessed
+    test_an_incomplete_payload_is_refused
+tests/unit/test_valuation_coverage.py -> tests/unit/test_valuation_stage.py  (8)
+    test_an_uncollected_symbol_is_uncovered_not_zero
+    test_a_strategy_needs_every_valuation_factor_it_declares
+    test_a_future_observation_does_not_count_at_this_point_in_time
+    test_a_non_positive_multiple_is_not_scoreable
+    test_a_strategy_without_factor_configs_fails_instead_of_approximating
+    test_an_empty_universe_is_refused
+    test_a_strategy_without_valuation_factors_is_not_reported_as_covered
+    test_the_report_serializes_to_json_shape
+    RENAME ROOT -> COVERAGE_ROOT
+    RENAME AS_OF -> COVERAGE_AS_OF
+tests/unit/test_valuation_normalizer.py -> tests/unit/test_valuation_stage.py  (8)
+    test_the_daily_series_becomes_dated_observations
+    test_the_header_metrics_borrow_the_newest_series_date
+    test_a_categorical_label_is_evidence_not_a_number
+    test_missing_markers_never_become_zero
+    test_every_metric_declares_a_unit_or_is_a_label
+    test_a_sector_block_without_a_series_is_dated_at_the_query_day
+    test_an_empty_source_reports_its_status_instead_of_inventing_rows
+    test_a_block_without_an_instrument_is_reported_not_guessed
+tests/unit/test_calibration_factor_distribution.py -> tests/unit/test_calibration_stage.py  (7)
+    test_quantiles_come_from_value_observations_only
+    test_a_factor_with_no_values_reports_no_quantiles
+    test_samples_carry_score_percentile_and_factor_evidence
+    test_the_report_records_the_population_it_was_computed_on
+    test_the_boundary_reports_rank_and_score_as_two_separate_numbers
+    test_a_decision_grade_report_refuses_incomplete_industry_coverage
+    test_rendering_is_byte_stable_under_shuffled_input
+tests/unit/test_qualification_impact.py -> tests/unit/test_calibration_stage.py  (5)
+    test_counts_are_computed_independently
+    test_failure_reasons_aggregate_by_factor
+    test_boundary_samples_are_deterministic
+    test_qualifier_without_absolute_rule_fails_loudly
+    test_unrecognized_risk_text_is_not_dropped
+    RENAME AS_OF -> QUALIFICATION_IMPACT_AS_OF
+    RENAME _factor -> _qi_factor
+    RENAME _result -> _qi_result
+tests/unit/test_settings.py -> tests/unit/test_platform_basics.py  (1)
+    test_load_app_config_reads_local_storage_paths
+tests/unit/test_import.py -> tests/unit/test_platform_basics.py  (1)
+    test_package_imports
+tests/unit/test_trading_calendar.py -> tests/unit/test_platform_basics.py  (6)
+    test_regular_weekday_is_trade_date
+    test_weekend_is_not_trade_date
+    test_statutory_holiday_is_not_trade_date
+    test_latest_trade_date_on_trade_date_returns_self
+    test_latest_trade_date_on_weekend_returns_previous_friday
+    test_custom_dates_override
+tests/unit/test_docs_consistency.py -> tests/unit/test_platform_basics.py  (1)
+    test_documentation_does_not_claim_stale_status
+tests/unit/test_universe_config.py -> tests/unit/test_universe_stage.py  (5)
+    test_repository_config_loads
+    test_liquidity_floor_carries_the_owner_supplied_value
+    test_long_suspension_is_deferred_not_defaulted
+    test_broken_configurations_are_refused
+    test_digest_is_stable_and_content_sensitive
+tests/unit/test_qualified_discovery.py -> tests/unit/test_universe_stage.py  (6)
+    test_screen_qualified_returns_only_dual_pass
+    test_screen_qualified_deterministic_order
+    test_screen_qualified_coverage_before_limit
+    test_screen_qualified_zero_qualified_warns
+    test_screen_qualified_missing_qualifier_fails_loudly
+    test_qualified_screen_query_rejects_non_positive_limit
+    RENAME _strategy_result -> _qualified_strategy_result
+tests/unit/test_discovery_service.py -> tests/unit/test_universe_stage.py  (8)
+    test_screen_strategy_orders_ranked_results_best_first
+    test_screen_strategy_tie_breaking_order
+    test_screen_strategy_missing_values_order_and_preservation
+    test_screen_strategy_filters
+    test_screen_strategy_query_validation
+    test_screen_strategy_coverage_calculated_before_filters
+    test_summarize_strategies
+    test_summarize_strategies_empty
+    RENAME AS_OF -> DISCOVERY_AS_OF
+tests/unit/test_trade_gate_models.py -> tests/unit/test_trade_gate_contracts.py  (3)
+    test_trade_gate_vocab_is_exact
+    test_trade_intent_rejects_naive_time
+    test_risk_proposal_computes_loss_without_inventing_account_limit
+tests/unit/test_trade_gate_profiles.py -> tests/unit/test_trade_gate_contracts.py  (2)
+    test_profiles_sum_to_100_and_use_fixed_thresholds
+    test_invalid_weight_total_is_rejected
+tests/unit/test_trade_gate_audit_adapter.py -> tests/unit/test_trade_gate_contracts.py  (3)
+    test_phase_one_does_not_receive_thesis
+    test_confidence_adjustment_is_exact
+    test_adapter_rejects_invalid_output
+tests/unit/test_trade_gate_context.py -> tests/unit/test_trade_gate_evaluation.py  (3)
+    test_eod_snapshot_does_not_invent_intraday_facts
+    test_overlay_facts_are_explicitly_carried
+    test_missing_all_snapshots_is_distinguished
+    RENAME NOW -> CTX_NOW
+tests/unit/test_trade_gate_engine.py -> tests/unit/test_trade_gate_evaluation.py  (2)
+    test_event_without_intraday_evidence_waits
+    test_hard_veto_overrides_high_weighted_score
+    RENAME _intent -> _engine_intent
+tests/unit/test_trade_gate_scoring.py -> tests/unit/test_trade_gate_evaluation.py  (3)
+    test_event_sector_and_relative_strength_mapping
+    test_swing_rr_is_reward_risk_transform
+    test_position_reuses_strategy_percentiles
+    RENAME NOW -> SCORING_NOW
+tests/unit/test_trade_gate_veto.py -> tests/unit/test_trade_gate_evaluation.py  (3)
+    test_vetoes_include_upstream_hard_blocks_and_missing_confirmation
+    test_losing_add_without_independent_confirmation_is_hard_veto
+    test_absent_invalidation_is_recorded_as_hard_veto
+tests/unit/test_trade_gate_store.py -> tests/unit/test_trade_gate_evaluation.py  (2)
+    test_same_day_multiple_evaluations_are_append_only
+    test_same_id_is_idempotent_only_for_identical_content
+    RENAME NOW -> STORE_NOW
+    RENAME _intent -> _store_intent
+tests/unit/test_trade_gate_duckdb_store.py -> tests/unit/test_trade_gate_evaluation.py  (2)
+    test_duckdb_store_round_trips_intent_and_read_does_not_create
+    test_duckdb_reads_missing_trade_table_as_empty
+tests/unit/test_trade_gate_metrics.py -> tests/unit/test_trade_gate_evaluation.py  (1)
+    test_metrics_report_override_rate_and_group_results
+tests/unit/test_trade_gate_replay.py -> tests/unit/test_trade_gate_evaluation.py  (1)
+    test_replay_uses_stored_context_and_assigns_new_versions
+tests/unit/test_trade_gate_service.py -> tests/unit/test_trade_gate_evaluation.py  (1)
+    test_override_requires_smaller_size_evidence_ack_and_stop
+    RENAME NOW -> SERVICE_NOW
+tests/unit/test_avg_amount_factor.py -> tests/unit/test_factor_long_tail.py  (7)
+    test_metadata_comes_from_the_config_file
+    test_window_completeness_decides_value_or_null
+    test_bars_after_as_of_are_excluded
+    test_result_carries_its_version_and_lineage
+    test_config_without_a_window_is_rejected
+    test_config_for_another_factor_is_rejected
+    test_unknown_symbol_is_null
+    RENAME CSV_ROOT -> AVG_AMOUNT_CSV_ROOT
+tests/unit/test_proximity_high_factor.py -> tests/unit/test_factor_long_tail.py  (8)
+    test_proximity_equals_the_latest_close_over_the_window_peak
+    test_a_planted_high_pulls_proximity_below_a_flat_ratio
+    test_proximity_never_exceeds_one
+    test_a_falling_symbol_sits_far_below_its_peak
+    test_missing_high_or_insufficient_window_is_null
+    test_metadata_and_window_come_from_the_configuration
+    test_a_configuration_without_a_window_is_an_error
+    test_a_configuration_for_another_factor_is_rejected
+    RENAME _config -> _proximity_config
+tests/unit/test_valuation_factors.py -> tests/unit/test_factor_long_tail.py  (8)
+    test_a_positive_multiple_is_a_value
+    test_a_non_positive_multiple_is_not_applicable
+    test_a_zero_percentile_is_still_a_value
+    test_a_symbol_that_never_reports_the_metric_is_not_applicable
+    test_a_metric_reported_only_after_the_point_in_time_is_null
+    test_the_newest_available_day_wins
+    test_a_reviewed_freshness_bound_switches_stale_on
+    test_the_freshness_key_must_be_declared
+    RENAME _context -> _valuation_context
+    RENAME ROOT -> VALUATION_ROOT
+    RENAME AS_OF -> VALUATION_AS_OF
+tests/unit/test_factor_registry.py -> tests/unit/test_factor_long_tail.py  (4)
+    test_registration_preserves_order
+    test_duplicate_registration_is_rejected
+    test_unknown_lookup_is_rejected
+    test_registered_factor_is_returned_by_name
+    RENAME CONFIG_PATH -> REGISTRY_CONFIG_PATH
+    RENAME _factor -> _registry_factor
+tests/unit/test_momentum_scanner.py -> tests/unit/test_strategy_long_tail.py  (9)
+    test_required_factors_come_from_the_config_file
+    test_eligible_when_every_required_factor_has_a_value
+    test_missing_factor_makes_the_symbol_ineligible
+    test_null_factor_makes_the_symbol_ineligible
+    test_scoring_is_explicitly_absent_for_a_lone_symbol
+    test_score_result_keeps_its_evidence
+    test_ineligible_context_is_carried_into_risks
+    test_explain_reports_per_factor_notes
+    test_explain_reports_a_missing_value_as_missing
+    RENAME AS_OF -> MOMENTUM_AS_OF
+    RENAME _scanner -> _momentum_scanner
+    RENAME _context -> _momentum_context
+tests/unit/test_strategy_scanners.py -> tests/unit/test_strategy_long_tail.py  (6)
+    test_the_class_is_its_own
+    test_the_required_factors_match_the_configuration
+    test_scoring_one_symbol_alone_reports_no_score
+    test_a_missing_factor_makes_the_symbol_ineligible_with_a_reason
+    test_the_explanation_reaches_factor_level
+    test_the_cross_section_ranks_exactly_the_eligible_population
+    RENAME AS_OF -> SCANNERS_AS_OF
+    RENAME _context -> _scanners_context
+    RENAME ROOT -> SCANNERS_ROOT
+    RENAME CONFIGS -> SCANNERS_CONFIGS
+tests/unit/test_strategy_factor_index.py -> tests/unit/test_strategy_long_tail.py  (4)
+    test_the_index_answers_exactly_like_a_naive_scan
+    test_the_index_separates_symbols_and_keeps_input_order
+    test_strategy_stage_hands_each_symbol_its_own_factor_results
+    test_factor_results_are_walked_once_per_stage_not_once_per_scanner
+tests/unit/test_strategy_parity.py -> tests/unit/test_strategy_long_tail.py  (2)
+    test_the_refactored_scanner_reproduces_the_recorded_output
+    test_the_fixture_was_recorded_before_this_refactor
+    RENAME AS_OF -> PARITY_AS_OF
+    RENAME _factor_result -> _parity_factor_result
+    RENAME SYMBOLS -> PARITY_SYMBOLS
+tests/unit/test_percentile_scorer.py -> tests/unit/test_strategy_long_tail.py  (8)
+    test_a_negative_weight_orients_a_factor_where_lower_is_better
+    test_the_orientation_is_visible_in_the_contribution
+    test_an_ineligible_symbol_shifts_nobody_else
+    test_a_single_symbol_population_gets_a_score_but_no_rank
+    test_no_contexts_means_no_results
+    test_the_caller_supplies_the_eligibility_rule
+    test_the_explanation_shows_each_factor_and_its_weight
+    test_invalid_weight_sets_are_refused
+    RENAME AS_OF -> PERCENTILE_AS_OF
+tests/unit/test_qualification_config.py -> tests/unit/test_qualification_long_tail.py  (4)
+    test_invalid_rules_are_refused
+    test_missing_file_keeps_not_configured_semantics
+    test_valid_rule_loads_with_expected_fields
+    test_allowed_root_keys_still_load
+tests/unit/test_qualification_context.py -> tests/unit/test_qualification_long_tail.py  (3)
+    test_growth_qualification_can_read_non_scoring_roe_factor
+    test_strategy_scoring_snapshot_is_not_used_as_qualification_evidence
+    test_qualification_context_defaults_to_no_factors
+    RENAME AS_OF -> QUALIFICATION_CONTEXT_AS_OF
+tests/unit/test_eligibility_scanner.py -> tests/unit/test_qualification_long_tail.py  (9)
+    test_a_symbol_with_every_required_factor_is_eligible
+    test_the_verdict_never_carries_a_score
+    test_a_missing_factor_makes_the_symbol_ineligible_and_says_which
+    test_any_status_other_than_value_is_not_eligible
+    test_a_population_gets_one_verdict_each_and_no_ranking
+    test_the_explanation_states_that_scoring_is_deferred
+    test_a_scanner_must_declare_what_it_requires
+    test_a_configured_scanner_with_weights_is_refused_here
+    test_the_result_carries_the_configured_identity
+tests/unit/test_market_regime.py -> tests/unit/test_market_long_tail.py  (5)
+    test_regime_detector_judgements
+    test_regime_detector_raises_when_no_data
+    test_r2_requires_breadth_and_index_trend
+    test_r2_requires_breadth_when_index_trend_present
+    test_r2_b3_volatility_deferred_reason
+tests/unit/test_market_validator.py -> tests/unit/test_market_long_tail.py  (8)
+    test_market_validator_liquidity_veto_contradicted
+    test_market_validator_status_matrix
+    test_market_validator_lineage_contains_market_validation_version
+    test_market_validator_relative_strength_negative_adds_risk
+    test_market_validator_missing_context_dimensions_raise
+    test_market_validator_missing_trend_or_liquidity_factors_raise
+    test_market_validator_non_momentum_allows_missing_proximity_52w_high
+    test_market_validator_multiple_missing_factors_reported
+    RENAME SHANGHAI -> MARKET_VALIDATOR_SHANGHAI
+    RENAME AS_OF -> MARKET_VALIDATOR_AS_OF
+tests/unit/test_csv_security_normalizer.py -> tests/unit/test_data_long_tail.py  (8)
+    test_every_row_of_the_fixture_becomes_a_profile
+    test_flags_are_parsed_as_booleans
+    test_listing_date_and_suspension_count_are_typed
+    test_unreadable_identity_cells_reject_the_row
+    test_an_absent_suspension_count_is_missing_not_rejected
+    test_a_rejected_row_does_not_discard_its_neighbours
+    test_a_naive_as_of_is_rejected
+    test_an_empty_payload_yields_no_profiles_and_no_failures
+    RENAME AS_OF -> CSV_SECURITY_AS_OF
+tests/unit/test_snapshot_store.py -> tests/unit/test_data_long_tail.py  (7)
+    test_write_then_read_round_trips
+    test_snapshot_path_is_kind_and_date_named
+    test_snapshot_records_the_as_of_it_was_written_for
+    test_same_snapshot_payload_is_idempotent
+    test_a_conflict_names_the_kind_and_the_date
+    test_the_comparison_is_by_content_not_by_file_layout
+    test_an_empty_snapshot_conflicts_with_a_measured_one
+tests/unit/test_domain_models.py -> tests/unit/test_platform_long_tail.py  (5)
+    test_financial_observation_rejects_future_availability
+    test_architecture_enums_are_explicit
+    test_missing_financial_value_stays_none
+    test_naive_timestamps_are_rejected
+    test_watchlist_states_keep_active_and_reserved_apart
+tests/unit/test_jev_triage.py -> tests/unit/test_platform_long_tail.py  (5)
+    test_classify_test_failure_returns_choice_and_metadata
+    test_missing_api_key_fails_gracefully
+    test_sdk_error_fails_gracefully
+    test_unknown_choice_is_not_silently_accepted
+    test_to_dict_has_stable_json_shape
+tests/integration/test_calibration_readiness_cli.py -> tests/integration/test_cli_entry_flows.py  (9)
+    test_the_canonical_research_analysis_never_scores_an_excluded_symbol
+    test_the_calibration_command_reports_the_population_it_used
+    test_an_external_map_missing_one_symbol_still_produces_the_diagnostic
+    test_the_canonical_map_missing_one_symbol_is_still_refused
+    test_a_complete_canonical_map_records_its_own_date_and_origin
+    test_future_membership_records_never_enter_the_historical_canonical_map
+    test_a_declared_mapping_date_is_recorded_verbatim
+    test_a_mapping_date_without_a_timezone_is_refused
+    test_a_mapping_date_without_an_external_map_is_refused
+    RENAME AS_OF -> READINESS_CLI_AS_OF
+tests/integration/test_candidate_calibration_cli.py -> tests/integration/test_cli_entry_flows.py  (6)
+    test_calibrate_cli_help
+    test_calibrate_candidates_generates_reports_without_production_mutation
+    test_calibrate_candidates_fails_on_missing_industry_file
+    test_calibrate_candidates_fails_on_duplicate_symbol_in_industry_csv
+    test_calibrate_candidates_fails_on_missing_header_in_industry_csv
+    test_calibrate_candidates_canonical_merges_supplement
+    RENAME ROOT -> CALIBRATION_CLI_ROOT
+tests/integration/test_candidates_cli.py -> tests/integration/test_cli_entry_flows.py  (4)
+    test_candidates_cli_missing_snapshot_fails_explicitly
+    test_candidates_cli_published_empty_snapshot_exits_zero
+    test_candidates_cli_displays_expected_columns_in_stored_order
+    test_candidates_cli_is_strictly_read_only
+    RENAME AS_OF -> CANDIDATES_CLI_AS_OF
+tests/integration/test_command_snapshot_ownership.py -> tests/integration/test_cli_entry_flows.py  (4)
+    test_factors_compute_does_not_touch_the_formal_candidate_snapshot
+    test_read_only_commands_write_no_formal_snapshot
+    test_scan_leaves_every_formal_snapshot_untouched
+    test_scan_does_not_replace_a_formal_candidate_snapshot
+    RENAME ROOT -> SNAPSHOT_OWNERSHIP_ROOT
+    RENAME CSV_ROOT -> SNAPSHOT_OWNERSHIP_CSV_ROOT
+    RENAME DAY -> SNO_DAY
+    RENAME LONG_DATASET -> SNAPSHOT_OWNERSHIP_LONG_DATASET
+tests/integration/test_dividend_sync_cli.py -> tests/integration/test_cli_entry_flows.py  (3)
+    test_sync_dividends_partial_response_resume
+    test_sync_dividends_stops_on_no_progress
+    test_sync_dividends_landed_blocks_survive_later_rounds
+    RENAME AS_OF -> DIV_AS_OF
+    RENAME DAY -> DIVIDEND_SYNC_DAY
+tests/integration/test_market_signal_readiness_cli.py -> tests/integration/test_cli_entry_flows.py  (3)
+    test_missing_snapshot_exits_nonzero
+    test_read_only_and_deterministic_output
+    test_invalid_qualification_config_fails_loudly
+    RENAME AS_OF -> SIGNAL_READINESS_CLI_AS_OF
+tests/integration/test_qualification_impact_cli.py -> tests/integration/test_cli_entry_flows.py  (2)
+    test_qualification_impact_cli_is_read_only
+    test_qualification_impact_cli_fails_on_missing_snapshot
+    RENAME DAY -> IMPACT_CLI_DAY
+tests/integration/test_qualified_cli.py -> tests/integration/test_cli_entry_flows.py  (9)
+    test_qualified_cli_help
+    test_qualified_only_dual_pass_displayed
+    test_qualified_top_limit_truncates_items_not_coverage
+    test_qualified_missing_factor_snapshot
+    test_qualified_missing_strategy_snapshot
+    test_qualified_invalid_config_fails_closed
+    test_qualified_unknown_strategy_fails_loudly
+    test_qualified_dividend_zero_result_warns
+    test_qualified_read_only_guarantee
+    RENAME Result -> TyperResult
+    RENAME AS_OF -> QUALIFIED_CLI_AS_OF
+    RENAME DAY -> QUALIFIED_CLI_DAY
+    RENAME _invoke -> _qualified_cli_invoke
+    RENAME _factor -> _qualified_cli_factor
+tests/integration/test_screen_cli.py -> tests/integration/test_cli_entry_flows.py  (9)
+    test_screen_cli_help
+    test_screen_mixed_strategy_snapshot_top_limit
+    test_screen_missing_snapshot
+    test_screen_unknown_strategy
+    test_screen_low_coverage_warning
+    test_screen_high_coverage_no_warning
+    test_screen_eligible_filter_and_all_results_flag
+    test_screen_min_percentile_filter
+    test_screen_read_only_guarantee
+    RENAME AS_OF -> SCR_AS_OF
+    RENAME DAY -> SCREEN_CLI_DAY
+    RENAME _invoke -> _screen_cli_invoke
+    RENAME SHANGHAI -> SCREEN_CLI_SHANGHAI
+    RENAME _strategy_result -> _screen_cli_strategy_result
+tests/integration/test_today_cli.py -> tests/integration/test_cli_entry_flows.py  (4)
+    test_today_cli_missing_snapshot_fails_explicitly
+    test_today_cli_empty_snapshot_exits_zero
+    test_today_cli_exact_aggregation_and_top_order
+    test_today_cli_is_strictly_read_only
+    RENAME AS_OF -> TODAY_CLI_AS_OF
+    RENAME runner -> today_cli_runner
+    RENAME _make_candidate -> _today_cli_make_candidate
+tests/integration/test_trade_gate_cli.py -> tests/integration/test_cli_entry_flows.py  (1)
+    test_trade_commands_are_registered
+tests/integration/test_valuation_backfill_cli.py -> tests/integration/test_cli_entry_flows.py  (7)
+    test_rounds_merge_and_every_round_only_asks_what_is_missing
+    test_a_gap_that_does_not_close_stops_and_exits_non_zero
+    test_a_covered_symbol_is_not_asked_again
+    test_a_missing_universe_file_is_an_error_not_an_empty_run
+    test_a_non_positive_batch_size_is_refused
+    test_the_coverage_command_reports_the_universe_as_the_denominator
+    test_the_coverage_command_refuses_an_empty_universe
+    RENAME ROOT -> VALUATION_BACKFILL_ROOT
+    RENAME DAY -> VBF_DAY
+    RENAME _invoke -> _valuation_backfill_invoke
+tests/integration/test_analysis_pipeline.py -> tests/integration/test_pipeline_flows.py  (9)
+    test_the_analysis_returns_factors_a_universe_and_strategy_results
+    test_the_analysis_writes_nothing
+    test_the_daily_pipeline_uses_the_same_business_steps
+    test_every_designed_universe_exclusion_fires_on_its_symbol
+    test_the_deferred_suspension_rule_is_reported_not_applied
+    test_the_ranking_matches_the_hand_computed_order
+    test_only_universe_symbols_enter_the_strategies
+    test_short_history_is_null_rather_than_a_number
+    test_a_missing_input_never_became_zero
+    RENAME ROOT -> ANALYSIS_ROOT
+    RENAME CONFIGS -> ANALYSIS_CONFIGS
+    RENAME AS_OF -> ANALYSIS_AS_OF
+    RENAME LONG_DATASET -> ANALYSIS_LONG_DATASET
+    RENAME _factor_configs -> _analysis_factor_configs
+tests/integration/test_candidate_correctness_gate.py -> tests/integration/test_pipeline_flows.py  (6)
+    test_value_qualified_symbol_must_keep_value_validation_semantics
+    test_growth_qualified_symbol_never_falls_through_to_value_contrarian_signal
+    test_detect_regime_fails_closed_when_market_breadth_is_unavailable
+    test_unconfigured_candidate_policy_fails_candidate_publication
+    test_only_qualified_symbols_enter_downstream_validation_and_signal
+    test_multi_qualified_symbol_derives_deterministic_primary_strategy_mapping
+    RENAME ROOT -> CORRECTNESS_GATE_ROOT
+    RENAME CSV_ROOT -> CORRECTNESS_GATE_CSV_ROOT
+    RENAME CONFIGS -> CG_CONFIGS
+    RENAME AS_OF -> CG_AS_OF
+tests/integration/test_candidate_qualification_pipeline.py -> tests/integration/test_pipeline_flows.py  (5)
+    test_canonical_qualifiers_removes_unconfigured_reason
+    test_missing_upstream_layers_blocks_build_candidates
+    test_candidate_stage_direct_call_with_complete_evidence_produces_candidates
+    test_signal_no_signal_does_not_disqualify_candidate
+    test_market_validation_contradicted_disqualifies_candidate
+    RENAME AS_OF -> QUALIFICATION_AS_OF
+tests/integration/test_daily_candidate_pipeline.py -> tests/integration/test_pipeline_flows.py  (1)
+    test_daily_pipeline_executes_regime_validation_signal_and_candidates
+    RENAME ROOT -> DAILY_CANDIDATE_ROOT
+    RENAME CSV_ROOT -> DAILY_CANDIDATE_CSV_ROOT
+    RENAME CONFIGS -> DAILY_CANDIDATE_CONFIGS
+    RENAME AS_OF -> DAILY_CANDIDATE_AS_OF
+    RENAME LONG_DATASET -> DAILY_CANDIDATE_LONG_DATASET
+tests/integration/test_daily_production_evidence.py -> tests/integration/test_pipeline_flows.py  (4)
+    test_step1_composition_proves_benchmark_and_industry_reach_run_daily
+    test_step2_missing_benchmark_file_fails_closed
+    test_step3_insufficient_59_benchmark_bars_regime_fails_closed
+    test_step4_qualified_symbol_missing_industry_evidence_fails_closed
+    RENAME ROOT -> PRODUCTION_EVIDENCE_ROOT
+    RENAME CONFIGS -> PE_CONFIGS
+    RENAME AS_OF -> PE_AS_OF
+tests/integration/test_dividend_factor_pipeline.py -> tests/integration/test_pipeline_flows.py  (1)
+    test_pipeline_computes_dividend_yield_ttm_from_landed_events
+    RENAME AS_OF -> DIVIDEND_FACTOR_AS_OF
+    RENAME SHANGHAI -> DIVIDEND_FACTOR_SHANGHAI
+tests/integration/test_dividend_qualified_discovery.py -> tests/integration/test_pipeline_flows.py  (2)
+    test_dividend_qualified_discovery_passes_when_factors_meet_dual_gate
+    test_dividend_qualified_discovery_blocks_when_yield_falls_below_threshold
+    RENAME AS_OF -> DQ_AS_OF
+    RENAME SHANGHAI -> DIVIDEND_DISCOVERY_SHANGHAI
+tests/integration/test_financial_pipeline.py -> tests/integration/test_pipeline_flows.py  (7)
+    test_a_landed_statement_reaches_the_factor_context
+    test_a_period_published_after_the_scan_is_not_in_the_context
+    test_statements_that_were_never_landed_are_named
+    test_a_scan_without_landed_statements_still_runs_and_says_so
+    test_a_missing_value_stays_missing_through_the_pipeline
+    test_the_two_statement_sets_land_and_normalize_together
+    test_each_factor_context_carries_only_its_own_symbol
+    RENAME ROOT -> FINANCIAL_ROOT
+tests/integration/test_market_regime_snapshot.py -> tests/integration/test_pipeline_flows.py  (5)
+    test_step1_daily_pipeline_writes_exactly_one_market_regime_record
+    test_step2_market_regime_snapshot_carries_lineage_regime_version
+    test_step3_same_date_changed_content_raises_snapshot_conflict
+    test_step5_artifact_validator_for_market_regime
+    test_step6_seed_market_regime_and_candidate_today_cli_prints_it
+    RENAME ROOT -> REGIME_SNAPSHOT_ROOT
+    RENAME AS_OF -> MRG_AS_OF
+    RENAME FIXTURE_CSV -> REGIME_SNAPSHOT_FIXTURE_CSV
+    RENAME BENCHMARK_ID -> REGIME_SNAPSHOT_BENCHMARK_ID
+tests/integration/test_market_signal_pipeline.py -> tests/integration/test_pipeline_flows.py  (1)
+    test_market_signal_pipeline_end_to_end_assembly
+    RENAME AS_OF -> SIGNAL_PIPELINE_AS_OF
+    RENAME SHANGHAI -> SIGNAL_PIPELINE_SHANGHAI
+    RENAME _fr -> _signal_pipeline_fr
+tests/integration/test_post_valuation_analysis_flow.py -> tests/integration/test_pipeline_flows.py  (2)
+    test_formal_snapshot_equals_verified_readonly_analysis
+    test_newer_valuation_changes_only_valuation_dependent_evidence
+    RENAME CONFIGS -> PV_CONFIGS
+tests/integration/test_qualification_pipeline.py -> tests/integration/test_pipeline_flows.py  (4)
+    test_growth_qualification_uses_full_factor_evidence_beyond_scoring_snapshot
+    test_growth_qualification_fails_closed_when_roe_evidence_is_missing
+    test_dividend_qualification_ignores_percent_unit_paid_ratio
+    test_garp_qualification_uses_pe_ttm_and_not_pe_percentile
+    RENAME AS_OF -> QUALIFICATION_PIPELINE_AS_OF
+    RENAME _factor -> _qualification_pipeline_factor
+tests/integration/test_research_universe_flow.py -> tests/integration/test_pipeline_flows.py  (8)
+    test_a_failed_symbol_keeps_the_symbols_that_succeeded
+    test_a_rerun_retries_only_the_coverage_that_is_missing
+    test_a_finished_symbol_is_on_disk_before_the_scheduler_forgets_it
+    test_short_history_is_extended_backward_until_it_is_enough
+    test_history_that_runs_out_is_reported_short_not_padded
+    test_the_research_universe_is_a_subset_of_the_listing_prefilter
+    test_the_research_command_reports_an_observational_target_and_writes_nothing
+    test_only_the_research_universe_is_asked_for_expensive_history
+    RENAME AS_OF -> RESEARCH_UNIVERSE_AS_OF
+tests/integration/test_stock_discovery_workflow.py -> tests/integration/test_pipeline_flows.py  (3)
+    test_stock_discovery_workflow_seeded_growth
+    test_read_after_write_consistency
+    test_daily_pipeline_to_discovery_workflow_end_to_end
+    RENAME ROOT -> DISCOVERY_WORKFLOW_ROOT
+    RENAME CSV_ROOT -> DISCOVERY_WORKFLOW_CSV_ROOT
+tests/integration/test_valuation_pipeline.py -> tests/integration/test_pipeline_flows.py  (6)
+    test_a_scan_without_landed_valuations_says_so
+    test_landed_valuations_reach_the_factor_context
+    test_a_future_landing_is_invisible_at_the_point_in_time
+    test_each_factor_sees_only_its_own_symbol_valuations
+    test_the_reported_metrics_match_what_the_response_carried
+    test_reading_valuations_twice_gives_the_same_answer
+    RENAME ROOT -> VALUATION_ROOT
+    RENAME CONFIGS -> VAL_CFG
+    RENAME AS_OF -> AS_OF_V
+    RENAME LONG_DATASET -> VAL_LONG_DS
+    RENAME CSV_FIXTURES -> VALUATION_CSV_FIXTURES
+```
