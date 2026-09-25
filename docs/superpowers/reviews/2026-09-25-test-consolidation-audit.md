@@ -216,34 +216,36 @@ contract **16** / stress **4** = **1298**，共 **136** 个文件。
 
 ```bash
 UV_PROJECT_ENVIRONMENT=/Users/huangjinjin/Documents/ChatGPT/a-stock-lens/.venv UV_OFFLINE=1 PYTHONPATH= \
-  uv run --no-sync pytest --cov=src/astock_lens --cov-report=term -q
-# → 1298 passed, 7 warnings in 376.75s (0:06:16)
+  uv run --no-sync pytest -q --cov=astock_lens --cov-report=term
+# → 1298 passed, 7 warnings in 443.68s (0:07:23)
 ```
 
 TOTAL 行原样：
 
 ```text
-TOTAL                                                     8703   8703     0%
+TOTAL                                                                                                       8703    734    92%
 ```
 
-**口径归因（必须与数字一起引用，否则会误导）：** 该 0% 是**测量口径失效**，不是真实
-覆盖为零：
+**这 92% 是规格 §7.1「覆盖率不低于基线」的唯一比较基准。**
 
-- 共享 venv 的 editable install 把 `astock_lens` 解析到**主仓**路径
-  `/Users/huangjinjin/Documents/ChatGPT/a-stock-lens/src/astock_lens/__init__.py`；
-- 而 `--cov=src/astock_lens` 量的是**本 worktree**的同一路径，该路径的自定义模块被
-  导入的却是主仓同名模块，故全部语句「未覆盖」；
-- 两处 `src/astock_lens` 内容 `diff -r` 一致（仅 `__pycache__` 不同）；主仓 HEAD 与本
-  worktree HEAD 相同（`276f1ae`），其未提交改动只涉及 `.env.example / AGENTS.md /
-  README.md`，`src/**`、`configs/**` 无改动。
+**口径说明（必须与数字一起引用）：** 本工作树与主仓**共享同一个 venv**，其 editable
+install 把 `astock_lens` 解析到主仓
+`/Users/huangjinjin/Documents/ChatGPT/a-stock-lens/src/astock_lens/`。因此覆盖率必须按
+**模块名**（`--cov=astock_lens`）测量——量的就是实际被导入的那份代码。审计已 `diff -r`
+证实主仓与工作树的 `src/astock_lens` 内容一致（仅 `__pycache__` 不同）；主仓 HEAD 与本
+worktree HEAD 相同（`276f1ae`），其未提交改动只涉及 `.env.example / AGENTS.md /
+README.md`，`src/**`、`configs/**` 无改动。
+
+**已废弃口径（留档，不得用于比较）：** `--cov=src/astock_lens` 在批次 0 曾量出
+`TOTAL 8703 8703 0%`。该 0% 是**测量口径失效**：它量的是**本 worktree**路径，而该路径的
+模块被导入时解析到的是**主仓**同名模块，于是全部语句被判「未覆盖」——不是真实覆盖为零。
+原始输出留在 `var/test-consolidation/coverage-baseline.txt`（不提交），不再作任何基准。
 
 **约定：**
 
-1. 本行按「原样」留档，是批次 0 的覆盖率产物，不作为「覆盖率不得下降」的比较基准；
-2. Task 14 验收若比较覆盖率，必须遵循**同口径对同口径**，或先修复测量口径（建议
-   `--cov=/Users/huangjinjin/Documents/ChatGPT/a-stock-lens/src/astock_lens`，并在报告里
-   标注为主仓路径口径）；
-3. 原始输出留档 `var/test-consolidation/coverage-baseline.txt`（不提交）。
+1. Task 14 验收比较覆盖率时，必须运行**本节完全相同的命令**
+   （`--cov=astock_lens --cov-report=term`），与本节的 92% 对同口径；
+2. 原始输出留档 `var/test-consolidation/coverage-baseline-module.txt`（不提交）。
 
 ---
 
@@ -388,5 +390,82 @@ TOTAL                                                     8703   8703     0%
 | 基线文件数 | **136**（≤9 例 86 个） | Task 12 的合并目标 ~65 |
 | 冻结用例 | **102**（5 个文件，只读） | 不参与任何删除/合并 |
 | 可动用例 | **1196** | 减量分母（−20% ≈ −239，验收线 1040 = −258） |
-| 覆盖率 TOTAL 行 | `TOTAL 8703 8703 0%`（vacuous，见 §3） | 仅留档；比较须同口径 |
+| 覆盖率 TOTAL 行 | `TOTAL 8703 734 92%`（口径 `--cov=astock_lens --cov-report=term`，见 §3） | Task 14 用完全相同的命令对账 |
 | 红项 | 无（1298 passed, 7 warnings） | 出口条件「基线全绿」达成 |
+
+---
+
+## 7. 减量对账与检查点修正
+
+### 7.1 每批可达减量与偏差
+
+计划文字里的四批细目（−114 / −107 / −20 / −6）未计入本文件的复核结论。按 5.1/5.2/5.4
+重算，逐批列出「计划预算 / 复核后可达 / 差异原因」：
+
+| 批次 | 任务 | 计划 | 复核后可达 | 差异原因（引用本文件已有条目） |
+| --- | --- | --- | --- | --- |
+| 1 | Task 1–4 | −114 | −114 | 四条与附录 A 一致（5.1 无改判） |
+| 2 | Task 5–9 | −107 | **−105** | Task 5：15 例按 5.1 判「拆表」为 −12；控制器裁决仍以 1 张表为目标，做到即回到 −14。Task 6：5.1 判 regime 12→≤5（8 判定收表 + 3 条 fail-closed 独立 + `:160` 保留），可多省 1（−25 而非 −24）。Task 8：5.1 实测族 15 条（复核范围 21/25 例），snapshot_validator 25→11、只省 −14 而非 −15 |
+| 3 | Task 10 | −20 | **−8** | 5.2 小计：T1 −4、T2 −1、T4 −1、T5 −1、T12 −1；T3/T8/T9/T10/T11/T2b 改判 KEEP（各有独有断言、指不出权威替代） |
+| 4 | Task 11 | −6 | −6 | 减量不变，方向修正：删 4 词 AST 例、保留并表化 12 词文本扫描（见 7.3） |
+
+**复算明细（逐项可复核）：**
+
+- 批次 1 = 72 + 17 + 11 + 14 = 114（Task 1 / 2 / 3 / 4）；
+- 批次 2 = 12 + 25 + 29 + 22 + 17 = **105**（Task 5 审计侧 / 6 / 7 / 8 / 9）；
+  Task 5 若达成单表（−14），批次回到 **107**（与计划数字相同，属巧合）；
+- 批次 3 = 4 + 1 + 1 + 1 + 1 = 8（T1 / T2 / T4 / T5 / T12）；
+- 批次 4 = 3（4 处扫描 → 1 张表）+ 1（4 词 AST）+ 2（docs 3→1）= 6；
+- 四批合计：计划 −247，复核后可达 **−233**；终值预期 1298 − 233 = **1065**。
+
+**注（残余风险）：** Task 7（−29）与 Task 9（−17）的家族未进入 5.1/5.2 台账逐条复核，
+其「复核后可达」暂按计划值计（占比不小，合计 −46）；若实测与之不符，按 7.2 的判定方式
+记录偏差，不得回退已完成的合并。
+
+### 7.2 检查点数字修正（计划文字里的 1077 / 1051 作废）
+
+| 检查点 | 计划数字 | 修正后 | 依据 |
+| --- | --- | --- | --- |
+| 基线 collected | 1298 | **1298** | §2 实测（`1298 tests collected`） |
+| 批次 1 末（Task 4 收口） | 1184 | **1184** | 1298 − 114 |
+| 批次 2 末（Task 9 收口） | 1077 | **≈1079** | 1298 − 114 − 105（Task 5 若达成单表则为 1077） |
+| 批次 1–4 末（Task 11 收口） | 1051 | **≈1065** | 1298 − 114 − 105 − 8 − 6 |
+| 验收线（Task 14 判定） | ≤1040 | **≤1040** | 规格 §7.1，不变 |
+| Task 15 缺口 | 约 −11 | **约 −25** | 1065 − 1040；**Task 15 因此必须执行** |
+
+**判定方式：** 每个收口点用完全相同环境运行下面这条命令，以实测数与本节数字对账，
+把偏差记进本节（含方向与原因）：
+
+```bash
+UV_PROJECT_ENVIRONMENT=/Users/huangjinjin/Documents/ChatGPT/a-stock-lens/.venv UV_OFFLINE=1 PYTHONPATH= \
+  uv run --no-sync pytest --collect-only -q 2>/dev/null | tail -1
+```
+
+**数字对不上时，不许为追平数字
+回退已完成的合并，也不许删除未登记的断言**；某批比预期多省（例如 Task 6 的 −25）照实记录
+即可，多省部分可用于抵扣 Task 15 缺口。
+
+### 7.3 Task 11 的方向修正落到哪一行
+
+Task 11 的两条 API 边界检查里：
+
+- **保留** `tests/unit/test_api.py::test_api_never_imports_the_computation_engines`
+  （12 词文本扫描，词表逐词抄进新的「模块 × 禁用词」总表的 `api/app.py` 行）；
+- **删除** `tests/unit/test_api.py::test_api_module_imports_strictly_bounded`
+  （4 词 AST：`astock_lens.pipelines` / `run_analysis` / `factor_stage` / `strategy_stage`，
+  全部是上述 12 词的子集，且 import 命中必然意味着源文本命中）。
+
+此方向与计划 Task 11 Step 2 的字面表述（「保留 AST、删文本扫描」）相反，以本文件 5.4
+第 3 条为准。
+
+---
+
+## 8. 执行记录（每个任务完成后追加一行）
+
+每个任务在收口时把 `pytest --collect-only -q` 的**实测**总例数、本任务实测减量与 §7.2 的
+预期对账后追加一行。数字对不上时写清方向与原因；**不许为追平数字回退已完成的合并，也不许
+删除未登记的断言**（见 §7.2）。
+
+| 任务 | commit | 本任务实测减量 | 收口实测 collected | 与 §7.2 预期 | 备注 |
+| --- | --- | --- | --- | --- | --- |
+| Task 0 | `872e99b` + 本文件修复轮 | 0 | 1298 | 1298 ✓ | 基线全绿；覆盖率口径修正为 `--cov=astock_lens` = 92% |
