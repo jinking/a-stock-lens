@@ -120,8 +120,8 @@ def test_the_snapshot_is_immutable() -> None:
         snapshot.included = ()  # type: ignore[misc]
 
 
-# 排除规则六行：前四行断言完整规则元组（原 `==` 语义），后两行断言规则命中
-# （原 `in` 语义），low_liquidity 行另带排除理由里的实测值片段。
+# 排除规则七行：第一至四行与第七行断言完整规则元组（原 `==` 语义），第五、六行
+# 断言规则命中（原 `in` 语义），low_liquidity 行另带排除理由里的实测值片段。
 # 行序与原用例一致，label 即原测试名；原 docstring 与断言旁的理由注释逐字保留。
 EXCLUSION_RULE_CASES = (
     # test_st_is_excluded_with_a_reason
@@ -168,6 +168,15 @@ EXCLUSION_RULE_CASES = (
         UniverseRule.NO_LIQUIDITY_MEASURE,
         (),
     ),
+    # test_a_symbol_that_breaks_two_rules_records_both:
+    #   000007.SZ has neither a bar nor a measure; both are reported.
+    (
+        "test_a_symbol_that_breaks_two_rules_records_both",
+        "000007.SZ",
+        (UniverseRule.NO_MARKET_DATA, UniverseRule.NO_LIQUIDITY_MEASURE),
+        None,
+        (),
+    ),
 )
 
 
@@ -193,14 +202,6 @@ def test_every_exclusion_records_the_rule_that_removed_it() -> None:
                     f"{label}: {symbol} 的排除理由 {detail!r} 缺少 {fragment!r}"
                 )
     assert not wrong, "排除规则未按标的记录:\n" + "\n".join(wrong)
-
-
-def test_a_symbol_that_breaks_two_rules_records_both() -> None:
-    """000007.SZ has neither a bar nor a measure; both are reported."""
-    assert _rules(_build(), "000007.SZ") == (
-        UniverseRule.NO_MARKET_DATA,
-        UniverseRule.NO_LIQUIDITY_MEASURE,
-    )
 
 
 def test_long_suspension_is_deferred_and_excludes_nobody() -> None:

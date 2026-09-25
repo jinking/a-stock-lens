@@ -207,11 +207,20 @@ MISSING_SNAPSHOT_CASES = (
         {"as_of": DAY},
         f"no CANDIDATE snapshot for {DAY}",
     ),
+    # test_universe_route_404s_when_no_universe_was_built:
+    #   /universe 与 /stocks 同读 UNIVERSE 快照，无快照时经同一个 `_read`
+    #   抛出点名日期的 404（原用例断言 404 且 DETAIL 含 as_of）。
+    (
+        "test_universe_route_404s_when_no_universe_was_built",
+        "/universe",
+        {"as_of": DAY},
+        DAY,
+    ),
 )
 
 
 def test_missing_snapshot_is_a_404(local_tmp: Path) -> None:
-    """测试 6 条快照路由各自在无快照时返回点名原因的 404（原 6 条缺快照用例收表）。"""
+    """测试 7 条快照路由各自在无快照时返回点名原因的 404（原 7 条缺快照用例收表）。"""
     client = TestClient(create_app(snapshot_root=local_tmp))
     wrong = []
     for label, route, params, expected_detail in MISSING_SNAPSHOT_CASES:
@@ -270,15 +279,6 @@ def test_universe_route_reads_the_stored_snapshot(local_tmp: Path) -> None:
     assert payload["as_of"] == DAY
     assert payload["snapshot"]["included"] == ["600000.SH"]
     assert payload["snapshot"]["exclusions"][0]["rule"] == "ST"
-
-
-def test_universe_route_404s_when_no_universe_was_built(local_tmp: Path) -> None:
-    client = TestClient(create_app(snapshot_root=local_tmp))
-
-    response = client.get("/universe", params={"as_of": DAY})
-
-    assert response.status_code == 404
-    assert DAY in response.json()["detail"]
 
 
 def test_trade_gate_intent_route_is_read_only(tmp_path: Path) -> None:
