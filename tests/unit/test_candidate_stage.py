@@ -112,14 +112,6 @@ def _strategy_result(
     )
 
 
-def test_next_action_defaults_to_the_inert_choice() -> None:
-    candidate = CandidateBuilder().build(
-        "600000.SH", as_of=AS_OF, strategy_results=(), lineage=BLD_LINEAGE
-    )
-
-    assert candidate.next_action is NextAction.IGNORE
-
-
 def test_signal_and_market_validation_stay_unset() -> None:
     """Neither layer exists in this slice, so neither is fabricated."""
     candidate = CandidateBuilder().build(
@@ -1019,16 +1011,37 @@ def test_score_does_not_override_a_rejecting_policy() -> None:
     assert candidates == ()
 
 
-def test_the_builder_does_not_derive_next_action_from_a_score() -> None:
-    """Builder 拿不到 policy 的判定，所以它不可能替 policy 做决定。"""
-    candidate = CandidateBuilder().build(
-        "600000.SH",
-        as_of=POLICY_AS_OF,
-        strategy_results=(_policy_result(score=100.0),),
-        lineage=LINEAGE,
-    )
+# 两行是「Builder 缺省即惰性 IGNORE、绝不自行推导 next_action」同一断言的参数枚举：
+# 无策略结果（默认值）/ 有 100 分的结果（分数不是决定）。
+NEXT_ACTION_INERT_DEFAULT_CASES: tuple[
+    tuple[str, datetime, tuple[StrategyResult, ...], SnapshotLineage], ...
+] = (
+    (
+        "test_next_action_defaults_to_the_inert_choice",
+        AS_OF,
+        (),
+        BLD_LINEAGE,
+    ),
+    (
+        "test_the_builder_does_not_derive_next_action_from_a_score",
+        POLICY_AS_OF,
+        (_policy_result(score=100.0),),
+        LINEAGE,
+    ),
+)
 
-    assert candidate.next_action is NextAction.IGNORE
+
+def test_the_builder_leaves_next_action_at_the_inert_default() -> None:
+    wrong = []
+    for label, as_of, strategy_results, lineage in NEXT_ACTION_INERT_DEFAULT_CASES:
+        candidate = CandidateBuilder().build(
+            "600000.SH", as_of=as_of, strategy_results=strategy_results, lineage=lineage
+        )
+        if candidate.next_action is not NextAction.IGNORE:
+            wrong.append(
+                f"{label}: next_action 得到 {candidate.next_action!r}，期望 IGNORE"
+            )
+    assert not wrong, "builder 不得自行推导 next_action:\n" + "\n".join(wrong)
 
 
 def test_a_policy_verdict_is_ineligible_without_eligible_evidence() -> None:
