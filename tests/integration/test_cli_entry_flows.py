@@ -455,6 +455,7 @@ def test_unusable_mapping_date_declarations_are_refused(local_tmp: Path) -> None
 
         result = _run(case_root, csv_root, *extra)
 
+        # Click 的用法错误码：拒绝就是拒绝
         if result.exit_code != 2:
             wrong.append(
                 f"{label}: 期望 Click 用法错误码 2，实际 {result.exit_code}；"
@@ -1930,11 +1931,15 @@ def _seed_factor_snapshot_only(snapshot_root: Path) -> None:
 QUALIFIED_MISSING_SNAPSHOT_CASES: tuple[
     tuple[str, Callable[[Path], None], str], ...
 ] = (
+    # test_qualified_missing_factor_snapshot:
+    #   Step 2: 缺 FACTOR 快照 → 非零退出 + 规范提示。
     (
         "test_qualified_missing_factor_snapshot",
         lambda snapshot_root: None,
         "FACTOR",
     ),
+    # test_qualified_missing_strategy_snapshot:
+    #   Step 3: 缺 STRATEGY 快照 → 非零退出 + 规范提示。
     (
         "test_qualified_missing_strategy_snapshot",
         _seed_factor_snapshot_only,
@@ -1996,12 +2001,17 @@ def _write_unapproved_growth_rule(qualification_dir: Path) -> None:
 QUALIFIED_UNHONORABLE_REQUEST_CASES: tuple[
     tuple[str, Callable[[Path], None], str, tuple[str, ...]], ...
 ] = (
+    # test_qualified_invalid_config_fails_closed:
+    #   Step 4: 非法资格配置必须报错退出，绝不打印零结果正常屏。
+    #   绝不降级为正常的零合格屏
     (
         "test_qualified_invalid_config_fails_closed",
         _write_unapproved_growth_rule,
         "growth",
         ("qualification configuration is invalid", "not_an_approved_factor"),
     ),
+    # test_qualified_unknown_strategy_fails_loudly:
+    #   请求的策略不在已批准 qualifiers 中：显式 not-found，不打印正常表格。
     (
         "test_qualified_unknown_strategy_fails_loudly",
         lambda qualification_dir: None,
@@ -2303,6 +2313,8 @@ def _seed_growth_strategy_snapshot(snapshot_root: Path) -> None:
 SCREEN_UNSERVICEABLE_REQUEST_CASES: tuple[
     tuple[str, Callable[[Path], None], str, str], ...
 ] = (
+    # test_screen_missing_snapshot:
+    #   Step 2: 快照不存在时输出规范提示并返回非零。
     (
         "test_screen_missing_snapshot",
         lambda snapshot_root: None,
@@ -2312,6 +2324,8 @@ SCREEN_UNSERVICEABLE_REQUEST_CASES: tuple[
             f"run `astock daily --as-of {SCREEN_CLI_DAY} --allow-incomplete` first"
         ),
     ),
+    # test_screen_unknown_strategy:
+    #   Step 3: 快照存在但没有所请求的策略结果时报错并退出。
     (
         "test_screen_unknown_strategy",
         _seed_growth_strategy_snapshot,
@@ -2355,7 +2369,7 @@ def test_screen_unserviceable_requests_fail_loudly(tmp_path: Path) -> None:
             wrong.append(
                 f"{label}: 输出缺少 {expected_message!r}；实际 {result.output!r}"
             )
-    assert not wrong, "screen 无法服侍的请求未按预期失败:\n" + "\n".join(wrong)
+    assert not wrong, "screen 无法服务的请求未按预期失败:\n" + "\n".join(wrong)
 
 
 def test_screen_low_coverage_warning(tmp_path: Path) -> None:
