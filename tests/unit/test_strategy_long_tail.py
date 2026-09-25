@@ -115,18 +115,33 @@ def test_eligible_when_every_required_factor_has_a_value() -> None:
     assert result.reasons == ()
 
 
-def test_missing_factor_makes_the_symbol_ineligible() -> None:
-    result = _momentum_scanner().eligibility(_momentum_context(*_valued()[:-1]))
+# 「缺证据即不合格」两行：行序与原用例一致，label 即原测试名，
+# 比对方式与原断言同为逐理由 `in` 片段。
+INELIGIBLE_FACTOR_CASES: tuple[tuple[str, tuple[FactorResult, ...], str], ...] = (
+    # test_missing_factor_makes_the_symbol_ineligible:
+    #   配置里最后一个必需因子整个缺席。
+    ("test_missing_factor_makes_the_symbol_ineligible", _valued()[:-1], REQUIRED[-1]),
+    # test_null_factor_makes_the_symbol_ineligible:
+    #   配置里最后一个必需因子在场但状态为 NULL。
+    ("test_null_factor_makes_the_symbol_ineligible", _null_last(), "NULL"),
+)
 
-    assert result.eligible is False
-    assert any(REQUIRED[-1] in reason for reason in result.reasons)
 
-
-def test_null_factor_makes_the_symbol_ineligible() -> None:
-    result = _momentum_scanner().eligibility(_momentum_context(*_null_last()))
-
-    assert result.eligible is False
-    assert any("NULL" in reason for reason in result.reasons)
+def test_missing_or_null_required_factor_makes_the_symbol_ineligible() -> None:
+    """原 2 条「缺因子 / NULL 因子」用例收表：不合格且理由点名因子或 NULL。"""
+    scanner = _momentum_scanner()
+    wrong = []
+    for label, factors, expected_reason_fragment in INELIGIBLE_FACTOR_CASES:
+        result = scanner.eligibility(_momentum_context(*factors))
+        if result.eligible is not False:
+            wrong.append(f"{label}: eligible 得到 {result.eligible!r}，期望 False")
+            continue
+        if not any(expected_reason_fragment in reason for reason in result.reasons):
+            wrong.append(
+                f"{label}: 理由中找不到 {expected_reason_fragment!r}，"
+                f"实际 {result.reasons!r}"
+            )
+    assert not wrong, "缺因子判定未按预期:\n" + "\n".join(wrong)
 
 
 def test_scoring_is_explicitly_absent_for_a_lone_symbol() -> None:
