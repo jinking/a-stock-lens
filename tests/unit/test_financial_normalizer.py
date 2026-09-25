@@ -18,8 +18,6 @@ cover the edge cases the fixture does not contain.
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-import pytest
-
 from astock_lens.data.contracts import RawDataset, RawPayload
 from astock_lens.data.normalize.financials import (
     FINANCIAL_METRICS,
@@ -286,6 +284,6 @@ def test_a_command_that_answered_nothing_is_not_treated_as_an_empty_market() -> 
     assert outcome.source_status is DataStatus.NULL
 
 
-@pytest.mark.parametrize("metric", FINANCIAL_METRICS, ids=lambda m: m.metric)
-def test_every_metric_declares_a_unit(metric: object) -> None:
-    assert metric.unit
+def test_every_metric_declares_a_unit() -> None:
+    missing = [metric.metric for metric in FINANCIAL_METRICS if not metric.unit]
+    assert not missing, f"缺少单位的指标: {missing}"

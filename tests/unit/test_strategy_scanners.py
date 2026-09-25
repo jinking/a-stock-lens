@@ -13,8 +13,6 @@ Task 6 的产出不是"换了个实现"，而是**每个策略都能自己拥有
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pytest
-
 from astock_lens.domain.enums import DataStatus
 from astock_lens.domain.models import SnapshotLineage
 from astock_lens.factors.contracts import FactorResult
@@ -64,77 +62,97 @@ def _context(
     )
 
 
-@pytest.mark.parametrize("strategy_id", sorted(SCANNERS))
-def test_the_class_is_its_own(strategy_id: str) -> None:
-    assert type(_scanner(strategy_id)).__name__ == SCANNERS[strategy_id]
+def test_the_class_is_its_own() -> None:
+    wrong = [
+        sid for sid in sorted(SCANNERS) if type(_scanner(sid)).__name__ != SCANNERS[sid]
+    ]
+    assert not wrong, f"扫描器类名与配置不符: {wrong}"
 
 
-@pytest.mark.parametrize("strategy_id", sorted(SCANNERS))
-def test_the_required_factors_match_the_configuration(strategy_id: str) -> None:
-    config = load_strategy_config(CONFIGS / f"{strategy_id}.yaml")
+def test_the_required_factors_match_the_configuration() -> None:
+    wrong = []
+    for sid in sorted(SCANNERS):
+        config = load_strategy_config(CONFIGS / f"{sid}.yaml")
+        if _scanner(sid).required_factors() != set(config.required_factors):
+            wrong.append(sid)
+    assert not wrong, f"必需因子与配置不符: {wrong}"
 
-    assert _scanner(strategy_id).required_factors() == set(config.required_factors)
 
-
-@pytest.mark.parametrize("strategy_id", sorted(SCANNERS))
-def test_scoring_one_symbol_alone_reports_no_score(strategy_id: str) -> None:
+def test_scoring_one_symbol_alone_reports_no_score() -> None:
     """`score()` 没有总体可排，所以它只报告资格与证据。"""
-    scanner = _scanner(strategy_id)
-
-    result = scanner.score(_context(scanner, "ONLY"))
-
-    assert result.eligible is True
-    assert result.score is None
-    assert result.rank_percentile is None
-    assert result.confidence is None
-    assert result.strategy_id == strategy_id
-
-
-@pytest.mark.parametrize("strategy_id", sorted(SCANNERS))
-def test_a_missing_factor_makes_the_symbol_ineligible_with_a_reason(
-    strategy_id: str,
-) -> None:
-    scanner = _scanner(strategy_id)
-    missing = min(scanner.required_factors())
-
-    result = scanner.score(_context(scanner, "HOLE", missing=missing))
-
-    assert result.eligible is False
-    assert any(missing in reason for reason in result.risks)
+    wrong = []
+    for sid in sorted(SCANNERS):
+        scanner = _scanner(sid)
+        result = scanner.score(_context(scanner, "ONLY"))
+        ok = (
+            result.eligible is True
+            and result.score is None
+            and result.rank_percentile is None
+            and result.confidence is None
+            and result.strategy_id == sid
+        )
+        if not ok:
+            wrong.append(
+                f"{sid}: eligible={result.eligible!r} score={result.score!r} "
+                f"percentile={result.rank_percentile!r} "
+                f"confidence={result.confidence!r} id={result.strategy_id!r}"
+            )
+    assert not wrong, "单独评分应只报资格与证据:\n" + "\n".join(wrong)
 
 
-@pytest.mark.parametrize("strategy_id", sorted(SCANNERS))
-def test_the_explanation_reaches_factor_level(strategy_id: str) -> None:
-    scanner = _scanner(strategy_id)
-    contexts = (
-        _context(scanner, "A"),
-        _context(scanner, "B"),
-        _context(scanner, "C"),
-    )
-
-    result = scanner.score_cross_section(contexts)[0]
-    explanation = scanner.explain(result)
-
-    assert explanation.strategy_id == strategy_id
-    assert {item.factor for item in explanation.factors} == scanner.required_factors()
+def test_a_missing_factor_makes_the_symbol_ineligible_with_a_reason() -> None:
+    wrong = []
+    for sid in sorted(SCANNERS):
+        scanner = _scanner(sid)
+        missing = min(scanner.required_factors())
+        result = scanner.score(_context(scanner, "HOLE", missing=missing))
+        if result.eligible is not False or not any(
+            missing in reason for reason in result.risks
+        ):
+            wrong.append(f"{sid}: eligible={result.eligible!r} risks={result.risks!r}")
+    assert not wrong, "缺因子应判不合格并给出原因:\n" + "\n".join(wrong)
 
 
-@pytest.mark.parametrize("strategy_id", sorted(SCANNERS))
-def test_the_cross_section_ranks_exactly_the_eligible_population(
-    strategy_id: str,
-) -> None:
-    scanner = _scanner(strategy_id)
-    missing = min(scanner.required_factors())
-    contexts = (
-        _context(scanner, "A"),
-        _context(scanner, "B"),
-        _context(scanner, "HOLE", missing=missing),
-    )
+def test_the_explanation_reaches_factor_level() -> None:
+    wrong = []
+    for sid in sorted(SCANNERS):
+        scanner = _scanner(sid)
+        contexts = (
+            _context(scanner, "A"),
+            _context(scanner, "B"),
+            _context(scanner, "C"),
+        )
+        result = scanner.score_cross_section(contexts)[0]
+        explanation = scanner.explain(result)
+        factors = {item.factor for item in explanation.factors}
+        if explanation.strategy_id != sid or factors != scanner.required_factors():
+            wrong.append(
+                f"{sid}: id={explanation.strategy_id!r} factors={sorted(factors)!r} "
+                f"expected={sorted(scanner.required_factors())!r}"
+            )
+    assert not wrong, "解释应落到因子层:\n" + "\n".join(wrong)
 
-    results = {
-        result.symbol: result for result in scanner.score_cross_section(contexts)
-    }
 
-    assert results["A"].score is not None
-    assert results["B"].score is not None
-    assert results["HOLE"].score is None
+def test_the_cross_section_ranks_exactly_the_eligible_population() -> None:
+    wrong = []
+    for sid in sorted(SCANNERS):
+        scanner = _scanner(sid)
+        missing = min(scanner.required_factors())
+        contexts = (
+            _context(scanner, "A"),
+            _context(scanner, "B"),
+            _context(scanner, "HOLE", missing=missing),
+        )
+        results = {
+            result.symbol: result for result in scanner.score_cross_section(contexts)
+        }
+        if not (
+            results["A"].score is not None
+            and results["B"].score is not None
+            and results["HOLE"].score is None
+        ):
+            wrong.append(
+                f"{sid}: A={results['A'].score!r} B={results['B'].score!r} "
+                f"HOLE={results['HOLE'].score!r}"
+            )
+    assert not wrong, "横截面应只给合格标的打分:\n" + "\n".join(wrong)
