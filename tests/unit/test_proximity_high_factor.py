@@ -59,6 +59,31 @@ def _compute(symbol: str, *, dataset: NormalizedDataset | None = None) -> Factor
     )
 
 
+def _with_null_high(dataset: NormalizedDataset, symbol: str) -> NormalizedDataset:
+    """抹掉窗口内第 40 根 bar 的 high。"""
+    ordered = sorted(
+        (bar for bar in dataset.daily_bars if bar.symbol == symbol),
+        key=lambda bar: bar.trade_date,
+    )
+    target = ordered[-40]
+    bars = tuple(
+        bar.model_copy(update={"high": None}) if bar == target else bar
+        for bar in dataset.daily_bars
+    )
+    return dataset.model_copy(update={"daily_bars": bars})
+
+
+def _with_zero_peak(dataset: NormalizedDataset, symbol: str) -> NormalizedDataset:
+    """把一只标的的全部 bar 的 high 与 close 归零。"""
+    bars = tuple(
+        bar.model_copy(update={"high": 0.0, "close": 0.0})
+        if bar.symbol == symbol
+        else bar
+        for bar in dataset.daily_bars
+    )
+    return dataset.model_copy(update={"daily_bars": bars})
+
+
 def test_proximity_equals_the_latest_close_over_the_window_peak() -> None:
     wrong = []
     for symbol in (*SPIKED, "000001.SZ", "900948.SH"):
@@ -103,56 +128,35 @@ def test_a_falling_symbol_sits_far_below_its_peak() -> None:
     assert falling < rising
 
 
-def test_a_missing_high_inside_the_window_is_null() -> None:
-    dataset = _dataset()
-    ordered = sorted(
-        (bar for bar in dataset.daily_bars if bar.symbol == "600000.SH"),
-        key=lambda bar: bar.trade_date,
-    )
-    target = ordered[-40]
-    bars = tuple(
-        bar.model_copy(update={"high": None}) if bar == target else bar
-        for bar in dataset.daily_bars
-    )
-
-    result = _compute(
-        "600000.SH", dataset=dataset.model_copy(update={"daily_bars": bars})
-    )
-
-    assert result.status is DataStatus.NULL
-    assert result.raw_value is None
+# 缺数据四行：窗口内缺 high / 窗口不足 / 标的未知 / 峰值与收盘价为 0。
+# 行序与原用例一致，label 即原测试名，原 docstring 逐字保留为行注释；
+# mutate 为 None 表示用未改动的数据集。
+NULL_CASES = (
+    # test_a_missing_high_inside_the_window_is_null
+    ("test_a_missing_high_inside_the_window_is_null", "600000.SH", _with_null_high),
+    # test_too_few_bars_is_null:
+    #   000004.SZ has 34 bars, far short of a 252-bar window.
+    ("test_too_few_bars_is_null", "000004.SZ", None),
+    # test_an_unknown_symbol_is_null
+    ("test_an_unknown_symbol_is_null", "999999.SH", None),
+    # test_a_zero_peak_is_null_rather_than_infinite
+    ("test_a_zero_peak_is_null_rather_than_infinite", "600000.SH", _with_zero_peak),
+)
 
 
-def test_too_few_bars_is_null() -> None:
-    """000004.SZ has 34 bars, far short of a 252-bar window."""
-    result = _compute("000004.SZ")
-
-    assert result.status is DataStatus.NULL
-    assert result.raw_value is None
-
-
-def test_an_unknown_symbol_is_null() -> None:
-    result = _compute("999999.SH")
-
-    assert result.status is DataStatus.NULL
-    assert result.raw_value is None
-
-
-def test_a_zero_peak_is_null_rather_than_infinite() -> None:
-    dataset = _dataset()
-    bars = tuple(
-        bar.model_copy(update={"high": 0.0, "close": 0.0})
-        if bar.symbol == "600000.SH"
-        else bar
-        for bar in dataset.daily_bars
-    )
-
-    result = _compute(
-        "600000.SH", dataset=dataset.model_copy(update={"daily_bars": bars})
-    )
-
-    assert result.status is DataStatus.NULL
-    assert result.raw_value is None
+def test_missing_high_or_insufficient_window_is_null() -> None:
+    """窗口内缺 high、窗口不足、标的未知或峰值为 0：一律 NULL，不扁平化也不取无限值。"""
+    wrong = []
+    for label, symbol, mutate in NULL_CASES:
+        dataset = _dataset()
+        if mutate is not None:
+            dataset = mutate(dataset, symbol)
+        result = _compute(symbol, dataset=dataset)
+        if result.status is not DataStatus.NULL or result.raw_value is not None:
+            wrong.append(
+                f"{label}: status={result.status!r} value={result.raw_value!r}，期望 NULL/None"
+            )
+    assert not wrong, "缺数据未按预期返回 NULL:\n" + "\n".join(wrong)
 
 
 def test_metadata_and_window_come_from_the_configuration() -> None:

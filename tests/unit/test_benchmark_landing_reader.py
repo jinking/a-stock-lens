@@ -72,79 +72,85 @@ def test_step2_wrong_symbol_exclusion(tmp_path: Path) -> None:
     assert [b.trade_date for b in bars] == [date(2026, 9, 1), date(2026, 9, 2)]
 
 
-def test_step3_missing_required_column_in_header(tmp_path: Path) -> None:
-    """Step 3: missing required column in CSV header fails closed with ValueError."""
-    # Header missing 'amount'
-    csv_file = _write_csv(
-        tmp_path / "benchmark_bars.csv",
+# test_step3_naive_as_of_rejected 用的无时区时间：原用例内联构造，逐字保留。
+NAIVE_AS_OF = datetime(2026, 9, 2, 15, 0)  # noqa: DTZ001
+
+# Step 3 的 fail-closed 五行：每行一份夹具内容（None 表示该路径不存在）、
+# 一个 as_of，以及期望的异常类型与消息片段（None 表示不断言消息）。
+# 行序与原用例一致，label 即原测试名，原 docstring 逐字保留为行注释。
+# 消息片段均为无正则元字符的字面量，故 `in` 与 pytest.raises 的 match= 等价。
+FAIL_CLOSED_CASES = (
+    # test_step3_missing_required_column_in_header:
+    #   Step 3: missing required column in CSV header fails closed with ValueError.
+    #   Header missing 'amount'
+    (
+        "test_step3_missing_required_column_in_header",
+        "benchmark_bars.csv",
         "symbol,trade_date,open,high,low,close,volume\n"
         + f"{BENCHMARK_ID},2026-09-01,10.0,11.0,9.0,10.5,1000.0\n",
-    )
-
-    with pytest.raises(ValueError, match="missing required columns"):
-        read_benchmark_bars(
-            path=csv_file,
-            benchmark_id=BENCHMARK_ID,
-            as_of=AS_OF,
-        )
-
-
-def test_step3_malformed_numeric_column(tmp_path: Path) -> None:
-    """Step 3: non-numeric float in column fails closed with ValueError."""
-    csv_file = _write_csv(
-        tmp_path / "benchmark_bars.csv",
+        AS_OF,
+        ValueError,
+        "missing required columns",
+    ),
+    # test_step3_malformed_numeric_column:
+    #   Step 3: non-numeric float in column fails closed with ValueError.
+    (
+        "test_step3_malformed_numeric_column",
+        "benchmark_bars.csv",
         HEADER
         + f"{BENCHMARK_ID},2026-09-01,10.0,11.0,9.0,not-a-number,1000.0,5000.0\n",
-    )
-
-    with pytest.raises(ValueError, match="Malformed numeric column 'close'"):
-        read_benchmark_bars(
-            path=csv_file,
-            benchmark_id=BENCHMARK_ID,
-            as_of=AS_OF,
-        )
-
-
-def test_step3_malformed_trade_date(tmp_path: Path) -> None:
-    """Step 3: invalid date string fails closed with ValueError."""
-    csv_file = _write_csv(
-        tmp_path / "benchmark_bars.csv",
+        AS_OF,
+        ValueError,
+        "Malformed numeric column 'close'",
+    ),
+    # test_step3_malformed_trade_date:
+    #   Step 3: invalid date string fails closed with ValueError.
+    (
+        "test_step3_malformed_trade_date",
+        "benchmark_bars.csv",
         HEADER + f"{BENCHMARK_ID},not-a-date,10.0,11.0,9.0,10.5,1000.0,5000.0\n",
-    )
-
-    with pytest.raises(ValueError, match="Malformed trade_date"):
-        read_benchmark_bars(
-            path=csv_file,
-            benchmark_id=BENCHMARK_ID,
-            as_of=AS_OF,
-        )
-
-
-def test_step3_missing_file_raises_file_not_found(tmp_path: Path) -> None:
-    """Step 3: non-existent file path fails closed with FileNotFoundError."""
-    non_existent = tmp_path / "non_existent.csv"
-    with pytest.raises(FileNotFoundError):
-        read_benchmark_bars(
-            path=non_existent,
-            benchmark_id=BENCHMARK_ID,
-            as_of=AS_OF,
-        )
-
-
-def test_step3_naive_as_of_rejected(tmp_path: Path) -> None:
-    """Step 3: naive datetime without timezone must be rejected."""
-    csv_file = _write_csv(
-        tmp_path / "benchmark_bars.csv",
+        AS_OF,
+        ValueError,
+        "Malformed trade_date",
+    ),
+    # test_step3_missing_file_raises_file_not_found:
+    #   Step 3: non-existent file path fails closed with FileNotFoundError.
+    (
+        "test_step3_missing_file_raises_file_not_found",
+        "non_existent.csv",
+        None,
+        AS_OF,
+        FileNotFoundError,
+        None,
+    ),
+    # test_step3_naive_as_of_rejected:
+    #   Step 3: naive datetime without timezone must be rejected.
+    (
+        "test_step3_naive_as_of_rejected",
+        "benchmark_bars.csv",
         HEADER + f"{BENCHMARK_ID},2026-09-01,10.0,11.0,9.0,10.5,1000.0,5000.0\n",
-    )
+        NAIVE_AS_OF,
+        ValueError,
+        "timezone-aware",
+    ),
+)
 
-    naive_as_of = datetime(2026, 9, 2, 15, 0)  # noqa: DTZ001
-    with pytest.raises(ValueError, match="timezone-aware"):
-        read_benchmark_bars(
-            path=csv_file,
-            benchmark_id=BENCHMARK_ID,
-            as_of=naive_as_of,
-        )
+
+def test_defective_inputs_fail_closed_and_name_the_defect(tmp_path: Path) -> None:
+    """坏列头 / 坏数值 / 坏日期 / 缺文件 / 无时区 as_of：显式失败并点名原因。"""
+    wrong = []
+    for label, filename, csv_text, as_of, expected_error, fragment in FAIL_CLOSED_CASES:
+        path = tmp_path / filename
+        if csv_text is not None:
+            _write_csv(path, csv_text)
+        try:
+            read_benchmark_bars(path=path, benchmark_id=BENCHMARK_ID, as_of=as_of)
+        except expected_error as exc:
+            if fragment is not None and fragment not in str(exc):
+                wrong.append(f"{label}: 错误信息缺少 {fragment!r}，实际 {exc}")
+        else:
+            wrong.append(f"{label}: 未按预期失败，期望 {expected_error.__name__}")
+    assert not wrong, "坏输入未显式失败:\n" + "\n".join(wrong)
 
 
 def test_bars_sorted_ascending(tmp_path: Path) -> None:

@@ -48,35 +48,59 @@ def test_metadata_comes_from_the_config_file() -> None:
     assert metadata.inputs == ("amount",)
 
 
-def test_full_window_averages_exactly() -> None:
-    result = _factor().compute(_context("600000.SH"))
+# 窗口完整性四行：整窗 / 窗口不足 / 窗口内缺值 / 窗口外缺值。
+# 行序与原用例一致，label 即原测试名，原 docstring 逐字保留为行注释。
+# 期望值一列原样携带 pytest.approx；None 表示该行要求 raw_value 就是 None。
+WINDOW_COMPLETENESS_CASES = (
+    # test_full_window_averages_exactly
+    (
+        "test_full_window_averages_exactly",
+        "600000.SH",
+        DataStatus.VALUE,
+        pytest.approx(1_014_500.0),
+    ),
+    # test_short_window_is_null_not_a_smaller_average:
+    #   000001.SZ only has 10 bars, so no 20-day average exists.
+    (
+        "test_short_window_is_null_not_a_smaller_average",
+        "000001.SZ",
+        DataStatus.NULL,
+        None,
+    ),
+    # test_missing_amount_inside_the_window_forces_null:
+    #   601398.SH has a blank amount on one of its trailing 20 bars.
+    (
+        "test_missing_amount_inside_the_window_forces_null",
+        "601398.SH",
+        DataStatus.NULL,
+        None,
+    ),
+    # test_missing_amount_outside_the_window_is_harmless:
+    #   600519.SH has a blank amount only on its oldest bar.
+    (
+        "test_missing_amount_outside_the_window_is_harmless",
+        "600519.SH",
+        DataStatus.VALUE,
+        pytest.approx(3_014_500.0),
+    ),
+)
 
-    assert result.status is DataStatus.VALUE
-    assert result.raw_value == pytest.approx(1_014_500.0)
 
-
-def test_short_window_is_null_not_a_smaller_average() -> None:
-    """000001.SZ only has 10 bars, so no 20-day average exists."""
-    result = _factor().compute(_context("000001.SZ"))
-
-    assert result.status is DataStatus.NULL
-    assert result.raw_value is None
-
-
-def test_missing_amount_inside_the_window_forces_null() -> None:
-    """601398.SH has a blank amount on one of its trailing 20 bars."""
-    result = _factor().compute(_context("601398.SH"))
-
-    assert result.status is DataStatus.NULL
-    assert result.raw_value is None
-
-
-def test_missing_amount_outside_the_window_is_harmless() -> None:
-    """600519.SH has a blank amount only on its oldest bar."""
-    result = _factor().compute(_context("600519.SH"))
-
-    assert result.status is DataStatus.VALUE
-    assert result.raw_value == pytest.approx(3_014_500.0)
+def test_window_completeness_decides_value_or_null() -> None:
+    """窗口不足或窗口内缺值返回 NULL，绝不用更短的窗口凑一个平均。"""
+    wrong = []
+    for label, symbol, expected_status, expected_value in WINDOW_COMPLETENESS_CASES:
+        result = _factor().compute(_context(symbol))
+        if result.status is not expected_status:
+            wrong.append(f"{label}: status={result.status!r}，期望 {expected_status!r}")
+        if expected_value is None:
+            if result.raw_value is not None:
+                wrong.append(f"{label}: raw_value={result.raw_value!r}，期望 None")
+        elif result.raw_value != expected_value:
+            wrong.append(
+                f"{label}: raw_value={result.raw_value!r}，期望 {expected_value!r}"
+            )
+    assert not wrong, "窗口完整性判定未按预期:\n" + "\n".join(wrong)
 
 
 def test_bars_after_as_of_are_excluded() -> None:
