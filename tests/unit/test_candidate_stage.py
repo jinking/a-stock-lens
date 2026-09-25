@@ -999,16 +999,38 @@ def test_the_policy_is_what_makes_a_candidate() -> None:
     assert candidates[0].next_action is NextAction.WATCH
 
 
-def test_score_does_not_override_a_rejecting_policy() -> None:
-    """分数再高也不能覆盖 policy 的拒绝判定。"""
-    candidates = candidate_stage(
-        strategy_results=(_policy_result(score=100.0),),
-        lineage=LINEAGE,
-        as_of=POLICY_AS_OF,
-        policy=_ApprovesNothing(),
-    )
+# 两行是「policy 判定不通过就没有 Candidate」同一断言（`candidates == ()`）的参数枚举：
+# 行序与原用例一致，label 即原测试名，原 docstring 逐字保留为行上注释。
+POLICY_REJECTION_CASES: tuple[
+    tuple[str, CandidatePolicy, tuple[StrategyResult, ...]], ...
+] = (
+    # 分数再高也不能覆盖 policy 的拒绝判定。
+    (
+        "test_score_does_not_override_a_rejecting_policy",
+        _ApprovesNothing(),
+        (_policy_result(score=100.0),),
+    ),
+    # 没有资格成立的结果时，policy 不会被问到"要不要入选"。
+    (
+        "test_a_policy_verdict_is_ineligible_without_eligible_evidence",
+        _ApprovesEverything(),
+        (_policy_result(eligible=False, score=99.0),),
+    ),
+)
 
-    assert candidates == ()
+
+def test_a_failed_policy_verdict_produces_no_candidate() -> None:
+    wrong = []
+    for label, policy, strategy_results in POLICY_REJECTION_CASES:
+        candidates = candidate_stage(
+            strategy_results=strategy_results,
+            lineage=LINEAGE,
+            as_of=POLICY_AS_OF,
+            policy=policy,
+        )
+        if candidates != ():
+            wrong.append(f"{label}: 期望空候选集，实际 {candidates!r}")
+    assert not wrong, "policy 判定不通过时仍然产生了 Candidate:\n" + "\n".join(wrong)
 
 
 # 两行是「Builder 缺省即惰性 IGNORE、绝不自行推导 next_action」同一断言的参数枚举：
@@ -1042,18 +1064,6 @@ def test_the_builder_leaves_next_action_at_the_inert_default() -> None:
                 f"{label}: next_action 得到 {candidate.next_action!r}，期望 IGNORE"
             )
     assert not wrong, "builder 不得自行推导 next_action:\n" + "\n".join(wrong)
-
-
-def test_a_policy_verdict_is_ineligible_without_eligible_evidence() -> None:
-    """没有资格成立的结果时，policy 不会被问到"要不要入选"。"""
-    candidates = candidate_stage(
-        strategy_results=(_policy_result(eligible=False, score=99.0),),
-        lineage=LINEAGE,
-        as_of=POLICY_AS_OF,
-        policy=_ApprovesEverything(),
-    )
-
-    assert candidates == ()
 
 
 # ===========================================================================
