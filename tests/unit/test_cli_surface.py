@@ -77,20 +77,32 @@ def _invoke(local_tmp: Path, *args: str, dataset: str = SHORT_DATASET) -> Result
     )
 
 
-def test_cli_help() -> None:
-    result = CliRunner().invoke(app, ["--help"])
+# 「命令可运行且打印点名字样」两行：行序与原用例一致，label 即原测试名。
+# 列 = label, args, expected：比对方式与原断言同为逐片段 `in result.stdout`。
+STARTUP_COMMAND_CASES: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
+    # test_cli_help:
+    ("test_cli_help", ("--help",), ("doctor", "scan")),
+    # test_doctor_reports_the_factor_set_and_its_weights:
+    (
+        "test_doctor_reports_the_factor_set_and_its_weights",
+        ("doctor",),
+        ("factors:", "weights:"),
+    ),
+)
 
-    assert result.exit_code == 0
-    assert "doctor" in result.stdout
-    assert "scan" in result.stdout
 
-
-def test_doctor_reports_the_factor_set_and_its_weights() -> None:
-    result = CliRunner().invoke(app, ["doctor"])
-
-    assert result.exit_code == 0
-    assert "factors:" in result.stdout
-    assert "weights:" in result.stdout
+def test_startup_commands_report_their_surface() -> None:
+    """原 2 条「--help / doctor」用例收表：退出码 0，且各自字样出现在 stdout。"""
+    wrong = []
+    for label, args, expected in STARTUP_COMMAND_CASES:
+        result = CliRunner().invoke(app, list(args))
+        if result.exit_code != 0:
+            wrong.append(f"{label}: exit_code={result.exit_code}，期望 0")
+            continue
+        for fragment in expected:
+            if fragment not in result.stdout:
+                wrong.append(f"{label}: stdout 缺少 {fragment!r}")
+    assert not wrong, "CLI 表层命令输出不符:\n" + "\n".join(wrong)
 
 
 def test_factors_compute_prints_one_document_per_symbol_and_factor(
@@ -107,19 +119,53 @@ def test_factors_compute_prints_one_document_per_symbol_and_factor(
     assert len(lines) == len(SHORT_SYMBOLS) * len(FACTOR_NAMES)
 
 
-def test_scan_reports_a_ranking_and_writes_no_snapshot(local_tmp: Path) -> None:
-    """`scan` 是预览：6 只通过 Universe 的标的全部被打分，但不落盘。
+# 「预览命令不落盘」两行：行序与原用例一致，label 即原测试名，docstring 逐字保留为行注释。
+# 列 = label, args, expected：
+#   - `args` 逐字取自原 `_invoke(local_tmp, ...)` 调用（dataset 同为 LONG_DATASET）；
+#   - 比对方式与原断言同为逐片段 `in result.stdout`，落盘检查逐行点名 label。
+PREVIEW_WITHOUT_WRITE_CASES: tuple[
+    tuple[str, tuple[str, ...], tuple[str, ...]], ...
+] = (
+    # test_scan_reports_a_ranking_and_writes_no_snapshot:
+    #   `scan` 是预览：6 只通过 Universe 的标的全部被打分，但不落盘。
+    #
+    #   2026-09-18 起北交所不在 Universe 的交易所清单里，所以样本从 7 只变 6 只，
+    #   横截面排名的百分位随之改变（第一名的分数也因此从 95.24 变成 94.44）。
+    (
+        "test_scan_reports_a_ranking_and_writes_no_snapshot",
+        ("scan", "--as-of", DAY),
+        (
+            "universe: 6 symbols considered",
+            # 排名第一：涨得最快的标的，有分数、资格成立。
+            "300750.SZ score 94.44 (eligible)",
+        ),
+    ),
+    # test_universe_build_reports_the_verdicts_without_writing:
+    (
+        "test_universe_build_reports_the_verdicts_without_writing",
+        ("universe", "build", "--as-of", DAY),
+        ("included: 6", "ST: 1", "LONG_SUSPENSION"),
+    ),
+)
 
-    2026-09-18 起北交所不在 Universe 的交易所清单里，所以样本从 7 只变 6 只，
-    横截面排名的百分位随之改变（第一名的分数也因此从 95.24 变成 94.44）。
-    """
-    result = _invoke(local_tmp, "scan", "--as-of", DAY, dataset=LONG_DATASET)
 
-    assert result.exit_code == 0
-    assert "universe: 6 symbols considered" in result.stdout
-    # 排名第一：涨得最快的标的，有分数、资格成立。
-    assert "300750.SZ score 94.44 (eligible)" in result.stdout
-    assert list(local_tmp.rglob("*.json")) == []
+def test_preview_commands_report_their_verdicts_and_write_no_snapshot(
+    local_tmp: Path,
+) -> None:
+    """原 2 条「预览不落盘」用例收表：退出码 0、各自字样出现、且不写任何 json。"""
+    wrong = []
+    for label, args, expected in PREVIEW_WITHOUT_WRITE_CASES:
+        result = _invoke(local_tmp, *args, dataset=LONG_DATASET)
+        if result.exit_code != 0:
+            wrong.append(f"{label}: exit_code={result.exit_code}，期望 0")
+            continue
+        for fragment in expected:
+            if fragment not in result.stdout:
+                wrong.append(f"{label}: stdout 缺少 {fragment!r}")
+        written = list(local_tmp.rglob("*.json"))
+        if written:
+            wrong.append(f"{label}: 预览命令写了快照 {written!r}")
+    assert not wrong, "预览命令输出不符:\n" + "\n".join(wrong)
 
 
 def test_scan_reports_every_candidate_with_a_score(local_tmp: Path) -> None:
@@ -134,20 +180,6 @@ def test_scan_reports_every_candidate_with_a_score(local_tmp: Path) -> None:
     ]
     assert candidate_lines
     assert all("score" in line for line in candidate_lines)
-
-
-def test_universe_build_reports_the_verdicts_without_writing(
-    local_tmp: Path,
-) -> None:
-    result = _invoke(
-        local_tmp, "universe", "build", "--as-of", DAY, dataset=LONG_DATASET
-    )
-
-    assert result.exit_code == 0
-    assert "included: 6" in result.stdout
-    assert "ST: 1" in result.stdout
-    assert "LONG_SUSPENSION" in result.stdout
-    assert list(local_tmp.rglob("*.json")) == []
 
 
 def test_scan_rejects_a_malformed_date(local_tmp: Path) -> None:
@@ -201,75 +233,157 @@ def _write_industry_csv(
     return file_path
 
 
-def test_step1_exact_date(tmp_path: Path) -> None:
-    """Step 1: When an exact-date industry file exists, it must be selected."""
-    industry_dir = tmp_path / "westock" / "industry"
-    _write_industry_csv(
-        industry_dir,
-        "2026-09-01.csv",
-        [("000001.SZ", "sw2_bank", "银行", "2026-09-01T15:00:00+00:00")],
-    )
-    _write_industry_csv(
-        industry_dir,
+# 「选文件 + 出映射」两行：行序与原用例一致，label 即原测试名，docstring 逐字保留为行注释。
+# 列 = label, files, expected_file, expected_mapping：
+#   - `files` 是 (文件名, 行) 序列，逐字取自原两次 `_write_industry_csv` 调用；
+#   - `expected_mapping` 逐行按键取值 `==` 比名字（与原断言同为 `[]` 访问 + `==`）；
+#   - 每行用独立子目录复现原用例各自的空 `tmp_path`。
+INDUSTRY_FILE_SELECTION_CASES: tuple[
+    tuple[
+        str,
+        tuple[tuple[str, list[tuple[str, str, str, str]]], ...],
+        str,
+        tuple[tuple[str, str], ...],
+    ],
+    ...,
+] = (
+    # test_step1_exact_date:
+    #   Step 1: When an exact-date industry file exists, it must be selected.
+    (
+        "test_step1_exact_date",
+        (
+            (
+                "2026-09-01.csv",
+                [("000001.SZ", "sw2_bank", "银行", "2026-09-01T15:00:00+00:00")],
+            ),
+            (
+                "2026-09-02.csv",
+                [
+                    ("000001.SZ", "sw2_bank", "银行", "2026-09-02T15:00:00+00:00"),
+                    (
+                        "000002.SZ",
+                        "sw2_realestate",
+                        "房地产",
+                        "2026-09-02T15:00:00+00:00",
+                    ),
+                ],
+            ),
+        ),
         "2026-09-02.csv",
-        [
-            ("000001.SZ", "sw2_bank", "银行", "2026-09-02T15:00:00+00:00"),
-            ("000002.SZ", "sw2_realestate", "房地产", "2026-09-02T15:00:00+00:00"),
-        ],
-    )
-
-    day = datetime(2026, 9, 2, 15, 0, tzinfo=UTC)
-    selected = _latest_industry_file(day, root=tmp_path)
-    assert selected == industry_dir / "2026-09-02.csv"
-
-    mapping = _production_industry_map(day, root=tmp_path)
-    assert mapping["000001.SZ"] == "银行"
-    assert mapping["000002.SZ"] == "房地产"
-
-
-def test_step2_latest_prior_date(tmp_path: Path) -> None:
-    """Step 2: When no exact-date file exists, latest prior date must be chosen."""
-    industry_dir = tmp_path / "westock" / "industry"
-    _write_industry_csv(
-        industry_dir,
-        "2026-08-30.csv",
-        [("000001.SZ", "sw2_bank", "银行", "2026-08-30T15:00:00+00:00")],
-    )
-    _write_industry_csv(
-        industry_dir,
+        (("000001.SZ", "银行"), ("000002.SZ", "房地产")),
+    ),
+    # test_step2_latest_prior_date:
+    #   Step 2: When no exact-date file exists, latest prior date must be chosen.
+    (
+        "test_step2_latest_prior_date",
+        (
+            (
+                "2026-08-30.csv",
+                [("000001.SZ", "sw2_bank", "银行", "2026-08-30T15:00:00+00:00")],
+            ),
+            (
+                "2026-09-01.csv",
+                [
+                    ("000001.SZ", "sw2_bank", "银行", "2026-09-01T15:00:00+00:00"),
+                    ("600519.SH", "sw2_liquor", "白酒", "2026-09-01T15:00:00+00:00"),
+                ],
+            ),
+        ),
         "2026-09-01.csv",
-        [
-            ("000001.SZ", "sw2_bank", "银行", "2026-09-01T15:00:00+00:00"),
-            ("600519.SH", "sw2_liquor", "白酒", "2026-09-01T15:00:00+00:00"),
-        ],
-    )
+        (("000001.SZ", "银行"), ("600519.SH", "白酒")),
+    ),
+)
 
+
+def test_industry_file_selection_and_mapping(tmp_path: Path) -> None:
+    """原 2 条「精确日期 / 最近先前日期」用例收表：选中的文件与映射逐行断言。"""
     day = datetime(2026, 9, 2, 15, 0, tzinfo=UTC)
-    selected = _latest_industry_file(day, root=tmp_path)
-    assert selected == industry_dir / "2026-09-01.csv"
+    wrong = []
+    for label, files, expected_file, expected_mapping in INDUSTRY_FILE_SELECTION_CASES:
+        case_root = tmp_path / label
+        case_root.mkdir()
+        industry_dir = case_root / "westock" / "industry"
+        for filename, rows in files:
+            _write_industry_csv(industry_dir, filename, rows)
 
-    mapping = _production_industry_map(day, root=tmp_path)
-    assert mapping["000001.SZ"] == "银行"
-    assert mapping["600519.SH"] == "白酒"
+        selected = _latest_industry_file(day, root=case_root)
+        if selected != industry_dir / expected_file:
+            wrong.append(f"{label}: selected 得到 {selected!r}，期望 {expected_file!r}")
+            continue
+        mapping = _production_industry_map(day, root=case_root)
+        for symbol, industry in expected_mapping:
+            if mapping[symbol] != industry:
+                wrong.append(
+                    f"{label}: mapping[{symbol!r}] 得到 {mapping[symbol]!r}，"
+                    f"期望 {industry!r}"
+                )
+    assert not wrong, "行业文件选择与映射不符:\n" + "\n".join(wrong)
 
 
-def test_step3_future_date_exclusion(tmp_path: Path) -> None:
-    """Step 3: Files dated after target as_of date must be strictly excluded."""
-    industry_dir = tmp_path / "westock" / "industry"
-    _write_industry_csv(
-        industry_dir,
+# 「不合格文件不参与选择」两行：行序与原用例一致，label 即原测试名，docstring 逐字保留。
+# 列 = label, files, extra_files, expected_file：
+#   - `files` 逐字取自原 `_write_industry_csv` 调用，`extra_files` 逐字承接原
+#     直接 `write_text` 的旁路文件（内容逐字）；
+#   - 选中结果与原断言同为 `==`；每行用独立子目录复现原用例各自的空 `tmp_path`。
+NON_ELIGIBLE_FILE_CASES: tuple[
+    tuple[
+        str,
+        tuple[tuple[str, list[tuple[str, str, str, str]]], ...],
+        tuple[tuple[str, str], ...],
+        str,
+    ],
+    ...,
+] = (
+    # test_step3_future_date_exclusion:
+    #   Step 3: Files dated after target as_of date must be strictly excluded.
+    (
+        "test_step3_future_date_exclusion",
+        (
+            (
+                "2026-09-01.csv",
+                [("000001.SZ", "sw2_bank", "银行", "2026-09-01T15:00:00+00:00")],
+            ),
+            (
+                "2026-09-03.csv",
+                [("000001.SZ", "sw2_bank", "银行新版", "2026-09-03T15:00:00+00:00")],
+            ),
+        ),
+        (),
         "2026-09-01.csv",
-        [("000001.SZ", "sw2_bank", "银行", "2026-09-01T15:00:00+00:00")],
-    )
-    _write_industry_csv(
-        industry_dir,
-        "2026-09-03.csv",
-        [("000001.SZ", "sw2_bank", "银行新版", "2026-09-03T15:00:00+00:00")],
-    )
+    ),
+    # test_ignores_non_iso_date_csv:
+    #   Non-ISO-date CSV files (e.g. metadata.csv) are ignored safely.
+    (
+        "test_ignores_non_iso_date_csv",
+        (
+            (
+                "2026-09-01.csv",
+                [("000001.SZ", "sw2_bank", "银行", "2026-09-01T15:00:00+00:00")],
+            ),
+        ),
+        (("latest.csv", "dummy"), ("README.md", "docs")),
+        "2026-09-01.csv",
+    ),
+)
 
+
+def test_non_eligible_files_are_ignored(tmp_path: Path) -> None:
+    """原 2 条「未来日期 / 非 ISO 文件名」用例收表：选中结果仍是 09-01 那行。"""
     day = datetime(2026, 9, 2, 15, 0, tzinfo=UTC)
-    selected = _latest_industry_file(day, root=tmp_path)
-    assert selected == industry_dir / "2026-09-01.csv"
+    wrong = []
+    for label, files, extra_files, expected_file in NON_ELIGIBLE_FILE_CASES:
+        case_root = tmp_path / label
+        case_root.mkdir()
+        industry_dir = case_root / "westock" / "industry"
+        for filename, rows in files:
+            _write_industry_csv(industry_dir, filename, rows)
+        for filename, content in extra_files:
+            (industry_dir / filename).write_text(content, encoding="utf-8")
+
+        selected = _latest_industry_file(day, root=case_root)
+        if selected != industry_dir / expected_file:
+            wrong.append(f"{label}: selected 得到 {selected!r}，期望 {expected_file!r}")
+    assert not wrong, "不合格文件被错误选中:\n" + "\n".join(wrong)
 
 
 def test_step4_no_data_raises_file_not_found(tmp_path: Path) -> None:
@@ -318,22 +432,6 @@ def test_ambiguous_membership_fails_closed(tmp_path: Path) -> None:
     day = datetime(2026, 9, 2, 15, 0, tzinfo=UTC)
     with pytest.raises(IndustryMembershipAmbiguous):
         _production_industry_map(day, root=tmp_path)
-
-
-def test_ignores_non_iso_date_csv(tmp_path: Path) -> None:
-    """Non-ISO-date CSV files (e.g. metadata.csv) are ignored safely."""
-    industry_dir = tmp_path / "westock" / "industry"
-    _write_industry_csv(
-        industry_dir,
-        "2026-09-01.csv",
-        [("000001.SZ", "sw2_bank", "银行", "2026-09-01T15:00:00+00:00")],
-    )
-    (industry_dir / "latest.csv").write_text("dummy", encoding="utf-8")
-    (industry_dir / "README.md").write_text("docs", encoding="utf-8")
-
-    day = datetime(2026, 9, 2, 15, 0, tzinfo=UTC)
-    selected = _latest_industry_file(day, root=tmp_path)
-    assert selected == industry_dir / "2026-09-01.csv"
 
 
 def test_includes_supplemental_industry_memberships(tmp_path: Path) -> None:
