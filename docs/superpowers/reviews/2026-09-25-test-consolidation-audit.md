@@ -440,7 +440,7 @@ README.md`，`src/**`、`configs/**` 无改动。
 | --- | --- | --- | --- |
 | 基线 collected | 1298 | **1298** | §2 实测（`1298 tests collected`） |
 | 批次 1 末（Task 4 收口） | 1184 | **1184** | 1298 − 114 |
-| 批次 2 末（Task 9 收口） | 1077 | **1077** | 1298 − 114 − 105（Task 5 若达成单表则为 1077） |
+| 批次 2 末（Task 9 收口） | 1077 | **1077** | 1298 − 114 − 107 = 1077（批次 2 实测合计 −107：Task 5 −14 / 6 −25 / 7 −29 / 8 −22 / 9 −17） |
 | 批次 1–4 末（Task 11 收口） | 1051 | **1063** | 1298 − 114 − 107 − 8 − 6 |
 | 验收线（Task 14 判定） | ≤1040 | **≤1040** | 规格 §7.1，不变 |
 | Task 15 缺口 | 约 −11 | **23** | 1063 − 1040；**Task 15 因此必须执行** |
@@ -495,8 +495,9 @@ Task 11 的两条 API 边界检查里：
 | Task 10 | `55398f3` | −8 | 1069 | 1077−8=1069 ✓ | 五文件 5 处改动 = 4 条纯 DELETE + 2 组两行表驱动合并（−8），全量 1069 全绿。**6 条 DELETE 的权威替代**（`文件::测试名`，逐条断言对照见 task-10-report.md）：`tests/unit/test_snapshot_store.py::test_unwritten_date_reads_empty` → `tests/unit/test_duckdb_snapshot_store.py::test_an_absent_snapshot_reads_as_empty`；`test_snapshot_store.py::test_kinds_do_not_collide` → `test_duckdb_snapshot_store.py::test_kinds_are_kept_apart` + `::test_candidate_snapshot_conflict_refused_across_both_stores` + `::test_a_written_snapshot_reads_back`（后两条承接「恰好一条记录」的列表等值断言）；`test_snapshot_store.py::test_different_payload_for_the_same_kind_and_date_is_rejected` → `test_duckdb_snapshot_store.py::test_rewriting_the_same_key_with_different_content_is_refused`；`test_snapshot_store.py::test_candidate_snapshot_conflict_cannot_be_overwritten_or_bypassed` → 组合 `test_duckdb_snapshot_store.py::test_candidate_snapshot_conflict_refused_across_both_stores` + 同文件 `test_snapshot_store.py::test_a_conflict_names_the_kind_and_the_date`（后者按台账约束未随族改写；该文件本轮只删 4 个函数、其余 7 例逐字节未动）；`tests/unit/test_qualification_context.py::test_missing_approved_qualification_factor_fails_closed` → `tests/integration/test_qualification_pipeline.py::test_growth_qualification_fails_closed_when_roe_evidence_is_missing`（`:118`/`:120` 逐条承接，另多一条 `qualified is False`）；`tests/integration/test_candidate_qualification_pipeline.py::test_no_approved_absolute_rules_blocks_build_candidates` → `tests/integration/test_daily_pipeline.py::test_the_candidate_stage_is_blocked_while_its_layers_are_missing`（T4 合并后 `qualifiers=None` 行的 `run.error` 断言逐字含 `"strategy qualification rules are not configured"`）。**2 组合并（两行表驱动，断言行逐行保留）**：T4 `tests/integration/test_daily_pipeline.py` 的 `test_the_blocked_candidate_stage_names_the_deferred_policy` 并入 `test_the_candidate_stage_is_blocked_while_its_layers_are_missing`——`layers-missing`（两层齐缺：两条 error 文案 + `candidates == ()`）与 `policy-deferred`（生产资格规则已装配、仅候选政策 Deferred；该行原本只断言阻断 + 文案，故不额外加强 `candidates`）两行各用 `local_tmp/<label>` 作运行根、行间不共享现场；T12 `tests/integration/test_daily_production_evidence.py` 的 step5（有效量不足）并入 step4（缺失行业证据）——同一 fail-closed 规则的两个缺失维度，两行 setUp 语句由具名准备函数 `_missing_industry_evidence_case` / `_insufficient_volume_bars_case` 逐字承载，公共 `run_daily` 参数与逐条断言（DETECT_REGIME SUCCEEDED、MARKET_VALIDATE FAILED、具体文案、下游 BUILD_CANDIDATES 未跑、`candidates == 0`、无候选快照）按行保留。**KEEP 的 8 项未被碰**：T1 余 7 例、T2b、T3、T6、T7、T8、T9、T10、T11（`tests/unit/test_bootstrap_batch_fallback.py` 本轮零改动，任务书关于冻结文件的注意不适用）；5 个被改文件里未登记的顶层函数 45/45 源码段 AST 逐字节相同，未列入改动集的文件全部零 diff（`task-10-preservation-check.txt`）。**负控**：两张表 11 项变异（逐行文案改写 + 6 个谓词取反）11/11 被检出且失败消息只点名被变异那一行的 label（`task-10-negative-control.txt`）。**偏差**：计划 −20 → 实测 −8（= §5.2 小计），缺口 **−12** 记入 Task 15；差异原因见 §5.4（T3/T8/T9/T10/T11/T2b 改判 KEEP、T1 只删 4 而非 6、T4/T12 由 DELETE 改 MERGE 且减量不变） |
 | Task 11 | `20baf65` | −6 | 1063 | 1069−6=1063 ✓ | 四行扫描表化 + 边界检查方向反转 + docs 3→1 + 三处恒真断言，全量 1063 全绿。**①「模块 × 禁用词」总表**落在 `tests/unit/test_financial_normalizer.py`（原 `test_the_normalizer_never_reaches_for_a_provider` 改名 `test_architecture_boundaries_hold_for_modules_and_the_watcher_script`），路径一律 `ROOT` 锚定、词表**按文件原样分列、未取并集**：`src/astock_lens/data/normalize/financials.py` 5 词（subprocess/urlopen/Runner/.fetch(/requests）、`src/astock_lens/factors/fundamental.py` 4 词（同上但无 `Runner`）、`src/astock_lens/api/app.py` 12 词（factors.builtin/strategies.momentum/AverageAmountFactor/MomentumScanner/astock_lens.pipelines/build_scanner/strategy_stage/factor_stage/run_analysis/trade_gate.engine/TradeGateEngine/ThesisAuditAdapter）、`scripts/watch-bootstrap.sh` 3 个禁用词（5301/REQUIRED=/2026-09-17）；`required` 列由第 4 行携带 1 个必须词 `manifest`（正向断言「watcher 的进度必须从本次运行的清单推导」保留）。循环遍历所有行、循环体内无 `assert`，先收集后一次性断言，失败消息点名路径与词；原四条用例的 docstring（`ARCHITECTURE.md` §4.3 两处、§2 一处）与逐行中文说明逐字折为行上注释。**②API 边界检查保留方向反转**（§5.4 第 3 条）：保留并表化 12 词文本扫描 `test_api_never_imports_the_computation_engines`，删除 4 词 AST `test_api_module_imports_strictly_bounded`（−1）。逐词核对 **4 ⊆ 12**：`astock_lens.pipelines`/`run_analysis`/`factor_stage`/`strategy_stage` 全部在 12 词内；两侧解析方式下「import 命中 ⟹ 源文本命中」成立（AST 侧取 `ast.Import.alias.name` 与 `ast.ImportFrom.module`/`alias.name`，都是源码中逐字出现的标识符文本，文本扫描是严格超集，反向不成立——注释与字符串也会命中文本扫描）→ 检测集 4 ⊊ 12，反转避免丢 8 词。另核对 `Path(api_module.__file__)` 与 `ROOT/src/astock_lens/api/app.py`：前者经共享 venv 的 editable 安装解析到主仓 `/Users/huangjinjin/Documents/ChatGPT/a-stock-lens/src/astock_lens/api/app.py`（绝对路径不同），两者 sha256 同为 `735d1b3f1edabba44e3c09bf3ab124d1bf86988cd614a4934036871fa41ff58a`、逐字节相同，换 `ROOT` 锚定后检测内容不变；`api_module` 随之成为未用导入，为过 `ruff check` 一并删除（test_api.py 中唯一超出删除函数范围的一行）。**③docs 3→1**：`tests/unit/test_docs_consistency.py` 三条用例合并为 `test_documentation_does_not_claim_stale_status`（−2），11 条过期文案逐字进表（README 4 + `docs/ROADMAP.md` 3 + `docs/REMAINING_PRODUCT_BLOCKERS.md` 4），失败消息点名 `path` 与 `phrase`，文件头中文注释与 `_repo_root()` 保留。**④三处恒真断言删除**（A18：删断言行、用例保留、±0）：`tests/unit/test_normalized_dataset_dividends.py:16`（被下一行 `ds_empty.dividend_events == ()` 蕴含）、`tests/unit/test_market_signal_readiness.py:196`（被其下 `strat.samples` 迭代蕴含）、`tests/unit/test_westock_bars.py:258`（被其下 `progress_callback(100, 5568, 97)` 调用蕴含）——逐处打开核实蕴含者仍在、用例与其余断言一字未动。**⑤批次 1–4 收口**：1298 → **1063 collected**（实测 −235），距验收线 ≤1040 尚差 **23**；收口数字与 §7.2 四批细目（−114/−107/−20/−6 = −247）相距 −12，加上验收所需 −258 的差 11，共 23，须由 Task 15 备用池补足（不自凑数、不删未登记断言）。**证据**：8 个改动文件 96 collected / 96 passed（基线 102）；四行表 24 个禁用词 + 1 个必须词逐词变异 25/25 被检出、docs 11 条文案逐条变异 11/11 被检出；`ruff check tests/` 通过、8 文件 `ruff format --check` 通过、`mypy` 167 源码文件零问题；未列入改动集的文件零 diff，`tests/unit/test_bootstrap_progress.py` 的 `ROOT` 常量按「其余用例零改动」保留（该文件因此不再引用它，无 lint 影响） |
 | Task 12 | `a9ec8f7` | 0 | 1063 | 1063−0=1063 ✓ | 文件合并（净 0）：136 → 66 个含用例文件。90 个 ≤9 例源文件合并为 20 个域文件（14 计划桶 + 6 个同域长尾桶）；8 个 ≤9 例文件按 no-merge 名单保留（`test_signal_detector.py`、`test_qualification_config.py`、`tests/artifacts/*`×3、`tests/contract/*`×2、`tests/stress/*`×1）。口径说明：规格 §6 的「86 个 ≤9 例文件」为 Task-0 基线；合并时点（`20baf65`）实际 ≤9 例文件为 98 个（38 个 ≥10 例）；90 源 + 8 保留 = 98，136 − 90 + 20 = 66。文件数 66 而非 65，系 R9 裁决下保留 `test_qualification_config.py` 所致（修复轮 R1 从误合并状态还原；还原后长尾文件 12 例，全量 collect 仍 1063）。**零丢失证据（R1 前 @`a9ec8f7`）**：433/433 用例体逐字节一致、433/433 词法一致、非测试顶层定义 0 未落点、0 问题（`task-12-verify.py`，可用 `git archive 20baf65` 基线复跑，复跑结果一致）；R1 还原后 `tests/unit/test_qualification_config.py` 与 `20baf65` 逐字节一致（`git diff --no-index`），其余 90 源未触碰。case 数零变化（1063 → 1063）；全量 1063 passed 全绿；`ruff check tests/` 通过；本次触碰的 18 个测试文件 `ruff format --check` 通过（全目录检查红：`tests/unit/test_akshare_provider.py:356` 为既有未格式化文件，`20baf65` 上同样红，属冻结文件的既有漂移，非本任务引入，转 Task 14 处置）；`mypy` 通过（形式门禁：其 `files` 仅含 `src/astock_lens`，对 `tests/` 不生效）。同名 helper / 常量按域前缀重命名并同步引用点（`task-12-rename-manifest.json`），未删除任何 helper；冻结 5 文件、`tests/artifacts/*`、`tests/contract/*`、`tests/stress/*`、`test_signal_detector.py`、`conftest.py`、`support.py` 零改动。**与任务书偏差**：合并源 90 个（R1 前 91 个；任务书字面 84 个）、目标文件 20 个（计划 14 桶 + 授权长尾 6 桶）——14 桶表为推荐值，任务书明示「未能归入上表的按同域就近归并」；最终 66 个文件与任务书「约 65」差 1，系 R9 裁决保留 no-merge 权威文件所致。**执行说明**：合并由被轮次上限中断的执行代理完成，由后续会话独立复核全部证据后落账提交；修复轮 R1 还原被误合并的 `test_qualification_config.py`，长尾文件回到 12 例，并同步订正本表与 §9 |
-| Task 13 | 本提交（Task 14 回填） | 0 | 1063 | 1063−0=1063 ✓ | 文档与治理：§20.5 追加「表驱动优先 / 数量上限」两条规范并加归属表指针；Test Ownership 归属表 5 行改指合并后新文件（trade_gate×3 → `test_trade_gate_contracts.py`、candidate_routing → `test_candidate_stage.py`、market_validator → `test_market_long_tail.py`）；§7.2 回填实测 1063 / 缺口 23；PROGRESS 记录实测前后指标与批次 commit；覆盖率收口重测见 `var/test-consolidation/coverage-after-1.txt` |
+| Task 13 | `823c272` | 0 | 1063 | 1063−0=1063 ✓ | 文档与治理：§20.5 追加「表驱动优先 / 数量上限」两条规范并加归属表指针；Test Ownership 归属表 5 行改指合并后新文件（trade_gate×3 → `test_trade_gate_contracts.py`、candidate_routing → `test_candidate_stage.py`、market_validator → `test_market_long_tail.py`）；§7.2 回填实测 1063 / 缺口 23；PROGRESS 记录实测前后指标与批次 commit；覆盖率收口重测见 `var/test-consolidation/coverage-after-1.txt` |
 | Task 15 | `37644c1` + `7dacdd2` + `fb20597` + `7432669` + `4745bab` + `b941560` + `9a63903` + `b94eb8a` + `fca6e88` + `a3817a7`（文档） | −25 | 1038 | 1063 − 25 = 1038 ≤ 1040 ✓（缺口 23 补齐，余量 2） | 备用池 case 级收口。**范围**：规格 §5 备用池 = 基线 35 个「6–9 例」文件（9 例 ×8、8 例 ×10、7 例 ×8、6 例 ×9，合计 262 例，Task 12 已并入域文件）；其中 14 文件（或其已审计部分，含冻结 `test_extension_contracts.py`，一行未动）已由 Task 4/6/7/9/10 做过 case 级审计、**不重复计减**，Task 15 审计其余 **21 个池文件的现行落点**（26 个家族行）+ **2 个已登记软候选**。**判定分布**：§10 共 28 行 = 13 行 MERGE（11 个池家族 + 2 个软候选）+ 15 行 KEEP。**实测减量 −25** = 软候选 −2（`37644c1`）＋交易日历 −3（`7dacdd2`）＋artifacts 校验器 −7（`fb20597`）＋动量扫描器 −1（`7432669`）＋CLI 表层 −4（`4745bab`）＋CLI 集成入口 −6（`b941560`）＋候选阶段/政策 −2（`9a63903`+`b94eb8a`）；全部并表满足 §4.1 三条（遍历全部成员 / 先收集再断言 / 失败消息点名 label），被吸收成员的每条断言逐行落为表内期望列或行内保留，`==`/`is`/`in` 原语义未放宽，无新增断言、无 `skip`/`xfail`/`importorskip`。**缺口已补齐（1038 ≤ 1040，余量 2）→ 不触发规格 §5 目标复议**。全量 1038 passed 全绿 + 收口 collect 1038（另有一次与 mypy/ruff 并发争抢的运行触发既有 `tests/stress/test_bootstrap_scale_properties.py::test_mixed_failures_stay_explicit_and_the_run_still_converges` 环境敏感红——单跑 1 passed、无并发全量复跑 1038 passed 绿；机制与引用见 `task-15-report.md` Concerns 1，非本任务引入、`tests/stress/` 零改动）；`ruff check tests/` 绿、8 个改动文件 `ruff format --check` 绿、`mypy` 167 源码文件零问题；`src/`、`configs/` 零 diff；冻结 5 文件零改动 |
+| Task 14 | 本提交 | 0 | 1038 | 1038 ≤ 1040 ✓（余量 2，与 Task 15 收口同值） | 全量验收与远端 CI。**Step 1 门禁**：`pytest -q` = **1038 passed, 7 warnings**（304.03s）；`ruff check src tests` 通过（exit 0）；`mypy` = Success: no issues found in 167 source files；`ruff format --check .` = 15 files would be reformatted（13 个为未入库的 `var/test-consolidation/*.py` 证据脚本，另 2 个为既有漂移 `src/astock_lens/data/providers/akshare_provider.py:454` 与 `tests/unit/test_akshare_provider.py:356`，由 main `3c97c25` 引入、与本切片逐字节相同）；web 三项（`npm test` 65 passed / `npm run typecheck` / `npm run build`）全绿。**Step 2**：`--cov=astock_lens --cov-report=term` 实测 `TOTAL 8703 734 92%`，与基线逐字相同；collected **1038**；文件数两口径 = `tests/**/*.py` **71** / 含用例文件 **66**（与 `task-15-perfile-at-head.txt` 同为 66 行，逐文件合计由 1063 → 1038 = Task 15 的 −25；66 而非 ≤65 仍系 R9 裁决保留 `test_qualification_config.py`）。**Step 3**：`git diff 276f1ae...HEAD --stat -- src/ configs/` 空输出，冻结 5 文件零 diff。**Step 4**：远端 run `36202187215`（PR #4 @`7288fd0`）= web job 全绿、verify job 在 `ruff format --check` 步红（日志点名的正是上述两个既有漂移文件）、`mypy` 与 `pytest` 步被跳过，按预判预案 A 如实回报（不改冻结文件与 `src/`）。详见 §11 |
 
 ---
 
@@ -1226,7 +1227,7 @@ Task 15 审计其余 **21 个池文件的现行落点**（26 个家族行）+ **
 | `tests/integration/test_pipeline_flows.py` | `test_candidate_correctness_gate.py`（池 6 例） | KEEP | 0 | 6 条各钉一种上游状态，含 fail-closed 变体（market breadth 不可得、未配置 policy 阻断发布）与「仅合格进入下游」等不同观察点 |
 | `tests/integration/test_pipeline_flows.py` | `test_candidate_qualification_pipeline.py`（池 6 例，Task 10 已删 1） | KEEP | 0 | 余 5 条中两条 direct-call 例期望异构（complete evidence 产候选 / CONTRADICTED 不合格），表无法完整承载；Task 10 T5 的权威替代已落 `test_daily_pipeline.py` |
 | `tests/integration/test_pipeline_flows.py` | `test_financial_pipeline.py`（池 7 例） | KEEP | 0 | 7 条各是时点 / 落盘 / 符号隔离观察点（含 PIT 未来期不可见、缺失穿越管道仍缺失、两套报表同时落地），断言异构 |
-| `tests/integration/test_pipeline_flows.py` | `test_research_universe_flow.py`（池 8 例） | KEEP | 0 | 8 条各钉调度 / 续跑的一个语义（失败符号保留、续跑只补缺口、落盘先于忘记、历史回填与耗尽报告、子集关系、只读观测、昂贵历史的调用范围），互不重复 |
+| `tests/integration/test_pipeline_flows.py` | `test_research_universe_flow.py`（池 8 例） | KEEP | 0 | 8 条各钉调度 / 续跑的一个语义（失败符号保留、续跑只补缺口、落盘先于忘记、历史回填与耗尽报告、子集关系、只读观测、昂贵历史的调用范围等），互不重复 |
 | `tests/integration/test_pipeline_flows.py` | `test_valuation_pipeline.py`（池 6 例） | KEEP | 0 | 6 条各钉一个落盘 / PIT / 因子隔离 / 指标一致 / 幂等观察点等，断言异构 |
 | `tests/unit/test_valuation_stage.py` | `test_valuation_coverage.py`（池 8 例） | KEEP | 0 | 8 个观察点各不相同（未采集≠0、需全部声明因子、PIT、非正倍数不可评分、无配置拒绝而非近似、空宇宙拒绝、无估值因子不算覆盖、JSON 形状） |
 | `tests/unit/test_valuation_stage.py` | `test_valuation_normalizer.py`（池 8 例） | KEEP | 0 | 同一输入面下 8 条各观察一个面（日序列→日期观测、表头借最新日、类目标签不是数字、缺失标记永不成 0、单位或标签、无序列扇区按查询日、空源报状态、无标的不猜），断言结构不同 |
@@ -1237,3 +1238,88 @@ Task 15 审计其余 **21 个池文件的现行落点**（26 个家族行）+ **
 | `tests/unit/test_calibration_stage.py` | `test_calibration_factor_distribution.py`（池 7 例） | KEEP | 0 | 7 个观察点（仅值观测出分位、无值不出分位、样本携带三项证据、报告记录总体、边界两数分离、不完整覆盖拒绝、洗牌字节稳定） |
 
 **结论**：已执行减量 **−25**；收口 collected **1038**；缺口 **23 已补齐**（1038 ≤ 1040，余量 2）；**不触发**规格 §5 目标复议。28 行判定中 13 行 MERGE 逐条断言零丢失（被吸收成员的每条断言落为表内期望列或行内保留），15 行 KEEP 均按 §4.1 口径留档；冻结 5 文件零改动，`tests/artifacts/*` 只表化未删断言。
+
+---
+
+## 11. Task 14 收口（全量验收与远端 CI）
+
+**状态：** 完成（DONE_WITH_CONCERNS）——本地全量门禁、数量与覆盖率对账、生产侧零改动核对全部通过；远端 CI 按预判在 `ruff format --check` 步红（既有漂移，非本切片引入），按处置预案 A 如实回报，未改任何冻结文件与 `src/`。
+
+**本任务提交（3 个）：**
+
+| # | commit | 信息 | 改动 |
+| --- | --- | --- | --- |
+| 1 | `7288fd0` | 测试：恢复裸时间映射日期用例的 docstring 原文 | `tests/integration/test_cli_entry_flows.py:411`（一行 docstring 逐字恢复，测试逻辑零改动；该文件 55 passed） |
+| 2 | 本提交 | 文档：收口测试精简台账（Task 14 行与收口小节） | 本文件（§7.2 依据列、§8 Task 13 行回填、§8 Task 14 行、§10「等」、本节） |
+| 3 | （待回填） | 文档：回填台账 Task 14 行提交哈希 | 本文件（仅回填两处 commit 单元格：§8 Task 14 行 + 本节提交表 #2） |
+
+**Step 1 全量门禁（HEAD = `7288fd0`，两次全量运行串行、无并发）：**
+
+| 命令 | 结果 |
+| --- | --- |
+| `PYTHONPATH= uv run --no-sync pytest -q` | **1038 passed, 7 warnings in 304.03s**（exit 0） |
+| `PYTHONPATH= uv run --no-sync ruff check src tests` | All checks passed!（exit 0） |
+| `PYTHONPATH= uv run --no-sync ruff format --check .` | **exit 1：15 files would be reformatted, 296 files already formatted** |
+| `PYTHONPATH= uv run --no-sync mypy` | Success: no issues found in 167 source files |
+| `cd web && npm test` | 9 test files passed，**65 tests passed**（14.07s） |
+| `cd web && npm run typecheck` | `tsc -b --pretty false` 无输出（通过） |
+| `cd web && npm run build` | `tsc -b && vite build` 成功，42 modules transformed（3.57s） |
+
+web 依赖经符号链接复用主仓 `web/node_modules`（零安装），跑完即移除链接，工作区回到仅 `?? var/test-consolidation/`。
+
+**format 红的 15 个文件构成**（`var/test-consolidation/task-14-ruff-format.txt`）：13 个为未入库的证据脚本 `var/test-consolidation/*.py`（`task-3/6/7/9/10/11/12/15` 的检查脚本；`var/` 不入库、远端检出时不存在），另 2 个即 §4 预判的两处既有漂移：`src/astock_lens/data/providers/akshare_provider.py:454:38`、`tests/unit/test_akshare_provider.py:356:18`。限定范围复跑：`ruff format --check src tests` → 2 files would be reformatted（同上两者）、`ruff format --check tests` → 1 file（冻结的 `test_akshare_provider.py`）。**非本切片新增**。
+
+**Step 2 数量与覆盖率（第二次全量运行）：**
+
+```bash
+grep -E "^TOTAL" var/test-consolidation/coverage-baseline-module.txt   # 基线（逐字；文件内两行同值）
+TOTAL                                                                                                       8703    734    92%
+PYTHONPATH= uv run --no-sync pytest -q --cov=astock_lens --cov-report=term \
+  > var/test-consolidation/coverage-after-2.txt 2>&1
+grep -E "^TOTAL" var/test-consolidation/coverage-after-2.txt           # 实测（逐字）
+TOTAL                                                                                                       8703    734    92%
+```
+
+- 覆盖率对照：基线与实测**逐字相同**（8703 statements / 734 missed / 92%），**未低于基线**。
+- collected：`pytest --collect-only -q | tail -1` → **1038 tests collected in 3.41s**（基线 1298；验收线 ≤1040，余量 2）。
+- 文件数两口径：`tests/**/*.py` = **71**（其中 5 个无用例：`conftest.py`、`support.py`、`tests/artifacts/__init__.py`、`tests/artifacts/validator.py`、`tests/artifacts/trade_gate_validator.py`）；**含用例文件 = 66**。
+- 与 `task-15-perfile-at-head.txt`（66 行、每行「collected + 文件」）重算对照：行数同为 **66**；逐文件合计由 **1063 → 1038**（差 −25 = Task 15 各合并的实测减量，仅出现在 Task 15 动过的 8 个文件：`test_cli_entry_flows.py` 61→55、`test_candidate_stage.py` 41→39、`test_api.py` 36→35、`test_strategy_long_tail.py` 29→28、`test_cli_surface.py` 25→21、`test_universe_builder.py` 16→15、`test_platform_basics.py` 9→6、`test_candidate_semantic_validator.py` 9→2）。
+
+**Step 3 生产侧零改动：**
+
+```bash
+git diff 276f1ae...HEAD --stat -- src/ configs/    # 输出 0 字节（空）
+```
+
+`git merge-base 276f1ae HEAD` = `276f1ae`（合并基复核一致）；全分支 131 个改动文件 = `tests/` 127 + `docs/` 3 + `PROGRESS.md` 1；冻结 5 文件 `git diff` 零字节。
+
+**Step 4 远端 CI：**
+
+- 推送通道：**HTTPS 直推**（`git push -u origin test-consolidation` 一次成功；推前探测 `https://github.com` → 200，未动用 HTTP/1.1 与 SSH-443 回退）。
+- PR：**#4** — https://github.com/jinking/a-stock-lens/pull/4
+- run id：**`36202187215`**（event=`pull_request`，branch=`test-consolidation`，head=`7288fd0`，结论 **failure**）
+- 逐步结论：
+
+| job | step | 结论 |
+| --- | --- | --- |
+| Web 前端验证（测试 / 类型 / 构建） | 检出 / Node.js 22 / 安装 Web 依赖 / Web 测试 / Web 类型检查 / Web 生产构建 | 全 **success** |
+| 全量验证（ruff / format / mypy / pytest） | 检出 / 安装 uv 与 Python 3.12 / 同步依赖 | success |
+|  | `ruff check` | **success** |
+|  | `ruff format --check` | **failure** |
+|  | `mypy`（严格模式） | skipped |
+|  | `pytest`（全量，含 tests/stress） | skipped |
+
+- 失败日志（`gh api repos/jinking/a-stock-lens/actions/jobs/108291023575/logs`）逐字且仅点名两个文件：`src/astock_lens/data/providers/akshare_provider.py:454:38`、`tests/unit/test_akshare_provider.py:356:18`；汇总行 `2 files would be reformatted, 283 files already formatted`；`##[error]Process completed with exit code 1`。
+- 处置：**预案 A**。两文件均为**与 main 逐字节相同**的既有漂移，证据：`git diff main --stat -- <两文件>` 空输出；`git blame -L356,356 tests/unit/test_akshare_provider.py` 与 `-L454,454 src/astock_lens/data/providers/akshare_provider.py` 均指向 main 提交 `3c97c25`（2026-09-25，`数据源：落地 WeStock 日线批量与数据湖 lake 日线 Provider`）；main 上一次 CI run `35825777729`（@`9b15b94`，经 `git merge-base --is-ancestor` 确认为 `3c97c25` 的祖先）的 `ruff format --check` 步为 ✓ 而 `pytest` 步红——即 **main 远端全量本已非绿**，format 漂移由 `3c97c25` 引入且从未被任何 CI 跑过。按硬约束不改冻结文件与 `src/`、不 skip/xfail、不 force-push，如实回报并停止 CI 部分。
+- 因 `ruff format --check` 失败，Actions 默认跳过其后两步 → **远端全量 pytest 实测未获得**（远端逐步结论以 run `36202187215` 为准）。
+
+**7 条 warning 身份（Step 1 实测；两次全量运行逐字一致，仅 pid 随进程不同）：**
+
+| # | 文件:行 / 触发标识 | 类别 |
+| --- | --- | --- |
+| 1 | `../../.venv/lib/python3.14/site-packages/starlette/testclient.py:53` | `DeprecationWarning`: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead. |
+| 2–7 | 触发标识：`tests/unit/test_bootstrap_stage.py::test_all_hanging_akshare_workers_are_terminated_without_serial_timeouts`（同一条目列 6 次）；位置行：`/Users/huangjinjin/.local/share/uv/python/cpython-3.14.3-macos-x86_64-none/lib/python3.14/multiprocessing/popen_fork.py:70` | `DeprecationWarning`: This process (pid=97895) is multi-threaded, use of fork() may lead to deadlocks in the child.（源码 `self.pid = os.fork()`） |
+
+**与控制器预判的身份差异：** 预判写「6 条 `tests/unit/test_bootstrap_scheduler.py` 的 Python 3.14 fork 弃用」；实测节点标识落在 `tests/unit/test_bootstrap_stage.py::test_all_hanging_akshare_workers_are_terminated_without_serial_timeouts`——原因是 Task 12 已把 `tests/unit/test_bootstrap_scheduler.py`（4 例）整体并入 `tests/unit/test_bootstrap_stage.py`（`task-12-rename-manifest.json` 第 145 行起），弃用机制与条数不变。另：本地为 Python 3.14，远端 CI 为 Python 3.12，该组 fork 弃用在远端不会出现。
+
+**与目标的差额说明：** collected **1038 ≤ 1040 ✓**（余量 2）；文件 **66** 与任务书「约 65」差 1，系 R9 裁决保留 no-merge 权威文件 `tests/unit/test_qualification_config.py` 所致（含用例文件口径；`tests/**/*.py` 为 71）；覆盖率 8703/734/92% **逐字等于基线**，未低于基线。Task 14 预算 net 0（仅一行 docstring 文本恢复 + 文档收口）。
