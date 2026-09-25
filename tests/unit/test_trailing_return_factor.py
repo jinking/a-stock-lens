@@ -82,16 +82,20 @@ def _with_null_close(
     return dataset.model_copy(update={"daily_bars": bars})
 
 
-@pytest.mark.parametrize("symbol", RANKED)
-def test_return_equals_the_ratio_of_the_window_ends(symbol: str) -> None:
-    """A 20-day return spans 21 closes: today's against the one 20 days back."""
-    closes = _closes(symbol)
-    expected = closes[-1] / closes[-21] - 1
-
-    result = _compute(symbol)
-
-    assert result.status is DataStatus.VALUE
-    assert result.raw_value == pytest.approx(expected, rel=1e-9)
+def test_return_equals_the_ratio_of_the_window_ends() -> None:
+    """20 日收益跨 21 个收盘价：今天对 20 天前。"""
+    wrong = []
+    for symbol in RANKED:
+        closes = _closes(symbol)
+        expected = closes[-1] / closes[-21] - 1
+        result = _compute(symbol)
+        if result.status is not DataStatus.VALUE or result.raw_value != pytest.approx(
+            expected, rel=1e-9
+        ):
+            wrong.append(
+                f"{symbol}: status={result.status!r} value={result.raw_value!r} expected={expected!r}"
+            )
+    assert not wrong, "收益不等于窗口两端比:\n" + "\n".join(wrong)
 
 
 def test_the_designed_ordering_holds() -> None:

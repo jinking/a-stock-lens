@@ -59,24 +59,32 @@ def _compute(symbol: str, *, dataset: NormalizedDataset | None = None) -> Factor
     )
 
 
-@pytest.mark.parametrize("symbol", (*SPIKED, "000001.SZ", "900948.SH"))
-def test_proximity_equals_the_latest_close_over_the_window_peak(symbol: str) -> None:
-    closes, highs = _columns(symbol)
-    expected = closes[-1] / max(highs[-WINDOW:])
+def test_proximity_equals_the_latest_close_over_the_window_peak() -> None:
+    wrong = []
+    for symbol in (*SPIKED, "000001.SZ", "900948.SH"):
+        closes, highs = _columns(symbol)
+        expected = closes[-1] / max(highs[-WINDOW:])
+        result = _compute(symbol)
+        if result.status is not DataStatus.VALUE or result.raw_value != pytest.approx(
+            expected, rel=1e-9
+        ):
+            wrong.append(
+                f"{symbol}: status={result.status!r} value={result.raw_value!r} expected={expected!r}"
+            )
+    assert not wrong, "近高点不等于收盘/窗口峰值:\n" + "\n".join(wrong)
 
-    result = _compute(symbol)
 
-    assert result.status is DataStatus.VALUE
-    assert result.raw_value == pytest.approx(expected, rel=1e-9)
-
-
-@pytest.mark.parametrize("symbol", SPIKED)
-def test_a_planted_high_pulls_proximity_below_a_flat_ratio(symbol: str) -> None:
-    """Without a planted high every rising symbol would score the same 1/1.01."""
-    result = _compute(symbol)
-
-    assert result.raw_value is not None
-    assert result.raw_value < 1 / 1.01
+def test_a_planted_high_pulls_proximity_below_a_flat_ratio() -> None:
+    """没有植入的高点，每个上涨标的都会得到同一个 1/1.01。"""
+    wrong = [
+        f"{symbol}: {_compute(symbol).raw_value!r}"
+        for symbol in SPIKED
+        if not (
+            _compute(symbol).raw_value is not None
+            and _compute(symbol).raw_value < 1 / 1.01
+        )
+    ]
+    assert not wrong, "植入高点未把近高压到平坦比之下:\n" + "\n".join(wrong)
 
 
 def test_proximity_never_exceeds_one() -> None:

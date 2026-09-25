@@ -35,7 +35,7 @@
 | 合计 | 110 | **102** |
 
 **口径修正：** `test_extension_contracts.py` 实测仅 8 例（直接 collect 复核），冻结总数
-102，本轮可动集合 **1296 − 102 = 1196 例**（规格 §3.1 的 1188 与 −21.7% 需按此修正为
+102，本轮可动集合 **1298 − 102 = 1196 例**（规格 §3.1 的 1188 与 −21.7% 需按此修正为
 −21.6%）。此差异已在本文件留痕，供 Task 14 验收引用。
 
 **环境口径（所有命令沿用）：**
@@ -246,6 +246,11 @@ README.md`，`src/**`、`configs/**` 无改动。
 1. Task 14 验收比较覆盖率时，必须运行**本节完全相同的命令**
    （`--cov=astock_lens --cov-report=term`），与本节的 92% 对同口径；
 2. 原始输出留档 `var/test-consolidation/coverage-baseline-module.txt`（不提交）。
+3. 一旦有任务改动 `src/**` 或 `configs/**`（违反 Global Constraints），本节的 92% 基准
+   立即作废、必须重测（本轮全程禁止改动生产代码与配置，正常情况下不会触发）。
+4. 留档文件 `var/test-consolidation/coverage-baseline-module.txt` 是**两次运行的合并输出**
+   （文件内两个 TOTAL 都是 `8703 734 92%`）；Task 14 追加时须标明运行序号/时间，
+   以免把两次输出误读为单次证据。
 
 ---
 
@@ -260,6 +265,11 @@ README.md`，`src/**`、`configs/**` 无改动。
   STOP/BLOCKED，任务继续到 Step 5/6。
 - 7 条 warning 均为第三方弃用告警（starlette `anyio.abc.BlockingPortal`、
   multiprocessing `fork()`），与本轮无关，不列入红项。
+- **format 门禁事实（本轮执行口径）**：基线 `59119d2` 上 `ruff format --check .`
+  **本就不是全绿**——`src/astock_lens/data/providers/akshare_provider.py` 与冻结文件
+  `tests/unit/test_akshare_provider.py` 需重排，属既有漂移且本轮禁止改动；因此
+  **format 检查只对本任务改动过的文件执行**（全仓检查必然报红，不是新问题）。
+  `ruff check .` 基线是全绿的。
 
 ---
 
@@ -282,7 +292,7 @@ README.md`，`src/**`、`configs/**` 无改动。
 | `tests/unit/test_strategy_scanners.py`（6 个参数化函数 × 5 SCANNERS，:67–141） | 30 | MERGE → 6 | 合并后自身（6 条函数各自保留） | 逐函数核对断言集：类名；`required_factors` 与配置一致；单标的 `score is None` + `eligible is True` + `strategy_id`；缺因子 ineligible + 点名 reason；explain 到因子层；横截面排名只含 eligible。合并只摊平 ×5 的重复，6 条语义各留一条。 |
 | `tests/unit/test_eligibility_scanner.py::test_any_status_other_than_value_is_not_eligible`（:94–104） | 5 | MERGE → 1 | 合并后自身 | 参数块 = 5 个 `DataStatus`（NULL/STALE/INVALID/SOURCE_ERROR/NOT_APPLICABLE）；断言 `eligible is False` + `f"gross_margin is {status}, not VALUE" in result.risks`。表化后逐行携带 status 与消息点名。 |
 | `tests/unit/test_api.py::test_strategy_results_invalid_query_returns_422`（:411–431） | 5 | MERGE → 1 | 合并后自身 | 参数块 = 5 组 `(param, value)`（limit 0/-1/501，min_percentile -0.1/1.1）；断言仅 422。表化后逐行携带参数与值，失败消息点名。 |
-| `tests/unit/test_qualification_config.py`（15 条「写 YAML → raises」，:24–208） | 15 | MERGE → 3 | 合并后自身 | 15 组非法 YAML 的具体 payload 与 match 文案必须逐行进表（不许抽象成一类）；特殊 kwargs 必须保留：`growth.yaml` 的 `expected_strategy_id`、`known_factor_names=frozenset({"pb"})`；`missing strategy_id` 键这一**无 match** 的裸 raises 形态必须独立保留；另 3 条与本族无关（合法加载 / `FileNotFoundError` 语义 / allowed root keys）不动。 |
+| `tests/unit/test_qualification_config.py`（15 条「写 YAML → raises」，:24–208） | 15 | MERGE → 3 | 合并后自身 | 15 组非法 YAML 的具体 payload 与 match 文案必须逐行进表（不许抽象成一类）；特殊 kwargs 必须保留：`growth.yaml` 的 `expected_strategy_id`、`known_factor_names=frozenset({"pb"})`；`missing strategy_id` 键这一**无 match** 的裸 raises 形态必须独立保留；另 3 条与本族无关（合法加载 / `FileNotFoundError` 语义 / allowed root keys）不动。控制器裁决以 **1 张表**为目标，无 match 的裸 raises 形态用 `expected=None` 的行承接；做不到再退 ≤3 张表。 |
 | `tests/unit/test_snapshot_store.py`（:36–146） | 11 | **DELETE 4 / KEEP 7**（附录写 DELETE 6，改正） | 见 5.1.1 明细 | 逐条断言对照 `test_duckdb_snapshot_store.py` 的 `store` fixture 套件（json+duckdb × 11 共享例）。仅 4 例可证被覆盖；其余 7 例各含套件无法承接的断言（见明细）。 |
 | `tests/unit/test_trailing_return_factor.py`（RANKED 6 标的，:85） | 6 | MERGE → 1 | 合并后自身 | 断言 = `status is VALUE` + `approx(closes[-1]/closes[-21]-1)`。表化后逐行携带 symbol 与收盘序列，失败消息点名 symbol。 |
 | `tests/unit/test_proximity_high_factor.py`（:62、:73 两个参数块 6+4） | 10 | MERGE → 2 | 合并后自身 | 两块断言不同：6 例族保 `raw_value` 语义；SPIKED 4 例保 `raw_value < 1/1.01`。各自合并为一张表，两表断言逐行保留。 |
@@ -306,9 +316,9 @@ README.md`，`src/**`、`configs/**` 无改动。
 | 位置（用例） | 决策 | 权威替代 | 复核结论 |
 | --- | --- | --- | --- |
 | `test_snapshot_store.py::test_unwritten_date_reads_empty` | DELETE | `test_duckdb_snapshot_store.py::test_an_absent_snapshot_reads_as_empty` | 断言 `read(CANDIDATE) == ()` 逐字覆盖；json 后端本就是该套件的一个参数。 |
-| `test_snapshot_store.py::test_kinds_do_not_collide` | DELETE | `test_duckdb_snapshot_store.py::test_kinds_are_kept_apart` | 同断言（FACTOR/CANDIDATE 同日期互不串）。 |
+| `test_snapshot_store.py::test_kinds_do_not_collide` | DELETE | `test_duckdb_snapshot_store.py::test_kinds_are_kept_apart` + `test_candidate_snapshot_conflict_refused_across_both_stores` + `test_a_written_snapshot_reads_back`（后两条承接「恰好一条记录」的等值断言） | 同断言（FACTOR/CANDIDATE 同日期互不串）。 |
 | `test_snapshot_store.py::test_different_payload_for_the_same_kind_and_date_is_rejected` | DELETE | `test_duckdb_snapshot_store.py::test_rewriting_the_same_key_with_different_content_is_refused` | 抛 `SnapshotConflictError` + 「被拒写入无痕（原记录仍在）」两条断言逐字覆盖。 |
-| `test_snapshot_store.py::test_candidate_snapshot_conflict_cannot_be_overwritten_or_bypassed` | DELETE | 组合：`test_duckdb_snapshot_store.py::test_candidate_snapshot_conflict_refused_across_both_stores`（抛错 + 无痕）+ `test_snapshot_store.py::test_a_conflict_names_the_kind_and_the_date`（消息点名 CANDIDATE 与日期） | 逐条断言清点：抛错✓、消息含 `CANDIDATE`✓、消息含 `2026-09-04`✓、无痕✓——四条全部被他处承接，可删。 |
+| `test_snapshot_store.py::test_candidate_snapshot_conflict_cannot_be_overwritten_or_bypassed` | DELETE | 组合：`test_duckdb_snapshot_store.py::test_candidate_snapshot_conflict_refused_across_both_stores`（抛错 + 无痕）+ `test_snapshot_store.py::test_a_conflict_names_the_kind_and_the_date`（消息点名 CANDIDATE 与日期） | 逐条断言清点：抛错✓、消息含 `CANDIDATE`✓、消息含 `2026-09-04`✓、无痕✓——四条全部被他处承接，可删。执行约束：其组合权威里的 `test_a_conflict_names_the_kind_and_the_date` 与被删者同文件，**不得**随其他同族合并被改写。 |
 | `test_snapshot_store.py::test_write_then_read_round_trips` | KEEP | —（套件的 `test_a_written_snapshot_reads_back` 只断言 len+symbol；`test_serialised_values_survive_the_round_trip` 只断言 date/float） | 独有断言 `status == "VALUE"`（枚举→字符串不得降级）与 `raw_value == 1_014_500.0` 不被套件承接。 |
 | `test_snapshot_store.py::test_snapshot_path_is_kind_and_date_named` | KEEP | —（套件 `test_write_reports_where_the_snapshot_landed` 只断言 `path.exists()`） | JSON 落盘布局 `FACTOR/2026-09-04.json` 是 JSON 后端独有契约。 |
 | `test_snapshot_store.py::test_snapshot_records_the_as_of_it_was_written_for` | KEEP | — | 「as-of 写进文件内容」是 JSON 落盘文本断言，套件无对应。 |
@@ -328,7 +338,7 @@ README.md`，`src/**`、`configs/**` 无改动。
 | T1 | `tests/unit/test_snapshot_store.py` JSON 专属重复 6 例 | 11 | DELETE 4 / KEEP 7 | 见 5.1.1 | 计划预估 6 例，逐条断言后仅 4 例可证被覆盖。 |
 | T2 | `tests/unit/test_qualification_context.py::test_missing_approved_qualification_factor_fails_closed` | 1 | DELETE | `tests/integration/test_qualification_pipeline.py::test_growth_qualification_fails_closed_when_roe_evidence_is_missing` | 被删断言 {`absolute_pass is False`、`"roe_ttm" in risks`} ⊆ 保留者 {同上 + `qualified is False`}；保留者走生产 YAML 装配（`QUALIFIERS`），更靠近失败原因。 |
 | T2b | `tests/unit/test_qualification_context.py::test_strategy_scoring_snapshot_is_not_used_as_qualification_evidence` | 1 | KEEP | —（集成例 `test_growth_qualification_uses_full_factor_evidence_beyond_scoring_snapshot` 只覆盖正向「能读到评分快照之外的 roe_ttm」，不覆盖反向分离规则） | 该例独有场景：`roe_ttm` 在评分快照里、不在 `context.factors` 里 → 必须 fail-closed；删了这条分离规则就没人守。 |
-| T3 | `tests/unit/test_candidate_builder.py::test_candidate_builder_trend_weaken_under_approved_decision_e1`、`::test_candidate_builder_no_signal_under_approved_decision_f1` | 2 | KEEP | —（计划的权威 `tests/unit/test_candidate_selection_policy.py` 无任何 `next_action` 断言；全仓 `next_action ==` 仅命中 `test_candidate_builder.py:186` 与 `test_candidate_discovery.py:124`） | builder 的决策→next_action 映射只被这两条钉住，删除即失守；无权威可指 → KEEP。 |
+| T3 | `tests/unit/test_candidate_builder.py::test_candidate_builder_trend_weaken_under_approved_decision_e1`、`::test_candidate_builder_no_signal_under_approved_decision_f1` | 2 | KEEP | —（计划的权威 `tests/unit/test_candidate_selection_policy.py` 无任何 `next_action` 断言；`grep -rn "next_action.*==" tests/ src/` 全仓命中 5 处：`test_candidate_builder.py:186`、`test_candidate_builder.py:221`（即 T3 第二条 f1 例）、`test_candidate_discovery.py:124`、`test_api.py:189`、`test_api.py:601`——其中 builder 的决策→`next_action` 映射只由 builder 这两条钉住，`test_api.py` 的命中是字典键比较/读取，不构成该映射的权威） | builder 的决策→next_action 映射只被这两条钉住，删除即失守；无权威可指 → KEEP。 |
 | T4 | `tests/integration/test_daily_pipeline.py::test_the_blocked_candidate_stage_names_the_deferred_policy` | 1 | MERGE（两状态表驱动） | 合并后 `test_daily_pipeline.py::test_the_candidate_stage_is_blocked_while_its_layers_are_missing`（表内两行：`qualifiers=None` / canonical 已装配） | 两行 scenario 不同：:147 是两层齐缺（两条 error 文案 + `candidates == ()`），:164 是「生产资格规则已装配、仅 policy Deferred」。两行断言逐行保留，不许纯 DELETE。 |
 | T5 | `tests/integration/test_candidate_qualification_pipeline.py::test_no_approved_absolute_rules_blocks_build_candidates` | 1 | DELETE | `tests/integration/test_daily_pipeline.py::test_the_candidate_stage_is_blocked_while_its_layers_are_missing`（**修正**：计划写的 `test_candidate_policy.py:135` 是另一条规则——policy 缺失抛 `CandidatePolicyNotConfigured`） | 被删者白盒直调私有 `_blocked_reasons`（`src/astock_lens/pipelines/daily.py:286`，由 `:352` 真实路径调用），断言串 `"strategy qualification rules are not configured"` 在保留者 `run.error` 中逐字出现。**依赖 T4 保留 `qualifiers=None` 行**。 |
 | T6 | `tests/integration/test_daily_pipeline.py::test_a_snapshot_conflict_is_recorded_in_the_job_manifest` | 1 | KEEP | —（无替代：观察点是「持久化后的 Job Store 读回」） | 全仓唯一断言**持久化** FAILED + error 的用例（`test_job_store.py:98` 是构造 helper；`test_daily_production_evidence.py:231/284/353` 断言的是内存 `result`）。计划自订「不同观察点 → KEEP」。 |
@@ -372,7 +382,7 @@ README.md`，`src/**`、`configs/**` 无改动。
 | 类别 | 行数 | 明细 |
 | --- | --- | --- |
 | MERGE | 16（附录 A）+ 2（Task 10） | A1–A5、A7–A17（含 A16 四扫描表化、A17 docs、A12/A13 artifacts 族）；T4、T12 |
-| DELETE（可执行，含分属批次） | 2（附录 A / Task 11）+ 1（Task 11 方向修正）+ 6（Task 10） | A6 的 4 例（组 1）、T2、T5；A16 的 4 词 AST 例 |
+| DELETE（可执行，含分属批次） | 7 | DELETE 用例 **7** = A6 的 4 + T2 1 + T5 1 + A16 的 1；按批次归属：Task 10 ×6、Task 11 ×1 |
 | KEEP | 7 例（A6 内）+ 8 项（Task 10） | A6 未覆盖的 7 例；T2b、T3、T6、T7、T8、T9、T10、T11 |
 | ±0 断言清理 | 3 处 | A18（用例保留） |
 
@@ -396,6 +406,8 @@ README.md`，`src/**`、`configs/**` 无改动。
 ---
 
 ## 7. 减量对账与检查点修正
+
+本节的对账框架（即「本文件修复轮」）实际落点为提交 `59119d2`（`文档：修正覆盖率测量口径并建立减量对账检查点`）；复核方式：`git show --stat 59119d2`。
 
 ### 7.1 每批可达减量与偏差
 
@@ -468,5 +480,6 @@ Task 11 的两条 API 边界检查里：
 
 | 任务 | commit | 本任务实测减量 | 收口实测 collected | 与 §7.2 预期 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| Task 0 | `872e99b` + 本文件修复轮 | 0 | 1298 | 1298 ✓ | 基线全绿；覆盖率口径修正为 `--cov=astock_lens` = 92% |
-| Task 1 | 本提交（Task 1 收口，见 `git log`） | −72 | 1226 | 1298−72=1226 ✓ | 实测与预期一致：两文件 93→21（63→15、30→6）；全量 1226 全绿 |
+| Task 0 | `872e99b` + `59119d2`（本文件修复轮的落点） | 0 | 1298 | 1298 ✓ | 基线全绿；覆盖率口径修正为 `--cov=astock_lens` = 92% |
+| Task 1 | `b466794` | −72 | 1226 | 1298−72=1226 ✓ | 实测与预期一致：两文件 93→21（63→15、30→6）；全量 1226 全绿 |
+| Task 2 | 本提交 | −17 | 1209 | 1226−17=1209 ✓ | 三文件 52→35（21→16、19→11、12→8），逐条断言零丢失；全量 1209 全绿 |

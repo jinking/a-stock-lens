@@ -70,17 +70,21 @@ def test_a_positive_multiple_is_a_value() -> None:
     assert result.inputs[0].report_period == date(2026, 9, 16)
 
 
-@pytest.mark.parametrize(
-    "factor", ["pe_ttm", "pb", "ps_ttm", "pcf_operating_ttm", "peg"]
-)
-def test_a_non_positive_multiple_is_not_applicable(factor: str) -> None:
+def test_a_non_positive_multiple_is_not_applicable() -> None:
     """负倍数不是便宜，是不存在。"""
-    result = build_factor(_config(factor)).compute(
-        _context(_observation(factor, -71.31))
-    )
-
-    assert result.status is DataStatus.NOT_APPLICABLE
-    assert result.raw_value is None
+    wrong = []
+    for factor in ("pe_ttm", "pb", "ps_ttm", "pcf_operating_ttm", "peg"):
+        result = build_factor(_config(factor)).compute(
+            _context(_observation(factor, -71.31))
+        )
+        if (
+            result.status is not DataStatus.NOT_APPLICABLE
+            or result.raw_value is not None
+        ):
+            wrong.append(
+                f"{factor}: status={result.status!r} value={result.raw_value!r}"
+            )
+    assert not wrong, "非正倍数应为 NOT_APPLICABLE:\n" + "\n".join(wrong)
 
 
 def test_a_zero_percentile_is_still_a_value() -> None:
