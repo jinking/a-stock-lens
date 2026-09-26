@@ -244,8 +244,19 @@ class NeodataProvider:
         }
         return self._transport(self._endpoint, headers, body, self._timeout)
 
-    def fetch(self, request: FetchRequest) -> RawDataset:
-        """按批次取数，并如实报告覆盖情况。"""
+    def fetch(
+        self,
+        request: FetchRequest,
+        *,
+        prior_landed: int = 0,
+    ) -> RawDataset:
+        """按批次取数，并如实报告覆盖情况。
+
+        `prior_landed` is accepted for protocol compatibility; the neodata
+        batch reader does not emit per-symbol progress callbacks, so the
+        value is unused.
+        """
+        del prior_landed  # unused: neodata fetch reports batches, not symbols
         if request.dataset not in QUERY_TEMPLATES:
             raise ValueError(
                 f"未知数据集 {request.dataset!r}；本 Provider 支持 "

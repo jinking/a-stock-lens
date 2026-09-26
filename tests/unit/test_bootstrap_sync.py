@@ -233,8 +233,12 @@ def test_the_single_symbol_primitive_reports_a_failure_instead_of_raising() -> N
     assert missing.payload is None
 
 
-def test_the_batch_contract_still_fails_as_a_whole() -> None:
-    """`fetch` keeps the answer it always gave: one bad symbol fails it all."""
+def test_the_batch_contract_lands_partial_and_names_the_failures() -> None:
+    """2026-09-23 裁决：单只失败不再拖垮整批（12.5 小时跑到 5222 只被一只中止、
+    前 5221 只全丢，是这条裁决的直接证据）。旧契约"一坏全废"自该日起作废。
+
+    半失败 = `VALUE` + `missing_symbols` 点名失败标的；失败标的不得被伪造成行。
+    """
     provider = _akshare_with(
         {"sz000001": (("2026-09-17", "1", "1", "1", "1", "1", "1", "0.01"),)}
     )
@@ -249,8 +253,11 @@ def test_the_batch_contract_still_fails_as_a_whole() -> None:
         )
     )
 
-    assert dataset.status is DataStatus.SOURCE_ERROR
-    assert dataset.row_count == 0
+    assert dataset.status is DataStatus.VALUE
+    assert dataset.row_count == 1
+    assert dataset.missing_symbols == ("600519.SH",)
+    assert dataset.payload is not None
+    assert {row[0] for row in dataset.payload.rows} == {"000001.SZ"}
 
 
 def test_a_chunk_lands_every_symbol_it_could_fetch(local_tmp: Path) -> None:

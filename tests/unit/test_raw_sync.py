@@ -55,7 +55,13 @@ class StubProvider:
             checked_at=FETCHED_AT,
         )
 
-    def fetch(self, request: FetchRequest) -> RawDataset:
+    def fetch(
+        self,
+        request: FetchRequest,
+        *,
+        prior_landed: int = 0,
+    ) -> RawDataset:
+        del prior_landed  # stub does not emit progress
         self.requests.append(request)
 
         if request.dataset == "securities":
@@ -126,6 +132,61 @@ def test_the_symbol_list_comes_from_the_securities_dataset(
 
     bar_requests = [r for r in provider.requests if r.dataset == "daily_bars"]
     assert bar_requests[-1].symbols == ("000001.SZ", "600519.SH")
+
+
+def test_listing_and_bars_can_be_fetched_from_separate_providers(
+    local_tmp: Path,
+) -> None:
+    listing_provider = StubProvider()
+    bars_provider = StubProvider()
+
+    land_raw(
+        provider=bars_provider,
+        listing_provider=listing_provider,
+        root=local_tmp,
+        as_of=AS_OF,
+    )
+
+    assert [request.dataset for request in listing_provider.requests] == ["securities"]
+    assert [request.dataset for request in bars_provider.requests] == ["daily_bars"]
+
+
+def test_partial_bar_landing_preserves_missing_symbols_and_is_incomplete(
+    local_tmp: Path,
+) -> None:
+    class PartialBarsProvider(StubProvider):
+        def fetch(
+            self,
+            request: FetchRequest,
+            *,
+            prior_landed: int = 0,
+        ) -> RawDataset:
+            del prior_landed
+            if request.dataset == "securities":
+                return super().fetch(request)
+            return RawDataset(
+                provider="stub",
+                dataset=request.dataset,
+                fetched_at=FETCHED_AT,
+                provider_version="v1",
+                status=DataStatus.VALUE,
+                row_count=1,
+                missing_symbols=("000001.SZ",),
+                message="rate limited after first batch",
+                payload=RawPayload(
+                    columns=BAR_COLUMNS,
+                    rows=(("600519.SH", AS_OF.date().isoformat(), "10.5"),),
+                ),
+            )
+
+    result = _land(local_tmp, PartialBarsProvider())
+
+    bars = next(item for item in result.landings if item.dataset == "daily_bars")
+    assert bars.status is DataStatus.VALUE
+    assert bars.symbols_missing == ("000001.SZ",)
+    assert bars.note == "rate limited after first batch"
+    assert result.failed_datasets == ("daily_bars",)
+    assert not result.is_complete
 
 
 def test_explicit_symbols_win_over_the_listing(local_tmp: Path) -> None:
@@ -263,7 +324,13 @@ def test_a_row_shape_the_file_has_not_seen_widens_it_instead_of_failing(
     )
 
     class WiderProvider(StubProvider):
-        def fetch(self, request: FetchRequest) -> RawDataset:
+        def fetch(
+            self,
+            request: FetchRequest,
+            *,
+            prior_landed: int = 0,
+        ) -> RawDataset:
+            del prior_landed
             self.requests.append(request)
             return RawDataset(
                 provider="stub",
@@ -339,7 +406,13 @@ def test_rows_are_written_verbatim_as_strings(local_tmp: Path) -> None:
 
 def test_an_empty_source_writes_no_file(local_tmp: Path) -> None:
     class EmptyProvider(StubProvider):
-        def fetch(self, request: FetchRequest) -> RawDataset:
+        def fetch(
+            self,
+            request: FetchRequest,
+            *,
+            prior_landed: int = 0,
+        ) -> RawDataset:
+            del prior_landed
             self.requests.append(request)
             return RawDataset(
                 provider="stub",

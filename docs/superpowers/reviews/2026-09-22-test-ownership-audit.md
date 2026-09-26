@@ -16,17 +16,29 @@
 
 | 规则 / 契约 | 权威测试文件或层 | 上层测试责任 |
 | --- | --- | --- |
-| Trade Gate 受控词表、`TradeIntent`、`TradeRiskProposal` 不变量 | `tests/unit/test_trade_gate_models.py` | CLI/API 仅验证接线，不重复证明领域不变量 |
-| Trade Profile YAML、固定阈值与权重总和 | `tests/unit/test_trade_gate_profiles.py` | Evaluation 仅消费解析后的 Profile，不重复验证配置解析 |
-| Thesis Audit 阶段隔离、Adapter 输出与置信度调整 | `tests/unit/test_trade_gate_audit_adapter.py` | 更高层仅验证调用关系，不重复证明 Adapter 契约 |
+| Trade Gate 受控词表、`TradeIntent`、`TradeRiskProposal` 不变量 | `tests/unit/test_trade_gate_contracts.py` | CLI/API 仅验证接线，不重复证明领域不变量 |
+| Trade Profile YAML、固定阈值与权重总和 | `tests/unit/test_trade_gate_contracts.py` | Evaluation 仅消费解析后的 Profile，不重复验证配置解析 |
+| Thesis Audit 阶段隔离、Adapter 输出与置信度调整 | `tests/unit/test_trade_gate_contracts.py` | 更高层仅验证调用关系，不重复证明 Adapter 契约 |
 | Qualification 配置校验 | `tests/unit/test_qualification_config.py` | Qualification 集成测试验证配置进入流程，不复测每种 YAML 校验失败形态 |
 | Signal 检测行为 | `tests/unit/test_signal_detector.py` | Candidate/API 层只验证消费结果，不复测 Signal 分类规则 |
 | Candidate 选择政策 | `tests/unit/test_candidate_selection_policy.py` | Artifact/API 层验证产物或读取边界，不重复计算选择排序规则 |
-| Candidate 路由 | `tests/unit/test_candidate_routing.py` | 上层只验证路由调用接线，不重复证明策略路由规则 |
-| Market Validation 规则 | `tests/unit/test_market_validator.py` | 下游验证消费状态，不复测各验证维度的规则 |
+| Candidate 路由 | `tests/unit/test_candidate_stage.py` | 上层只验证路由调用接线，不重复证明策略路由规则 |
+| Market Validation 规则 | `tests/unit/test_market_long_tail.py` | 下游验证消费状态，不复测各验证维度的规则 |
 | API 路由及只读边界 | `tests/unit/test_api.py` | 不在 Web 中复制服务端领域计算规则 |
 | 独立产物校验 | `tests/artifacts/` | 保持产物语义与跨快照校验，不把它们迁移为 API 测试的重复断言 |
 | 公开契约 | `tests/contract/` | 保持对外签名与批准规则的契约证明，不由单元测试替代 |
+
+## 2026-09-25 文件合并后的名字变化
+
+以下规则的文件级指针按 2026-09-25 测试精简的映射更新（完整映射见 `docs/superpowers/reviews/2026-09-25-test-consolidation-audit.md` §9）：
+
+| 规则 / 契约 | 合并前 | 合并后（现行） |
+| --- | --- | --- |
+| Trade Gate 模型不变量 | `tests/unit/test_trade_gate_models.py` | `tests/unit/test_trade_gate_contracts.py` |
+| Trade Profile 配置契约 | `tests/unit/test_trade_gate_profiles.py` | `tests/unit/test_trade_gate_contracts.py` |
+| Thesis Audit Adapter 契约 | `tests/unit/test_trade_gate_audit_adapter.py` | `tests/unit/test_trade_gate_contracts.py` |
+| Candidate 路由 | `tests/unit/test_candidate_routing.py` | `tests/unit/test_candidate_stage.py` |
+| Market Validation 规则 | `tests/unit/test_market_validator.py` | `tests/unit/test_market_long_tail.py` |
 
 ## 保留项
 
@@ -52,7 +64,7 @@
 
 本轮可证明的收敛为净减少 10 个 pytest 用例。第二轮复核发现第一轮漏算了一个与 `100.0` 参数用例完全相同的独立 Candidate policy 用例；合并后达到计划的第一批减少目标。其余名字相同的用例经边界核验后保留：bootstrap 两个 `batch_size` 用例分别验证公开 `bootstrap_liquidity_history` 参数透传和 `land_bar_chunks` 直接校验；Westock 与 Neodata 未知数据集用例分别锁定不同 Provider 的数据集契约。
 
-第二轮集群盘点记录：bootstrap 6 文件 / 64 个测试函数；candidate 14 / 90；qualification 6 / 36；calibration 2 / 16；provider 4 / 70；Trade Gate 14 / 28；`tests/artifacts/` 的产物校验单独保留。Trade Gate 的 `test_trade_gate_models.py`、`test_trade_gate_profiles.py`、`test_trade_gate_audit_adapter.py` 标记 **KEEP**，分别负责领域模型、Profile 配置和审计 Adapter 契约；当前其余 Trade Gate 测试也未发现可证明的字面重复，不作删除。
+第二轮集群盘点记录：bootstrap 6 文件 / 64 个测试函数；candidate 14 / 90；qualification 6 / 36；calibration 2 / 16；provider 4 / 70；Trade Gate 14 / 28；`tests/artifacts/` 的产物校验单独保留。Trade Gate 的三项权威测试（模型 / Profile / 审计 Adapter）现集中于 `tests/unit/test_trade_gate_contracts.py`，标记 **KEEP**；当前其余 Trade Gate 测试也未发现可证明的字面重复，不作删除。
 
 ## 并发功能约束
 

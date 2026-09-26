@@ -60,6 +60,7 @@ from .runtime import (
     MINIMUM_PYTHON,
     STRATEGY_CONFIG_PATH,
     _as_of,
+    _batch_source,
     _benchmark_subset,
     _bulk_provider,
     _configured_config_path,
@@ -72,10 +73,11 @@ from .runtime import (
     _HeartbeatSink,
     _land_financials,
     _land_valuation,
+    _listing_provider,
     _load_dividend_events,
     _neodata_provider,
     _securities_dataset,
-    _symbol_bar_provider,
+    _symbol_bar_fallback,
     _today_close,
     _universe_config_path,
     _valuation_strategy_configs,
@@ -794,10 +796,11 @@ def sync_research(
     typer.echo(f"price history required: {required_bars} bars per symbol")
 
     result = bootstrap_strategy_history(
-        # Task 3 的只读探测结论是 `NO_BATCH_PRIMARY_AVAILABLE`：
-        # 没有经过证据背书的批量行情来源，就不接线、不发明。
-        batch_source=None,
-        fallback_source=_symbol_bar_provider(provider),
+        # 2026-09-18 探测的 `NO_BATCH_PRIMARY_AVAILABLE` 对 westock/akshare 仍成立；
+        # 数据湖是第一个经过证据背书的批量日线源，选中它时 `_batch_source` 才接线，
+        # 否则仍是诚实的 None、缺口全走逐标的补缺。
+        batch_source=_batch_source(provider),
+        fallback_source=_symbol_bar_fallback(provider),
         root=_csv_root(),
         as_of=day,
         symbols=state.research_symbols,
@@ -886,8 +889,9 @@ def sync_bootstrap(
 
     root = _csv_root()
     dataset = _securities_dataset()
+    listing_provider = _listing_provider(provider)
     landing = land_securities_listing(
-        provider=provider, root=root, as_of=day, dataset=dataset
+        provider=listing_provider, root=root, as_of=day, dataset=dataset
     )
     typer.echo(
         f"securities {landing.status.value}: {landing.rows_total} rows "
@@ -925,9 +929,10 @@ def sync_bootstrap(
         )
 
     result = bootstrap_liquidity_history(
-        # 同上：批量来源没有证据背书，接线为 None，补缺逐标的进行。
-        batch_source=None,
-        fallback_source=_symbol_bar_provider(provider),
+        # 同上：westock/akshare 没有批量契约，`_batch_source` 返回 None，补缺逐标的；
+        # 选到数据湖时它整段窗口一次返回，冷启动不再逐只 ~1 秒地抠。
+        batch_source=_batch_source(provider),
+        fallback_source=_symbol_bar_fallback(provider),
         root=root,
         as_of=day,
         symbols=population,
@@ -1019,6 +1024,7 @@ def sync(
     if not statements_only:
         result = land_raw(
             provider=provider,
+            listing_provider=_listing_provider(provider),
             root=_csv_root(),
             as_of=day,
             symbols=tuple(symbol) if symbol else None,

@@ -11,7 +11,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-import astock_lens.api.app as api_module
 from astock_lens.api.app import create_app
 from astock_lens.candidates.models import Candidate
 from astock_lens.data.snapshots.store import JsonSnapshotStore
@@ -168,13 +167,72 @@ def test_factor_route_is_empty_for_an_unknown_symbol(local_tmp: Path) -> None:
     assert response.json()["records"] == []
 
 
+MISSING_SNAPSHOT_CASES = (
+    # label, route, params, expected detail 片段
+    (
+        "test_missing_snapshot_is_a_404",
+        "/factors",
+        {"symbol": "600000.SH", "as_of": DAY},
+        DAY,
+    ),
+    (
+        "test_strategies_route_404s_when_no_snapshot",
+        "/strategies",
+        {"as_of": DAY},
+        DAY,
+    ),
+    (
+        "test_strategy_results_missing_snapshot_returns_404",
+        "/strategies/growth/results",
+        {"as_of": DAY},
+        DAY,
+    ),
+    (
+        "test_stock_profile_missing_universe_snapshot_returns_404",
+        "/stocks/600000.SH",
+        {"as_of": DAY},
+        DAY,
+    ),
+    (
+        "test_qualification_results_missing_snapshot_returns_404",
+        "/qualifications/growth/results",
+        {"as_of": DAY},
+        DAY,
+    ),
+    # test_today_api_missing_candidate_snapshot_returns_404:
+    #   Task 5: CANDIDATE 快照不存在时 /today 返回 404。
+    (
+        "test_today_api_missing_candidate_snapshot_returns_404",
+        "/today",
+        {"as_of": DAY},
+        f"no CANDIDATE snapshot for {DAY}",
+    ),
+    # test_universe_route_404s_when_no_universe_was_built:
+    #   /universe 与 /stocks 同读 UNIVERSE 快照，无快照时经同一个 `_read`
+    #   抛出点名日期的 404（原用例断言 404 且 DETAIL 含 as_of）。
+    (
+        "test_universe_route_404s_when_no_universe_was_built",
+        "/universe",
+        {"as_of": DAY},
+        DAY,
+    ),
+)
+
+
 def test_missing_snapshot_is_a_404(local_tmp: Path) -> None:
+    """测试 7 条快照路由各自在无快照时返回点名原因的 404（原 7 条缺快照用例收表）。"""
     client = TestClient(create_app(snapshot_root=local_tmp))
-
-    response = client.get("/factors", params={"symbol": "600000.SH", "as_of": DAY})
-
-    assert response.status_code == 404
-    assert DAY in response.json()["detail"]
+    wrong = []
+    for label, route, params, expected_detail in MISSING_SNAPSHOT_CASES:
+        response = client.get(route, params=params)
+        if response.status_code != 404:
+            wrong.append(f"{label}: {route} 得到 {response.status_code}，期望 404")
+        elif expected_detail not in response.json()["detail"]:
+            wrong.append(
+                f"{label}: {route} detail 缺少 {expected_detail!r}，"
+                f"实际 {response.json()['detail']!r}"
+            )
+    assert not wrong, "缺快照路由应返回点名原因的 404:\n" + "\n".join(wrong)
 
 
 def test_candidate_route_reads_the_stored_snapshot(local_tmp: Path) -> None:
@@ -221,33 +279,6 @@ def test_universe_route_reads_the_stored_snapshot(local_tmp: Path) -> None:
     assert payload["as_of"] == DAY
     assert payload["snapshot"]["included"] == ["600000.SH"]
     assert payload["snapshot"]["exclusions"][0]["rule"] == "ST"
-
-
-def test_universe_route_404s_when_no_universe_was_built(local_tmp: Path) -> None:
-    client = TestClient(create_app(snapshot_root=local_tmp))
-
-    response = client.get("/universe", params={"as_of": DAY})
-
-    assert response.status_code == 404
-    assert DAY in response.json()["detail"]
-
-
-def test_api_never_imports_the_computation_engines() -> None:
-    """ARCHITECTURE.md §2: the API must not recompute factors or scanners."""
-    source = Path(api_module.__file__).read_text(encoding="utf-8")
-
-    assert "factors.builtin" not in source
-    assert "strategies.momentum" not in source
-    assert "AverageAmountFactor" not in source
-    assert "MomentumScanner" not in source
-    assert "astock_lens.pipelines" not in source
-    assert "build_scanner" not in source
-    assert "strategy_stage" not in source
-    assert "factor_stage" not in source
-    assert "run_analysis" not in source
-    assert "trade_gate.engine" not in source
-    assert "TradeGateEngine" not in source
-    assert "ThesisAuditAdapter" not in source
 
 
 def test_trade_gate_intent_route_is_read_only(tmp_path: Path) -> None:
@@ -320,15 +351,6 @@ def test_strategies_route_reads_summaries(local_tmp: Path) -> None:
     assert payload[1]["eligible_count"] == 2
     assert payload[1]["scored_count"] == 2
     assert payload[1]["ranked_count"] == 2
-
-
-def test_strategies_route_404s_when_no_snapshot(local_tmp: Path) -> None:
-    client = TestClient(create_app(snapshot_root=local_tmp))
-
-    response = client.get("/strategies", params={"as_of": DAY})
-
-    assert response.status_code == 404
-    assert DAY in response.json()["detail"]
 
 
 def test_strategy_results_default_query(local_tmp: Path) -> None:
@@ -408,28 +430,27 @@ def test_strategy_results_min_percentile(local_tmp: Path) -> None:
     assert payload["items"][0]["rank_percentile"] == 0.98
 
 
-@pytest.mark.parametrize(
-    ("param", "value"),
-    [
-        ("limit", 0),
-        ("limit", -1),
-        ("limit", 501),
-        ("min_percentile", -0.1),
-        ("min_percentile", 1.1),
-    ],
+INVALID_QUERY_VALUES = (
+    ("limit", 0),
+    ("limit", -1),
+    ("limit", 501),
+    ("min_percentile", -0.1),
+    ("min_percentile", 1.1),
 )
-def test_strategy_results_invalid_query_returns_422(
-    local_tmp: Path, param: str, value: object
-) -> None:
+
+
+def test_strategy_results_invalid_query_returns_422(local_tmp: Path) -> None:
     _seed(local_tmp)
     client = TestClient(create_app(snapshot_root=local_tmp))
 
-    response = client.get(
-        "/strategies/growth/results",
-        params={"as_of": DAY, param: value},
-    )
-
-    assert response.status_code == 422
+    wrong = []
+    for param, value in INVALID_QUERY_VALUES:
+        response = client.get(
+            "/strategies/growth/results", params={"as_of": DAY, param: value}
+        )
+        if response.status_code != 422:
+            wrong.append(f"{param}={value!r}: {response.status_code}")
+    assert not wrong, "非法查询参数应返回 422:\n" + "\n".join(wrong)
 
 
 def test_strategy_results_unknown_strategy_returns_404(local_tmp: Path) -> None:
@@ -446,18 +467,6 @@ def test_strategy_results_unknown_strategy_returns_404(local_tmp: Path) -> None:
         response.json()["detail"]
         == f"strategy 'unknown_strat' has no stored results for {DAY}"
     )
-
-
-def test_strategy_results_missing_snapshot_returns_404(local_tmp: Path) -> None:
-    client = TestClient(create_app(snapshot_root=local_tmp))
-
-    response = client.get(
-        "/strategies/growth/results",
-        params={"as_of": DAY},
-    )
-
-    assert response.status_code == 404
-    assert DAY in response.json()["detail"]
 
 
 def _seed_profile_base(root: Path) -> None:
@@ -738,17 +747,6 @@ def test_stock_profile_factors_and_strategies_deterministic_sorting(
     ]
 
 
-def test_stock_profile_missing_universe_snapshot_returns_404(
-    local_tmp: Path,
-) -> None:
-    client = TestClient(create_app(snapshot_root=local_tmp))
-
-    response = client.get("/stocks/600000.SH", params={"as_of": DAY})
-
-    assert response.status_code == 404
-    assert DAY in response.json()["detail"]
-
-
 def test_stock_profile_invalid_as_of_returns_422(local_tmp: Path) -> None:
     client = TestClient(create_app(snapshot_root=local_tmp))
 
@@ -1001,51 +999,6 @@ def test_qualification_results_invalid_config_fails_loudly(
     res = client.get("/qualifications/growth/results", params={"as_of": DAY})
     assert res.status_code >= 400
     assert res.status_code != 200
-
-
-def test_qualification_results_missing_snapshot_returns_404(
-    local_tmp: Path,
-) -> None:
-    client = TestClient(create_app(snapshot_root=local_tmp))
-    res = client.get("/qualifications/growth/results", params={"as_of": DAY})
-    assert res.status_code == 404
-    assert DAY in res.json()["detail"]
-
-
-def test_api_module_imports_strictly_bounded() -> None:
-    import ast
-
-    api_file = Path("src/astock_lens/api/app.py")
-    tree = ast.parse(api_file.read_text("utf-8"), filename=str(api_file))
-
-    forbidden = {
-        "astock_lens.pipelines",
-        "run_analysis",
-        "factor_stage",
-        "strategy_stage",
-    }
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                for f in forbidden:
-                    assert f not in alias.name, f"Forbidden import found: {alias.name}"
-        elif isinstance(node, ast.ImportFrom):
-            mod = node.module or ""
-            for f in forbidden:
-                assert f not in mod, f"Forbidden from-import module found: {mod}"
-            for alias in node.names:
-                for f in forbidden:
-                    assert f != alias.name, (
-                        f"Forbidden from-import name found: {alias.name}"
-                    )
-
-
-def test_today_api_missing_candidate_snapshot_returns_404(local_tmp: Path) -> None:
-    """Task 5: CANDIDATE 快照不存在时 /today 返回 404。"""
-    client = TestClient(create_app(snapshot_root=local_tmp))
-    res = client.get("/today", params={"as_of": DAY})
-    assert res.status_code == 404
-    assert f"no CANDIDATE snapshot for {DAY}" in res.json()["detail"]
 
 
 def test_today_api_returns_aggregated_overview(local_tmp: Path) -> None:

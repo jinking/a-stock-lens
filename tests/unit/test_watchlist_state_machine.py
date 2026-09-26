@@ -80,14 +80,18 @@ def test_a_transition_updates_updated_at_but_never_created_at() -> None:
     assert entry.updated_at == CREATED_AT
 
 
-@pytest.mark.parametrize("target", RESERVED_STATES)
-def test_reserved_states_are_unreachable_in_v1(target: WatchlistState) -> None:
-    entry = open_entry("600519.SH", at=CREATED_AT)
-
-    with pytest.raises(WatchlistTransitionError) as raised:
-        transition(entry, target, at=LATER)
-
-    assert target.value in str(raised.value)
+def test_reserved_states_are_unreachable_in_v1() -> None:
+    wrong = []
+    for target in RESERVED_STATES:
+        entry = open_entry("600519.SH", at=CREATED_AT)
+        try:
+            transition(entry, target, at=LATER)
+        except WatchlistTransitionError as exc:
+            if target.value not in str(exc):
+                wrong.append(f"{target}: 错误信息未点名状态: {exc}")
+        else:
+            wrong.append(f"{target}: 未拒绝保留状态")
+    assert not wrong, "保留状态在 V1 必须不可达:\n" + "\n".join(wrong)
 
 
 def test_skipping_a_state_is_refused() -> None:

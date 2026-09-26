@@ -33,7 +33,7 @@ Candidate v2 全链路生产验收经独立产物校验器 100% 通过（0 findi
 
 | 层 | 现状 |
 | --- | --- |
-| 数据源 | AkShare（名单/日线）、WeStock（三大表，带公告日）、neodata（估值/行业/语义）三个 Provider 全部接入 |
+| 数据源 | WeStock CLI（日线批量/三大表）、AkShare（名单/显式日线回退）、neodata（估值/行业/语义）均已接入 |
 | 落地 | 财报（按 `code+EndDate` 合并）、名单/日线（按 `symbol[+trade_date]`）、neodata（按取数日一天一文件） |
 | 因子 | 24 个配置（技术/流动性 + 基本面 + 估值，含真实 TTM 股息率） |
 | 策略 | 7 个配置，**6 个在打分**（等权，均已评审，各自独立 Scanner 类），1 个待行业数据 |
@@ -126,7 +126,7 @@ ResearchRequest → DeepResearchAdapter` 逐项对照：
 - [ ] **全市场归一化峰值内存约 2.9 GB**（一次性物化 213 万个观测对象），是当前最大开销；可改为按标的惰性读取。
 - [ ] **板块清单来源未定**（同上）。
 - [ ] **测试里的网络打桩规范**：一次 36 秒的测试暴露出"没打桩就会真的抓全市场名单"；约定：任何触碰 Provider 的测试都必须注入桩。
-- [ ] **`astock daily` 的 `--sync` 目前只支持 AkShare 批量路径**，估值需要单独按标的落地。
+- [x] **日线批量 Provider 切换**（2026-09-23）：`astock daily --sync` 默认走 WeStock CLI，本地缓存优先读取证券名单；AkShare 保留为名单更新、冷启动及显式行情回退。底层两者仍同属腾讯行情接口，非供应商级分散。
 - [ ] **资格影响审计的 risk 聚合键命名空间混用（M2 Minor，2026-09-20 QA 复评遗留）**：
   `src/astock_lens/calibration/qualification_impact.py` 的 `failure_reasons` 目前「能抠出因子名用因子名、
   抠不出用 risk 原文」作聚合键，因子标识符与整句文案同表。当前生产 risk 均含因子名、只读审计零丢失，

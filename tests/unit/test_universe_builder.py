@@ -120,44 +120,88 @@ def test_the_snapshot_is_immutable() -> None:
         snapshot.included = ()  # type: ignore[misc]
 
 
-def test_st_is_excluded_with_a_reason() -> None:
-    assert _rules(_build(), "000002.SZ") == (UniverseRule.ST,)
-
-
-def test_delisting_board_is_excluded_with_a_reason() -> None:
-    assert _rules(_build(), "000003.SZ") == (UniverseRule.DELISTING_BOARD,)
-
-
-def test_short_listing_age_is_excluded_with_a_reason() -> None:
-    """Listed 2026-08-01, so 34 days old against a 120-day rule."""
-    assert _rules(_build(), "000004.SZ") == (UniverseRule.SHORT_LISTING,)
-
-
-def test_low_liquidity_is_excluded_with_the_measured_value() -> None:
-    exclusions = {exclusion.symbol: exclusion for exclusion in _build().exclusions}
-
-    exclusion = exclusions[LOW_LIQUIDITY_SYMBOL]
-    assert exclusion.rule is UniverseRule.LOW_LIQUIDITY
-    assert "5000000.0" in exclusion.detail
-    assert str(float(_config().min_average_turnover_20d)) in exclusion.detail, (
-        "排除理由要写清实际门槛值，而门槛来自配置"
-    )
-
-
-def test_a_symbol_with_no_bar_on_the_as_of_date_is_excluded() -> None:
-    assert UniverseRule.NO_MARKET_DATA in _rules(_build(), "000007.SZ")
-
-
-def test_a_symbol_with_no_liquidity_measure_is_excluded() -> None:
-    assert UniverseRule.NO_LIQUIDITY_MEASURE in _rules(_build(), "000007.SZ")
-
-
-def test_a_symbol_that_breaks_two_rules_records_both() -> None:
-    """000007.SZ has neither a bar nor a measure; both are reported."""
-    assert _rules(_build(), "000007.SZ") == (
+# 排除规则七行：第一至四行与第七行断言完整规则元组（原 `==` 语义），第五、六行
+# 断言规则命中（原 `in` 语义），low_liquidity 行另带排除理由里的实测值片段。
+# 行序与原用例一致，label 即原测试名；原 docstring 与断言旁的理由注释逐字保留。
+EXCLUSION_RULE_CASES = (
+    # test_st_is_excluded_with_a_reason
+    ("test_st_is_excluded_with_a_reason", "000002.SZ", (UniverseRule.ST,), None, ()),
+    # test_delisting_board_is_excluded_with_a_reason
+    (
+        "test_delisting_board_is_excluded_with_a_reason",
+        "000003.SZ",
+        (UniverseRule.DELISTING_BOARD,),
+        None,
+        (),
+    ),
+    # test_short_listing_age_is_excluded_with_a_reason:
+    #   Listed 2026-08-01, so 34 days old against a 120-day rule.
+    (
+        "test_short_listing_age_is_excluded_with_a_reason",
+        "000004.SZ",
+        (UniverseRule.SHORT_LISTING,),
+        None,
+        (),
+    ),
+    # test_low_liquidity_is_excluded_with_the_measured_value
+    #   原断言消息：排除理由要写清实际门槛值，而门槛来自配置
+    (
+        "test_low_liquidity_is_excluded_with_the_measured_value",
+        LOW_LIQUIDITY_SYMBOL,
+        (UniverseRule.LOW_LIQUIDITY,),
+        None,
+        ("5000000.0", str(float(_config().min_average_turnover_20d))),
+    ),
+    # test_a_symbol_with_no_bar_on_the_as_of_date_is_excluded
+    (
+        "test_a_symbol_with_no_bar_on_the_as_of_date_is_excluded",
+        "000007.SZ",
+        None,
         UniverseRule.NO_MARKET_DATA,
+        (),
+    ),
+    # test_a_symbol_with_no_liquidity_measure_is_excluded
+    (
+        "test_a_symbol_with_no_liquidity_measure_is_excluded",
+        "000007.SZ",
+        None,
         UniverseRule.NO_LIQUIDITY_MEASURE,
-    )
+        (),
+    ),
+    # test_a_symbol_that_breaks_two_rules_records_both:
+    #   000007.SZ has neither a bar nor a measure; both are reported.
+    (
+        "test_a_symbol_that_breaks_two_rules_records_both",
+        "000007.SZ",
+        (UniverseRule.NO_MARKET_DATA, UniverseRule.NO_LIQUIDITY_MEASURE),
+        None,
+        (),
+    ),
+)
+
+
+def test_every_exclusion_records_the_rule_that_removed_it() -> None:
+    """每个被排除的标的都要带上导致排除的规则；流动性一行还要写出实测值与门槛。"""
+    snapshot = _build()
+    details = {exclusion.symbol: exclusion.detail for exclusion in snapshot.exclusions}
+    wrong = []
+    for label, symbol, expected_rules, required_rule, fragments in EXCLUSION_RULE_CASES:
+        rules = _rules(snapshot, symbol)
+        if expected_rules is not None and rules != expected_rules:
+            wrong.append(
+                f"{label}: {symbol} 的排除规则为 {rules!r}，期望 {expected_rules!r}"
+            )
+        if required_rule is not None and required_rule not in rules:
+            wrong.append(
+                f"{label}: {symbol} 的排除规则 {rules!r} 未包含 {required_rule!r}"
+            )
+        detail = details.get(symbol, "")
+        for fragment in fragments:
+            if fragment not in detail:
+                wrong.append(
+                    f"{label}: {symbol} 的排除理由 {detail!r} 缺少 {fragment!r}"
+                )
+    assert not wrong, "排除规则未按标的记录:\n" + "\n".join(wrong)
 
 
 def test_long_suspension_is_deferred_and_excludes_nobody() -> None:

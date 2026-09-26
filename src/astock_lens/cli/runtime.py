@@ -8,6 +8,7 @@ import sys
 from collections.abc import Callable, Sequence
 from datetime import date, datetime
 from pathlib import Path
+from typing import cast
 from zoneinfo import ZoneInfo
 
 import typer
@@ -16,13 +17,19 @@ from pydantic import BaseModel
 from astock_lens.candidates.policy import RepresentativeCandidatePolicy
 from astock_lens.data.benchmark import BENCHMARK_BARS_ENV, read_benchmark_bars
 from astock_lens.data.bootstrap_progress import BootstrapProgress, render_progress
-from astock_lens.data.bootstrap_sources import SymbolBarFallbackSource
+from astock_lens.data.bootstrap_sources import (
+    BatchMarketBarSource,
+    SymbolBarFallbackSource,
+)
 from astock_lens.data.contracts import DataProvider
 from astock_lens.data.dividends.models import DividendEvent
 from astock_lens.data.dividends.normalize import normalize_dividend_events
 from astock_lens.data.providers.akshare_provider import AkShareProvider
+from astock_lens.data.providers.lake import LakeProvider
+from astock_lens.data.providers.local import LocalCsvProvider
 from astock_lens.data.providers.neodata import NeodataProvider
 from astock_lens.data.providers.westock import FINANCIAL_DATASETS, WestockCliProvider
+from astock_lens.data.providers.westock_bars import WestockBarsProvider
 from astock_lens.data.snapshots.resolve import resolve_snapshot_store
 from astock_lens.data.snapshots.store import SnapshotStore
 from astock_lens.data.storage.paths import StoragePaths, resolve_storage_paths
@@ -197,17 +204,63 @@ def _neodata_provider(batch_size: int | None = None) -> NeodataProvider:
 
 
 def _bulk_provider() -> DataProvider:
+    selected = os.getenv("ASTOCK_BULK_PROVIDER", "westock").strip().lower()
+    if selected == "westock":
+        return WestockBarsProvider(progress_callback=_report_bulk_progress)
+    if selected == "akshare":
+        # 复用同一个进度回调：两端用户看到的格式一致
+        # （"已处理 X/Y 只，缺失 X 只，待处理 X 只"）。
+        # AkShareProvider 在 _fetch_bars 成功一只就打一次回调，
+        # 失败让它照旧 raise（既有契约）；progress 是 best-effort。
+        return AkShareProvider(progress_callback=_report_bulk_progress)
+    if selected == "lake":
+        # 数据湖日线：本地 Parquet 读，无需进度回调（全市场单日 <1s），
+        # 底层不依赖腾讯，是 westock/akshare 的正交替代。
+        return LakeProvider()
+    raise typer.BadParameter(
+        f"ASTOCK_BULK_PROVIDER must be 'westock', 'akshare', or 'lake', "
+        f"got {selected!r}"
+    )
+
+
+def _report_bulk_progress(processed: int, total: int, downloaded: int) -> None:
+    missing = processed - downloaded
+    pending = total - processed
+    typer.echo(
+        f"日线下载进度：已处理 {processed}/{total} 只，成功 {downloaded} 只，"
+        f"缺失 {missing} 只，待处理 {pending} 只",
+        err=True,
+    )
+    # 与 _HeartbeatSink 同纪律：进度可见必须落到磁盘/管道。
+    # 重定向时 stderr 是块缓冲的（macOS ~4 KB），不 flush 的话一行心跳要等几十行
+    # 之后才可见，cron 场景下等于"没实现"。
+    sys.stderr.flush()
+
+
+def _symbol_bar_fallback(provider: DataProvider) -> SymbolBarFallbackSource:
+    if isinstance(provider, SymbolBarFallbackSource):
+        return provider
     return AkShareProvider()
 
 
-def _symbol_bar_provider(provider: DataProvider) -> SymbolBarFallbackSource:
-    if not isinstance(provider, SymbolBarFallbackSource):
-        typer.echo(
-            f"provider {provider.health().provider} cannot fetch one symbol at a "
-            "time, so the bootstrap cannot isolate failures with it",
-            err=True,
-        )
-        raise typer.Exit(code=1)
+def _batch_source(provider: DataProvider) -> BatchMarketBarSource | None:
+    """把批量补缺来源接进 bootstrap：只有真正实现了批量契约的源才接。
+
+    2026-09-18 探测的 `NO_BATCH_PRIMARY_AVAILABLE` 结论对 westock/akshare 仍然成立，
+    它们没有批量接口，`batch_source` 就该是诚实的 `None`（缺口全走逐标的补缺）。
+    数据湖是第一个经过证据背书、能整段窗口一次返回的批量日线源：选中它时把
+    它自己接上，冷启动就不再逐只 ~1 秒地抠。判据是"有没有 `fetch_recent_bars`"，
+    不是类型名单——新批量源无需改这里。
+    """
+    if hasattr(provider, "fetch_recent_bars"):
+        return cast("BatchMarketBarSource", provider)
+    return None
+
+
+def _listing_provider(provider: DataProvider) -> DataProvider:
+    # westock / 数据湖都只服务日线，不做标的枚举：名单一律走 AkShare。
+    if isinstance(provider, WestockBarsProvider | LakeProvider):
+        return AkShareProvider()
     return provider
 
 
@@ -346,7 +399,19 @@ def _land(day: datetime) -> SyncResult:
         raise RuntimeError(
             f"provider {health.provider} is not usable: {health.message}"
         )
-    return land_raw(provider=provider, root=_csv_root(), as_of=day)
+    root = _csv_root()
+    listing_path = root / f"{_securities_dataset()}.csv"
+    listing_provider = (
+        LocalCsvProvider(root)
+        if listing_path.is_file()
+        else _listing_provider(provider)
+    )
+    return land_raw(
+        provider=provider,
+        listing_provider=listing_provider,
+        root=root,
+        as_of=day,
+    )
 
 
 def _latest_industry_file(day: datetime, root: Path | None = None) -> Path:

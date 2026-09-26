@@ -12,7 +12,6 @@
 from pathlib import Path
 from typing import Any
 
-import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -66,14 +65,21 @@ def load_raw_thresholds(strategy_id: str) -> dict[str, dict[str, float]]:
     return thresholds
 
 
-@pytest.mark.parametrize("strategy_id", EXPECTED)
-def test_production_rule_matches_owner_approval(strategy_id: str) -> None:
+def test_production_rule_matches_owner_approval() -> None:
     """生产 YAML 必须与所有者批准的因子名与阈值逐字一致。"""
-    raw = _load_yaml(strategy_id)
-
-    assert raw["strategy_id"] == strategy_id
-    assert raw["version"] == "v1"
-    assert raw["thresholds"] == EXPECTED[strategy_id]
+    wrong = []
+    for strategy_id, expected in EXPECTED.items():
+        raw = _load_yaml(strategy_id)
+        if raw["strategy_id"] != strategy_id:
+            wrong.append(f"{strategy_id}: strategy_id={raw['strategy_id']!r}")
+        if raw["version"] != "v1":
+            wrong.append(f"{strategy_id}: version={raw['version']!r}")
+        if raw["thresholds"] != expected:
+            wrong.append(
+                f"{strategy_id}: thresholds 与获批口径不一致\n"
+                f"  实际: {raw['thresholds']!r}\n  获批: {expected!r}"
+            )
+    assert not wrong, "生产资格 YAML 偏离所有者批准口径:\n" + "\n".join(wrong)
 
 
 def test_dividend_rule_uses_approved_metrics_not_percent_ratio_substitute() -> None:

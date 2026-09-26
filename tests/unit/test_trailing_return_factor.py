@@ -82,16 +82,34 @@ def _with_null_close(
     return dataset.model_copy(update={"daily_bars": bars})
 
 
-@pytest.mark.parametrize("symbol", RANKED)
-def test_return_equals_the_ratio_of_the_window_ends(symbol: str) -> None:
-    """A 20-day return spans 21 closes: today's against the one 20 days back."""
-    closes = _closes(symbol)
-    expected = closes[-1] / closes[-21] - 1
+def _with_zero_close(dataset: NormalizedDataset, symbol: str) -> NormalizedDataset:
+    """置零窗口起点那根 bar 的收盘价。"""
+    ordered = sorted(
+        (bar for bar in dataset.daily_bars if bar.symbol == symbol),
+        key=lambda bar: bar.trade_date,
+    )
+    target = ordered[-21]
+    bars = tuple(
+        bar.model_copy(update={"close": 0.0}) if bar == target else bar
+        for bar in dataset.daily_bars
+    )
+    return dataset.model_copy(update={"daily_bars": bars})
 
-    result = _compute(symbol)
 
-    assert result.status is DataStatus.VALUE
-    assert result.raw_value == pytest.approx(expected, rel=1e-9)
+def test_return_equals_the_ratio_of_the_window_ends() -> None:
+    """20 日收益跨 21 个收盘价：今天对 20 天前。"""
+    wrong = []
+    for symbol in RANKED:
+        closes = _closes(symbol)
+        expected = closes[-1] / closes[-21] - 1
+        result = _compute(symbol)
+        if result.status is not DataStatus.VALUE or result.raw_value != pytest.approx(
+            expected, rel=1e-9
+        ):
+            wrong.append(
+                f"{symbol}: status={result.status!r} value={result.raw_value!r} expected={expected!r}"
+            )
+    assert not wrong, "收益不等于窗口两端比:\n" + "\n".join(wrong)
 
 
 def test_the_designed_ordering_holds() -> None:
@@ -111,67 +129,62 @@ def test_a_sixty_day_return_spans_a_longer_window() -> None:
     assert result.raw_value == pytest.approx(expected, rel=1e-9)
 
 
-def test_too_few_bars_for_the_window_is_null() -> None:
-    """000004.SZ has 34 bars, so a 61-bar window cannot be satisfied."""
-    result = _compute("000004.SZ", config=_config("ret_60d"))
+# 缺数据 / 窗口不足的 NULL 族六行：行序与原用例一致，label 即原测试名，
+# 原 docstring 逐字保留为行注释。config 为 None 表示默认 ret_20d，
+# mutate 为 None 表示用未改动的数据集；其余每行的输入逐字来自原用例。
+NULL_CASES = (
+    # test_too_few_bars_for_the_window_is_null:
+    #   000004.SZ has 34 bars, so a 61-bar window cannot be satisfied.
+    ("test_too_few_bars_for_the_window_is_null", "000004.SZ", _config("ret_60d"), None),
+    # test_the_window_is_never_shortened_to_fit:
+    #   A 300-bar window needs 301 closes, and the fixture supplies exactly 300.
+    (
+        "test_the_window_is_never_shortened_to_fit",
+        "600000.SH",
+        _config().model_copy(update={"params": {"window": 300}}),
+        None,
+    ),
+    # test_an_unknown_symbol_is_null
+    ("test_an_unknown_symbol_is_null", "999999.SH", None, None),
+    # test_a_missing_close_inside_the_window_is_null:
+    #   A hole in the window is not interpolated and not skipped over.
+    (
+        "test_a_missing_close_inside_the_window_is_null",
+        "600000.SH",
+        None,
+        lambda dataset, symbol: _with_null_close(dataset, symbol, days_before_end=10),
+    ),
+    # test_a_missing_close_at_the_window_edge_is_null
+    (
+        "test_a_missing_close_at_the_window_edge_is_null",
+        "600000.SH",
+        None,
+        lambda dataset, symbol: _with_null_close(dataset, symbol, days_before_end=20),
+    ),
+    # test_a_zero_starting_close_is_null_rather_than_infinite
+    (
+        "test_a_zero_starting_close_is_null_rather_than_infinite",
+        "600000.SH",
+        None,
+        _with_zero_close,
+    ),
+)
 
-    assert result.status is DataStatus.NULL
-    assert result.raw_value is None
 
-
-def test_the_window_is_never_shortened_to_fit() -> None:
-    """A 300-bar window needs 301 closes, and the fixture supplies exactly 300."""
-    config = _config().model_copy(update={"params": {"window": 300}})
-
-    result = _compute("600000.SH", config=config)
-
-    assert result.status is DataStatus.NULL
-    assert result.raw_value is None
-
-
-def test_an_unknown_symbol_is_null() -> None:
-    result = _compute("999999.SH")
-
-    assert result.status is DataStatus.NULL
-    assert result.raw_value is None
-
-
-def test_a_missing_close_inside_the_window_is_null() -> None:
-    """A hole in the window is not interpolated and not skipped over."""
-    dataset = _with_null_close(_dataset(), "600000.SH", days_before_end=10)
-
-    result = _compute("600000.SH", dataset=dataset)
-
-    assert result.status is DataStatus.NULL
-    assert result.raw_value is None
-
-
-def test_a_missing_close_at_the_window_edge_is_null() -> None:
-    dataset = _with_null_close(_dataset(), "600000.SH", days_before_end=20)
-
-    result = _compute("600000.SH", dataset=dataset)
-
-    assert result.status is DataStatus.NULL
-
-
-def test_a_zero_starting_close_is_null_rather_than_infinite() -> None:
-    dataset = _dataset()
-    ordered = sorted(
-        (bar for bar in dataset.daily_bars if bar.symbol == "600000.SH"),
-        key=lambda bar: bar.trade_date,
-    )
-    target = ordered[-21]
-    bars = tuple(
-        bar.model_copy(update={"close": 0.0}) if bar == target else bar
-        for bar in dataset.daily_bars
-    )
-
-    result = _compute(
-        "600000.SH", dataset=dataset.model_copy(update={"daily_bars": bars})
-    )
-
-    assert result.status is DataStatus.NULL
-    assert result.raw_value is None
+def test_missing_or_insufficient_data_is_null() -> None:
+    """窗口不足、标的未知、窗口内缺收盘价或起点收盘价为 0：一律 NULL，
+    不插值、不跳过、不缩短窗口，也不拿零收盘价去算无限收益。"""
+    wrong = []
+    for label, symbol, config, mutate in NULL_CASES:
+        dataset = _dataset()
+        if mutate is not None:
+            dataset = mutate(dataset, symbol)
+        result = _compute(symbol, config=config, dataset=dataset)
+        if result.status is not DataStatus.NULL or result.raw_value is not None:
+            wrong.append(
+                f"{label}: status={result.status!r} value={result.raw_value!r}，期望 NULL/None"
+            )
+    assert not wrong, "缺数据未按预期返回 NULL:\n" + "\n".join(wrong)
 
 
 def test_bars_after_the_as_of_date_are_ignored() -> None:

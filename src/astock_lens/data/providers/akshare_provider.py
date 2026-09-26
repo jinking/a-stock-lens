@@ -31,6 +31,7 @@ Failure modes, kept apart on purpose:
 """
 
 import math
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Final
@@ -46,6 +47,11 @@ from astock_lens.domain.enums import DataStatus
 if TYPE_CHECKING:
     Frame = tuple[tuple[str, ...], tuple[tuple[str, ...], ...]]
     Transport = Callable[[str, Mapping[str, str]], "Frame"]
+
+# 与西股票 `WestockBarsProvider` 对齐：三参数 (processed, total, downloaded)。
+# 在 akshare 全市场单只循环里，"downloaded" 计数与"processed"一致——每只成功 fetch
+# 一只，downloaded += 1。失败让 fetch 整体 raise（既有行为），不在回调里体现。
+ProgressCallback = Callable[[int, int, int], None]
 
 BAR_ENDPOINT = "stock_zh_a_hist_tx"
 
@@ -201,12 +207,14 @@ class AkShareProvider:
         provider: str = "akshare",
         version: str = "unversioned",
         transport: "Transport | None" = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         self._provider = provider
         self._version = version
         self._transport: Transport = (
             transport if transport is not None else _live_transport
         )
+        self._progress_callback = progress_callback
 
     @property
     def fallback_execution_requirement(self) -> str:
@@ -243,8 +251,19 @@ class AkShareProvider:
             ),
         )
 
-    def fetch(self, request: FetchRequest) -> RawDataset:
-        """Fetch one dataset, raising for caller problems only."""
+    def fetch(
+        self,
+        request: FetchRequest,
+        *,
+        prior_landed: int = 0,
+    ) -> RawDataset:
+        """Fetch one dataset, raising for caller problems only.
+
+        `prior_landed` is the count the caller already skipped at the disk
+        level; the progress callback adds it so users see cumulative
+        progress (e.g. 1401/5568 instead of 1/4168). Defaults to 0 so this
+        remains a duck-typed drop-in for `DataProvider.fetch`.
+        """
         if request.dataset not in {"daily_bars", "securities"}:
             raise ValueError(
                 f"unknown dataset {request.dataset!r}; this provider serves "
@@ -265,7 +284,9 @@ class AkShareProvider:
         fetched_at = datetime.now(UTC)
         try:
             if request.dataset == "daily_bars":
-                return self._fetch_bars(request, codes, fetched_at)
+                return self._fetch_bars(
+                    request, codes, fetched_at, prior_landed=prior_landed
+                )
             return self._fetch_securities(request, fetched_at)
         except _MissingExtra:
             raise
@@ -365,12 +386,32 @@ class AkShareProvider:
         request: FetchRequest,
         codes: Sequence[str],
         fetched_at: datetime,
+        *,
+        prior_landed: int = 0,
     ) -> RawDataset:
-        """One source call per symbol; any failure fails the whole dataset."""
+        """One source call per symbol; per-symbol failures do not abort the batch.
+
+        A symbol whose `fetch_symbol_bars` returns a non-VALUE status is
+        recorded in `missing_symbols` and skipped: in a 4,000-symbol cold
+        start a single transient timeout should not discard the rest of the
+        batch the way an aggregate `raise` would. When every symbol in the
+        batch fails, the returned dataset is `SOURCE_ERROR`; when only some
+        fail, it carries the successful rows plus the missing list.
+
+        `prior_landed` is added to the progress callback so the bar reports
+        cumulative progress over the full listing instead of the residual
+        fetch subset (e.g. 1401/5568 rather than 1/4168). The `downloaded`
+        count reports successful symbols only, never failed ones.
+        """
         assert request.symbols is not None  # validated in `fetch`
         rows: list[tuple[str, ...]] = []
+        failed: list[str] = []
+        symbols = tuple(request.symbols)
+        total = len(symbols)
+        # 加上 prior_landed 让分母变成"全部 listing 标的"，分子也对应累计
+        cumulative_total = total + prior_landed
 
-        for canonical in request.symbols:
+        for index, canonical in enumerate(symbols, start=1):
             dataset = self.fetch_symbol_bars(
                 canonical,
                 as_of=request.as_of,
@@ -379,26 +420,73 @@ class AkShareProvider:
             )
             payload = dataset.payload
             if dataset.status is not DataStatus.VALUE or payload is None:
-                # The batch contract is unchanged: one bad symbol still fails
-                # the dataset. `fetch_symbol_bars` is where the single-symbol
-                # verdict lives, so the chunked bootstrap can call it directly
-                # and keep the other symbols' work.
-                raise _SourceError(
-                    dataset.message
-                    or f"{BAR_ENDPOINT} returned no rows for {canonical!r}"
-                )
+                # 整批不 abort：单只失败就累积到 missing 列表里，让 fetch_symbol_bars
+                # 这个 single-symbol verdict 真正承载"一只坏"的语义，而不是让 _fetch_bars
+                # 把它升级成整批 SOURCE_ERROR。RawDataset.missing_symbols 是
+                # RawDataset 的契约字段，写盘层能区分"成功"和"被跳过的源失败"。
+                failed.append(canonical)
+                if self._progress_callback is not None:
+                    try:
+                        # 已"处理"这只（尝试过）但没下载：分子 downloaded 用累计成功数
+                        self._progress_callback(
+                            index + prior_landed,
+                            cumulative_total,
+                            (index - len(failed)) + prior_landed,
+                        )
+                    except Exception as error:  # noqa: BLE001 — best-effort
+                        sys.stderr.write(
+                            f"akshare progress callback raised: {error!r}\n"
+                        )
+                continue
             rows.extend(payload.rows)
+            # 回调失败必须被吞掉——和 westock 同样的纪律："便利工具" 失败不能变成数据
+            # 链路的单点故障。失败信息写到 stderr，不进 stdout 避免破坏下游管道。
+            if self._progress_callback is not None:
+                try:
+                    # downloaded 用累计"真成功"：index 是当前序号，len(failed) 是
+                    # 已经记录下来的失败数；累计成功 = index - len(failed)。
+                    self._progress_callback(
+                        index + prior_landed,
+                        cumulative_total,
+                        (index - len(failed)) + prior_landed,
+                    )
+                except Exception as error:  # noqa: BLE001 — progress is best-effort
+                    sys.stderr.write(
+                        f"akshare progress callback raised: {error!r}\n"
+                    )
 
-        trade_date = _single_date(rows, position=1)
+        if rows and failed:
+            status = DataStatus.VALUE
+            message = (
+                f"{len(failed)} of {total} symbols returned no rows; "
+                "the rest were landed"
+            )
+        elif rows:
+            status = DataStatus.VALUE
+            message = None
+        else:
+            # 全部失败 → 上报 SOURCE_ERROR，让 _land_dataset 把它当不合格的 partial
+            status = DataStatus.SOURCE_ERROR
+            message = (
+                f"every symbol in this batch failed ({len(failed)} symbols)"
+            )
+
+        trade_date = _single_date(rows, position=1) if rows else None
         return RawDataset(
             provider=self._provider,
             dataset=request.dataset,
             fetched_at=fetched_at,
             provider_version=self._version,
-            status=DataStatus.VALUE,
+            status=status,
             row_count=len(rows),
+            missing_symbols=tuple(failed),
+            message=message,
             trade_date=trade_date,
-            payload=RawPayload(columns=BAR_EMIT_COLUMNS, rows=tuple(rows)),
+            payload=(
+                RawPayload(columns=BAR_EMIT_COLUMNS, rows=tuple(rows))
+                if rows
+                else None
+            ),
         )
 
     def _fetch_securities(

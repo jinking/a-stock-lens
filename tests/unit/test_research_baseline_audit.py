@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -105,44 +106,80 @@ def test_entries_are_sorted_by_relative_path(local_tmp: Path) -> None:
 # --- 3. 损坏不是空 -----------------------------------------------------------
 
 
-def test_broken_json_is_not_disguised_as_empty(local_tmp: Path) -> None:
-    """坏文件必须点名报错，不能在清单里记成 0 条。"""
-    broken = _write(local_tmp, "data/snapshots/UNIVERSE/2026-09-17.json", "{not json")
-    with pytest.raises(audit.CorruptInput) as caught:
-        inventory(local_tmp)
-    assert str(broken.relative_to(local_tmp)) in str(caught.value)
-
-
-def test_json_without_envelope_is_corrupt_not_empty(local_tmp: Path) -> None:
-    """合法 JSON 但外壳字段不合约定，同样是损坏：`records` 必须是列表。"""
-    _write(
-        local_tmp,
+# 损坏输入五行：行序与原用例一致，label 即原测试名，原 docstring 逐字保留为行注释。
+# `regex=True` 的行原用 `pytest.raises(..., match=...)`，保留其 re.search 正则语义
+# （"empty.csv" 含 `.` 元字符）；`regex=False` 的行原是字面 `in` 断言，逐字保留。
+CORRUPT_CASES = (
+    # test_broken_json_is_not_disguised_as_empty:
+    #   坏文件必须点名报错，不能在清单里记成 0 条。
+    #   原断言 str(broken.relative_to(local_tmp)) in str(caught.value)，
+    #   夹具写在 local_tmp 下，故等价于该相对路径字面量。
+    (
+        "test_broken_json_is_not_disguised_as_empty",
+        "data/snapshots/UNIVERSE/2026-09-17.json",
+        "{not json",
+        "data/snapshots/UNIVERSE/2026-09-17.json",
+        False,
+    ),
+    # test_json_without_envelope_is_corrupt_not_empty:
+    #   合法 JSON 但外壳字段不合约定，同样是损坏：`records` 必须是列表。
+    (
+        "test_json_without_envelope_is_corrupt_not_empty",
         "data/snapshots/UNIVERSE/2026-09-17.json",
         json.dumps({"kind": "UNIVERSE", "records": 0}),
-    )
-    with pytest.raises(audit.CorruptInput, match="records"):
-        inventory(local_tmp)
+        "records",
+        True,
+    ),
+    # test_job_manifest_without_runs_is_corrupt:
+    #   Job 同日清单的 `runs` 必须是列表。
+    (
+        "test_job_manifest_without_runs_is_corrupt",
+        "var/jobs/2026-09-17.json",
+        json.dumps({"as_of": "x"}),
+        "runs",
+        True,
+    ),
+    # test_watchlist_record_must_be_an_object:
+    #   Watchlist 一只标的一个文件，外壳必须是一个映射。
+    (
+        "test_watchlist_record_must_be_an_object",
+        "data/watchlist/600519.SH.json",
+        json.dumps(["600519.SH"]),
+        "mapping",
+        True,
+    ),
+    # test_csv_without_header_is_corrupt:
+    #   空 CSV 没有列名，报错而不是记成 0 行 0 列。
+    (
+        "test_csv_without_header_is_corrupt",
+        "data/raw/empty.csv",
+        "",
+        "empty.csv",
+        True,
+    ),
+)
 
 
-def test_job_manifest_without_runs_is_corrupt(local_tmp: Path) -> None:
-    """Job 同日清单的 `runs` 必须是列表。"""
-    _write(local_tmp, "var/jobs/2026-09-17.json", json.dumps({"as_of": "x"}))
-    with pytest.raises(audit.CorruptInput, match="runs"):
-        inventory(local_tmp)
+def test_corrupt_inputs_are_refused_and_named(local_tmp: Path) -> None:
+    """坏 JSON / 外壳不合格 / 缺 runs / 非映射 / 无列名：显式报错并点名文件或字段。
 
-
-def test_watchlist_record_must_be_an_object(local_tmp: Path) -> None:
-    """Watchlist 一只标的一个文件，外壳必须是一个映射。"""
-    _write(local_tmp, "data/watchlist/600519.SH.json", json.dumps(["600519.SH"]))
-    with pytest.raises(audit.CorruptInput, match="mapping"):
-        inventory(local_tmp)
-
-
-def test_csv_without_header_is_corrupt(local_tmp: Path) -> None:
-    """空 CSV 没有列名，报错而不是记成 0 行 0 列。"""
-    _write(local_tmp, "data/raw/empty.csv", "")
-    with pytest.raises(audit.CorruptInput, match="empty.csv"):
-        inventory(local_tmp)
+    每行一个独立的扫描根：原用例各有自己的 `local_tmp`，同一根里混放坏文件
+    会让第一处损坏先被报出，行与行就不再互不干扰。
+    """
+    wrong = []
+    for index, (label, relative, text, fragment, regex) in enumerate(CORRUPT_CASES):
+        root = local_tmp / f"case{index}"
+        _write(root, relative, text)
+        try:
+            inventory(root)
+        except audit.CorruptInput as exc:
+            message = str(exc)
+            hit = re.search(fragment, message) if regex else fragment in message
+            if not hit:
+                wrong.append(f"{label}: 错误信息缺少 {fragment!r}，实际 {message}")
+        else:
+            wrong.append(f"{label}: 坏输入未被拒绝（期望 CorruptInput）")
+    assert not wrong, "损坏输入未被点名拒绝:\n" + "\n".join(wrong)
 
 
 # --- 4. 只读与覆盖面 ---------------------------------------------------------

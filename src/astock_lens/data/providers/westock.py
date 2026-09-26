@@ -213,8 +213,18 @@ class WestockCliProvider:
             message="binary is present; liveness is only proven by a fetch",
         )
 
-    def fetch(self, request: FetchRequest) -> RawDataset:
-        """Fetch one financial statement for the requested symbols."""
+    def fetch(
+        self,
+        request: FetchRequest,
+        *,
+        prior_landed: int = 0,
+    ) -> RawDataset:
+        """Fetch one financial statement for the requested symbols.
+
+        `prior_landed` is accepted for protocol compatibility; the financial
+        reader does not emit progress callbacks, so the value is unused.
+        """
+        del prior_landed  # unused: financial fetch has no progress bar
         statement = FINANCIAL_DATASETS.get(request.dataset)
         if statement is None:
             raise ValueError(
