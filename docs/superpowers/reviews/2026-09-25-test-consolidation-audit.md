@@ -1323,3 +1323,5 @@ git diff 276f1ae...HEAD --stat -- src/ configs/    # 输出 0 字节（空）
 **与控制器预判的身份差异：** 预判写「6 条 `tests/unit/test_bootstrap_scheduler.py` 的 Python 3.14 fork 弃用」；实测节点标识落在 `tests/unit/test_bootstrap_stage.py::test_all_hanging_akshare_workers_are_terminated_without_serial_timeouts`——原因是 Task 12 已把 `tests/unit/test_bootstrap_scheduler.py`（4 例）整体并入 `tests/unit/test_bootstrap_stage.py`（`task-12-rename-manifest.json` 第 145 行起），弃用机制与条数不变。另：本地为 Python 3.14，远端 CI 为 Python 3.12，该组 fork 弃用在远端不会出现。
 
 **与目标的差额说明：** collected **1038 ≤ 1040 ✓**（余量 2）；文件 **66** 与任务书「约 65」差 1，系 R9 裁决保留 no-merge 权威文件 `tests/unit/test_qualification_config.py` 所致（含用例文件口径；`tests/**/*.py` 为 71）；覆盖率 8703/734/92% **逐字等于基线**，未低于基线。Task 14 预算 net 0（仅一行 docstring 文本恢复 + 文档收口）。
+
+**`pytest.raises` 归因（终审独立复算）：** 计数 194 → 155（−39）——77 处随 90 个被合并源文件迁入域文件，存活文件内自持数 117 → 155；全部字面片段与异常类型在 HEAD 均存在，属表驱动收敛，非断言丢失。

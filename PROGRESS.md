@@ -1,11 +1,11 @@
 # PROGRESS
 
-## 测试用例精简切片（2026-09-25）
+## 测试用例精简切片（2026-09-25 开工，2026-09-26 收口）
 
 - **目标**：测试用例数量精简（规格 §7.1 验收线 ≤1040 例）；只动 `tests/`，`src/**` 与 `configs/**` 零改动，冻结 5 个未提交测试文件一行不改。
 - **手法**：三条合并规则（遍历全部成员 / 先收集再断言 / 失败消息点名参数）+ 按域合并长尾文件；已固化进 `docs/ARCHITECTURE.md` §20.5（「表驱动优先」与「数量上限」）。
-- **实测（collected）**：**1298 → 1063**（−235）；含用例文件 **136 → 66**，`tests/**/*.py` **141 → 71**（`a9ec8f7` 合并落点 70；修复轮 R1 还原 `test_qualification_config.py` 后 71）。
-- **覆盖率**：基线 92%（`TOTAL 8703 734`，`--cov=astock_lens --cov-report=term`）；收口重测 **TOTAL 8703 734 92%（1063 passed）**（命令与原始输出见 `var/test-consolidation/coverage-after-1.txt`）。
+- **实测（collected）**：**1298 → 1038**（−260）；含用例文件 **136 → 66**，`tests/**/*.py` **141 → 71**（`a9ec8f7` 合并落点 70；修复轮 R1 还原 `test_qualification_config.py` 后 71）。
+- **覆盖率**：终值与基线**逐字相同**：`TOTAL 8703 734 92%`（`--cov=astock_lens --cov-report=term`）；收口命令与原始输出见 `var/test-consolidation/coverage-after-2.txt`（尾部 `1038 passed, 7 warnings in 293.26s`），Task 14 Step 1 全量证据见 `var/test-consolidation/task-14-pytest-step1.txt`。
 - **批次与 commit**：
   | 批次 | 任务 | commit | collected |
   | --- | --- | --- | --- |
@@ -14,9 +14,13 @@
   | 2 近邻家族 | Task 5–9 | `ae5bb62` `bd285ba` `889c652` `0c6426b` `8b5cb8c` | 1184 → 1077 |
   | 3–4 去重与清理 | Task 10–11 | `55398f3` `20baf65` | 1077 → 1063 |
   | 5 文件合并 | Task 12 | `a9ec8f7`（修复轮 `48d5e1e` `9c1a39c`） | 1063 → 1063 |
-  | 6 文档治理 | Task 13 | 本提交 | 1063 |
-  | 待执行 | Task 14 / Task 15 | — | ≤1040（缺口 23） |
-- **遗留**：Task 14 全量验收与远端 CI；Task 15 备用池收口（缺口 23，未达标不得凑数）。目录级 `ruff format --check tests/` 唯一红项 `tests/unit/test_akshare_provider.py:356` 为冻结文件的既有漂移（`20baf65` 上同样红），转 Task 14 处置披露。
+  | 6 文档治理 | Task 13 | `823c272` | 1063 |
+  | 7 备用池收口 | Task 15 | `37644c1` `7dacdd2` `fb20597` `7432669` `4745bab` `b941560` `9a63903` `b94eb8a`（文档 `fca6e88` `a3817a7`、修复轮 `329ac5c`） | 1063 → 1038 |
+  | 8 全量验收 | Task 14 | `7288fd0` `a4130d2` `2a72965` | 1038 |
+- **遗留**：
+  - 远端 CI run `36202187215` / `36202478208` 红在 `ruff format --check`：涉及两个 **main 继承**的漂移文件（`src/astock_lens/data/providers/akshare_provider.py:454`、`tests/unit/test_akshare_provider.py:356`，与本切片逐字节相同、blame 归 main `3c97c25`），其后 `mypy`/`pytest` 步被 Actions 跳过 → **远端全量待所有者裁决**（建议 main 上一次性格式提交解锁）；本地全量两次 `1038 passed` 全绿。
+  - 已接受未修的 Minor 清单与全部过程裁决在 `.superpowers/sdd/2026-09-25-test-suite-consolidation-implementation-plan/progress.md`（工作区级、不随仓库交付）。
+  - `var/test-consolidation/`（未跟踪证据）是否加入 `.gitignore` 待所有者决定；`mypy` 对 `tests/` 不生效（`pyproject.toml` 的 `files = ["src/astock_lens"]`，形式门禁）。
 
 ## 复杂度收敛切片（2026-09-23）
 
